@@ -139,6 +139,7 @@ export type AdminOrderDetail = {
     provider: string;
     tracking: string | null;
     status: string | null;
+    externalId: string | null;
     createdAt: string;
   }>;
   events: AdminOrderEvent[];
