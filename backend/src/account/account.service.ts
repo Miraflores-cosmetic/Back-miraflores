@@ -546,6 +546,8 @@ export class AccountService {
         total: true,
         refundedAmount: true,
         promoCode: true,
+        giftCertificateCode: true,
+        giftCertificateAmount: true,
         guestId: true,
         createdAt: true,
         shipments: {
@@ -639,6 +641,8 @@ export class AccountService {
       total: order.total,
       refundedAmount: order.refundedAmount,
       promoCode: order.promoCode,
+      giftCertificateCode: order.giftCertificateCode,
+      giftCertificateAmount: order.giftCertificateAmount,
       createdAt: order.createdAt,
       shipments: order.shipments,
       items: this.mapOrderItems(order.items),

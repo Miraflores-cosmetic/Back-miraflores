@@ -448,6 +448,14 @@
   margin-bottom: 24px;
 }
 
+.giftHoldNote {
+  margin: 10px 0 0;
+  font-size: var(--text-caption);
+  font-weight: var(--text-caption-weight);
+  color: var(--color-gray);
+  line-height: 1.45;
+}
+
 .promoRow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

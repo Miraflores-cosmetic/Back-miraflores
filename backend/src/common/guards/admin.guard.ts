@@ -22,6 +22,7 @@ export class AdminGuard implements CanActivate {
       path?: string;
       url?: string;
       originalUrl?: string;
+      method?: string;
     }>();
     const user = req.user;
     if (!user) throw new UnauthorizedException();
@@ -44,6 +45,7 @@ export class AdminGuard implements CanActivate {
       user.role,
       pathOnly,
       user.tv,
+      req.method,
     );
     if (!allowed) {
       throw new ForbiddenException('Нет доступа к этому разделу админки');

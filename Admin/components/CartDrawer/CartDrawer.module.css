@@ -359,6 +359,14 @@
   color: var(--color-gray);
 }
 
+.giftHoldNote {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 350;
+  color: var(--color-gray);
+  line-height: 1.45;
+}
+
 .subtotalRow {
   display: flex;
   align-items: baseline;

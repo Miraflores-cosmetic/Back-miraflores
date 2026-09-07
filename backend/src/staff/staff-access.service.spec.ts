@@ -102,6 +102,87 @@ describe('StaffAccessService', () => {
     ).toBe(false);
   });
 
+  it('certificates_finance split: issue/revoke vs denoms mutate', async () => {
+    prisma = makePrisma({
+      role: UserRole.MODERATOR,
+      isActive: true,
+      adminSections: ['certificates'],
+    });
+    svc = new StaffAccessService(prisma as never);
+
+    expect(
+      await svc.canAccessApiPath(
+        'm1',
+        UserRole.MODERATOR,
+        '/api/v1/gift-certificates/admin/issue',
+        undefined,
+        'POST',
+      ),
+    ).toBe(false);
+    expect(
+      await svc.canAccessApiPath(
+        'm1',
+        UserRole.MODERATOR,
+        '/api/v1/gift-certificates/admin/denominations',
+        undefined,
+        'POST',
+      ),
+    ).toBe(true);
+    expect(
+      await svc.canAccessApiPath(
+        'm1',
+        UserRole.MODERATOR,
+        '/api/v1/gift-certificates/admin',
+        undefined,
+        'GET',
+      ),
+    ).toBe(true);
+
+    prisma = makePrisma({
+      role: UserRole.MODERATOR,
+      isActive: true,
+      adminSections: ['certificates_finance'],
+    });
+    svc = new StaffAccessService(prisma as never);
+
+    expect(
+      await svc.canAccessApiPath(
+        'm1',
+        UserRole.MODERATOR,
+        '/api/v1/gift-certificates/admin/issue',
+        undefined,
+        'POST',
+      ),
+    ).toBe(true);
+    expect(
+      await svc.canAccessApiPath(
+        'm1',
+        UserRole.MODERATOR,
+        '/api/v1/gift-certificates/admin/c1/revoke',
+        undefined,
+        'POST',
+      ),
+    ).toBe(true);
+    expect(
+      await svc.canAccessApiPath(
+        'm1',
+        UserRole.MODERATOR,
+        '/api/v1/gift-certificates/admin/denominations',
+        undefined,
+        'POST',
+      ),
+    ).toBe(false);
+    expect(
+      await svc.canAccessApiPath(
+        'm1',
+        UserRole.MODERATOR,
+        '/api/v1/gift-certificates/admin/denominations',
+        undefined,
+        'GET',
+      ),
+    ).toBe(true);
+  });
+
   it('staff CRUD API — только ADMIN', async () => {
     expect(
       await svc.canAccessApiPath('m1', UserRole.MODERATOR, '/api/v1/settings/admin/staff'),

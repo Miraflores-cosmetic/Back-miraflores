@@ -59,6 +59,8 @@ export type BuyerOrderDetail = BuyerOrder & {
   subtotal: number;
   discountTotal: number;
   promoCode: string | null;
+  giftCertificateCode?: string | null;
+  giftCertificateAmount?: number;
   payToken: string | null;
   /** ISO: до какого момента ждать оплату (TTL). */
   payExpiresAt?: string | null;

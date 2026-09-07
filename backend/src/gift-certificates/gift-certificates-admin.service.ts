@@ -30,6 +30,7 @@ import {
   maskGiftCertificateCode,
 } from './gift-purchase-email';
 import { expireOverdueGiftCertificates } from './gift-certificate-expire.util';
+import { closeOpenGiftCapturesOnRevoke } from './gift-certificate-hold.util';
 
 function parseOptionalDate(raw: string | null | undefined): Date | null | undefined {
   if (raw === undefined) return undefined;
@@ -628,9 +629,11 @@ export class GiftCertificatesAdminService {
     if (recipientEmail && created.length) {
       emailDelivered = await this.sendIssuedEmail({
         to: recipientEmail,
-        codes: created.map((c) => c.code),
-        faceValue,
-        expiresAt,
+        items: created.map((c) => ({
+          code: c.code,
+          faceValue: c.faceValue,
+          expiresAt: c.expiresAt,
+        })),
         resend: false,
       });
     }
@@ -663,9 +666,13 @@ export class GiftCertificatesAdminService {
     }
     const emailDelivered = await this.sendIssuedEmail({
       to: cert.recipientEmail,
-      codes: [cert.code],
-      faceValue: cert.faceValue,
-      expiresAt: cert.expiresAt,
+      items: [
+        {
+          code: cert.code,
+          faceValue: cert.faceValue,
+          expiresAt: cert.expiresAt,
+        },
+      ],
       resend: true,
     });
     if (!emailDelivered) {
@@ -681,9 +688,7 @@ export class GiftCertificatesAdminService {
 
   private async sendIssuedEmail(params: {
     to: string;
-    codes: string[];
-    faceValue: number;
-    expiresAt: Date | null;
+    items: Array<{ code: string; faceValue: number; expiresAt: Date | null }>;
     resend: boolean;
   }): Promise<boolean> {
     if (!this.mail.isConfigured()) {
@@ -734,6 +739,12 @@ export class GiftCertificatesAdminService {
           note: note?.trim() || 'Отзыв',
         },
       });
+
+      await closeOpenGiftCapturesOnRevoke(tx, id, {
+        actorUserId,
+        note: 'Закрытие hold при отзыве сертификата (баланс не восстановлен)',
+      });
+
       return updated;
     });
   }

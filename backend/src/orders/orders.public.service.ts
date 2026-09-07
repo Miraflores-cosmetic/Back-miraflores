@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { OrderStatus, PaymentStatus, Prisma } from '@prisma/client';
+import { OrderStatus, PaymentStatus, Prisma, ShipmentProvider } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CatalogPublicService } from '../catalog/catalog.public.service';
 import { PromoPublicService } from '../promo/promo.service';
@@ -39,6 +39,13 @@ import {
   giftBuyerCopyEmail,
   giftPurchasePaidEmail,
 } from '../gift-certificates/gift-purchase-email';
+import {
+  GIFT_PURCHASE_SKU,
+  assertGiftDenomCartNotMixedWithPhysical,
+  giftPurchaseSkuForDenom,
+  parseGiftDenomCartVariantId,
+  parseGiftPurchaseSkuDenomId,
+} from '../gift-certificates/gift-certificate-purchase.util';
 
 import { allocateNextOrderNumber } from './order-number';
 
@@ -232,6 +239,12 @@ export class OrdersPublicService {
     if (!items.length) {
       throw new BadRequestException('Корзина пуста или позиции недоступны');
     }
+    const { giftOnly } = assertGiftDenomCartNotMixedWithPhysical(items);
+    if (giftOnly) {
+      throw new BadRequestException(
+        'Для электронных сертификатов доставка не нужна — оформите заказ без расчёта доставки',
+      );
+    }
 
     const subtotal = items.reduce((sum, l) => sum + l.price * l.qty, 0);
     const cartSettings = await this.prisma.cartSettings.findUnique({
@@ -336,12 +349,6 @@ export class OrdersPublicService {
     const customerName = dto.customerName.trim();
     if (!customerName) throw new BadRequestException('Укажите имя');
 
-    const city = dto.shippingAddress?.city?.trim() || '';
-    const address = dto.shippingAddress?.address?.trim() || '';
-    if (!city || !address) {
-      throw new BadRequestException('Укажите город и адрес доставки');
-    }
-
     const idempotencyKey = dto.idempotencyKey?.trim();
     if (!idempotencyKey) {
       throw new BadRequestException('idempotencyKey обязателен');
@@ -365,6 +372,14 @@ export class OrdersPublicService {
     const items = synced.items;
     if (!items.length) {
       throw new BadRequestException('Корзина пуста или позиции недоступны');
+    }
+
+    const { giftOnly } = assertGiftDenomCartNotMixedWithPhysical(items);
+
+    const city = dto.shippingAddress?.city?.trim() || '';
+    const address = dto.shippingAddress?.address?.trim() || '';
+    if (!giftOnly && (!city || !address)) {
+      throw new BadRequestException('Укажите город и адрес доставки');
     }
 
     const subtotal = items.reduce((sum, l) => sum + l.price * l.qty, 0);
@@ -396,14 +411,7 @@ export class OrdersPublicService {
       promoCode = promoApply.code;
     }
 
-    const payableBeforeGift = Math.max(0, subtotal - discountTotal);
-
-    if (giftRaw) {
-      giftApply = await this.giftsPublic.applyForCheckout(giftRaw, payableBeforeGift);
-    }
-
-    const giftCertificateAmount = giftApply?.applyAmount ?? 0;
-    const giftCertificateCode = giftApply?.code ?? null;
+    const payableAfterPromo = Math.max(0, subtotal - discountTotal);
 
     const cartSettings = await this.prisma.cartSettings.findUnique({
       where: { id: 'default' },
@@ -412,14 +420,20 @@ export class OrdersPublicService {
     const freeShippingThresholdRub =
       cartSettings?.freeShippingThresholdRub ?? 10_000;
 
-    const quotePayload = this.shippingQuotes.verify(dto.shippingQuote);
-    const createComment = dto.shippingAddress.comment?.trim() || '';
-    const createPvzCode = resolvePvzCode(
-      createComment,
-      dto.shippingAddress.pvzCode,
-    );
-    const { cost: shippingCost, method: shippingMethod } =
-      resolveShippingFromQuote({
+    let shippingCost = 0;
+    let shippingMethod: ShipmentProvider | null = null;
+    let createComment = '';
+    let createPvzCode: string | null = null;
+    let quotePayload: ReturnType<ShippingQuoteService['verify']> | null = null;
+
+    if (!giftOnly) {
+      if (!dto.shippingQuote?.trim() || !dto.shippingMethod?.trim()) {
+        throw new BadRequestException('Укажите способ и расчёт доставки');
+      }
+      quotePayload = this.shippingQuotes.verify(dto.shippingQuote);
+      createComment = dto.shippingAddress.comment?.trim() || '';
+      createPvzCode = resolvePvzCode(createComment, dto.shippingAddress.pvzCode);
+      const resolved = resolveShippingFromQuote({
         quote: quotePayload,
         shippingMethod: dto.shippingMethod,
         shippingAddress: {
@@ -442,13 +456,24 @@ export class OrdersPublicService {
         goodsSubtotal: subtotal,
         freeShippingThresholdRub,
       });
+      shippingCost = resolved.cost;
+      shippingMethod = resolved.method;
+    }
 
-    // Доставка поверх товаров после промо/сертификата (как в UI summary).
-    const goodsTotal = Math.max(0, payableBeforeGift - giftCertificateAmount);
-    const total = goodsTotal + shippingCost;
+    // Сертификат покрывает товары + доставку (промо — только товары).
+    const payableForGift = payableAfterPromo + shippingCost;
+    if (giftRaw) {
+      giftApply = await this.giftsPublic.applyForCheckout(giftRaw, payableForGift);
+    }
 
-    // Подарок благодарности не входит в subtotal/доставку — бесплатная линия.
-    const gratitudeGift = await this.resolveGratitudeGiftLine(subtotal);
+    const giftCertificateAmount = giftApply?.applyAmount ?? 0;
+    const giftCertificateCode = giftApply?.code ?? null;
+    const total = Math.max(0, payableForGift - giftCertificateAmount);
+
+    // Подарок благодарности — только к physical-заказам (не к digital gift-denom).
+    const gratitudeGift = giftOnly
+      ? null
+      : await this.resolveGratitudeGiftLine(subtotal);
     const itemsForOrder: SyncedCartItem[] = gratitudeGift
       ? [...(items as SyncedCartItem[]), gratitudeGift]
       : (items as SyncedCartItem[]);
@@ -504,7 +529,9 @@ export class OrdersPublicService {
         }
       }
 
-      let created;
+      let created:
+        | Prisma.OrderGetPayload<{ include: { items: true } }>
+        | undefined;
       for (let attempt = 0; attempt < 5; attempt++) {
         try {
           const number = await allocateNextOrderNumber(tx);
@@ -530,53 +557,84 @@ export class OrdersPublicService {
               total,
               shippingCost,
               shippingMethod,
-              shippingAddress: {
-                city,
-                address,
-                apartment: dto.shippingAddress.apartment?.trim() || '',
-                region: dto.shippingAddress.region?.trim() || '',
-                district: dto.shippingAddress.district?.trim() || '',
-                comment: createComment,
-                postalCode: dto.shippingAddress.postalCode?.trim() || '',
-                pvzCode: createPvzCode || undefined,
-                phone: dto.shippingAddress.phone?.trim() || undefined,
-                recipientName:
-                  dto.shippingAddress.recipientName?.trim() || undefined,
-                carrierQuote: {
-                  cost: shippingCost,
-                  method: shippingMethod,
-                  freePvz: Boolean(quotePayload.freePvz),
-                  tariffId:
-                    dto.shippingAddress.carrierQuote?.tariffId ??
-                    quotePayload.tariffId ??
-                    null,
-                  tariffName:
-                    dto.shippingAddress.carrierQuote?.tariffName ??
-                    quotePayload.tariffName ??
-                    null,
-                  daysMin:
-                    dto.shippingAddress.carrierQuote?.daysMin ??
-                    quotePayload.daysMin ??
-                    null,
-                  daysMax:
-                    dto.shippingAddress.carrierQuote?.daysMax ??
-                    quotePayload.daysMax ??
-                    null,
-                  source: 'checkout',
-                  estimatedAt: new Date().toISOString(),
-                  quoteExp: quotePayload.exp,
-                },
-              },
+              shippingAddress: giftOnly
+                ? {
+                    city: city || '—',
+                    address: address || 'Электронный сертификат',
+                    apartment: '',
+                    region: '',
+                    district: '',
+                    comment: 'digital-gift',
+                    postalCode: '',
+                  }
+                : {
+                    city,
+                    address,
+                    apartment: dto.shippingAddress.apartment?.trim() || '',
+                    region: dto.shippingAddress.region?.trim() || '',
+                    district: dto.shippingAddress.district?.trim() || '',
+                    comment: createComment,
+                    postalCode: dto.shippingAddress.postalCode?.trim() || '',
+                    pvzCode: createPvzCode || undefined,
+                    phone: dto.shippingAddress.phone?.trim() || undefined,
+                    recipientName:
+                      dto.shippingAddress.recipientName?.trim() || undefined,
+                    carrierQuote: {
+                      cost: shippingCost,
+                      method: shippingMethod,
+                      freePvz: Boolean(quotePayload?.freePvz),
+                      tariffId:
+                        dto.shippingAddress.carrierQuote?.tariffId ??
+                        quotePayload?.tariffId ??
+                        null,
+                      tariffName:
+                        dto.shippingAddress.carrierQuote?.tariffName ??
+                        quotePayload?.tariffName ??
+                        null,
+                      daysMin:
+                        dto.shippingAddress.carrierQuote?.daysMin ??
+                        quotePayload?.daysMin ??
+                        null,
+                      daysMax:
+                        dto.shippingAddress.carrierQuote?.daysMax ??
+                        quotePayload?.daysMax ??
+                        null,
+                      source: 'checkout',
+                      estimatedAt: new Date().toISOString(),
+                      quoteExp: quotePayload?.exp,
+                    },
+                  },
+              giftPurchaseDenominationId: (() => {
+                for (const l of itemsForOrder) {
+                  const denomId = parseGiftDenomCartVariantId(l.variantId);
+                  if (denomId) return denomId;
+                  const fromSku = parseGiftPurchaseSkuDenomId(l.sku);
+                  if (fromSku) return fromSku;
+                }
+                return null;
+              })(),
+              giftPurchaseRecipientEmail: (() => {
+                const hasGift = itemsForOrder.some(
+                  (l) =>
+                    Boolean(parseGiftDenomCartVariantId(l.variantId)) ||
+                    Boolean(parseGiftPurchaseSkuDenomId(l.sku)) ||
+                    (l.sku ?? '') === GIFT_PURCHASE_SKU,
+                );
+                return hasGift ? email : null;
+              })(),
               items: {
                 create: itemsForOrder.map((l) => {
+                  const giftDenomId = parseGiftDenomCartVariantId(l.variantId);
                   const title = [l.name, l.variantName, l.shadeName]
                     .filter(Boolean)
                     .join(' · ');
                   return {
-                    variantId: l.variantId,
+                    variantId: giftDenomId ? null : l.variantId,
                     shadeId: l.shadeId ?? null,
                     title,
-                    sku: l.sku,
+                    sku: giftDenomId
+                      ? giftPurchaseSkuForDenom(giftDenomId)
+                      : l.sku,
                     qty: l.qty,
                     unitPrice: l.price,
                     lineTotal: l.price * l.qty,
@@ -1327,9 +1385,11 @@ export class OrdersPublicService {
     }
     const mail = giftPurchasePaidEmail({
       orderNumber,
-      codes: certs.map((c) => c.code),
-      faceValue: certs[0]!.faceValue,
-      expiresAt: certs[0]!.expiresAt,
+      items: certs.map((c) => ({
+        code: c.code,
+        faceValue: c.faceValue,
+        expiresAt: c.expiresAt,
+      })),
       recipientEmail: order.giftPurchaseRecipientEmail || order.email,
       buyerEmail: order.email,
     });

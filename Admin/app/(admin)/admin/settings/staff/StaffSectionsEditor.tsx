@@ -5,6 +5,7 @@ import { AdminCompactBtn } from '@/components/AdminCompactBtn/AdminCompactBtn';
 import type { ModeratorAssignableSectionId } from '@/lib/adminSections';
 import {
   sectionsMissingCatalogHint,
+  sectionsMissingCertificatesCatalogHint,
   sectionsMissingFulfillmentHint,
 } from '@/lib/adminSections';
 import type { StaffSectionCatalogItem } from '@/lib/adminStaffTypes';
@@ -75,8 +76,8 @@ export function StaffSectionsEditor({
       </div>
       {sectionsMissingCatalogHint(sections).length > 0 ? (
         <p className={catalogStyles.lead} style={{ marginTop: 12 }}>
-          Для «Скидки и промо», «Сертификаты» и «Отзывы» пикеры товаров/категорий ходят в
-          API каталога. Без раздела «Каталог» UI откроется, но запросы вернут 403 —
+          Для «Скидки и промо», разделов сертификатов и «Отзывы» пикеры товаров/категорий
+          ходят в API каталога. Без раздела «Каталог» UI откроется, но запросы вернут 403 —
           добавьте «Каталог» или уберите эти разделы.
         </p>
       ) : null}
@@ -85,6 +86,13 @@ export function StaffSectionsEditor({
           «Заказы: оплата и возвраты» — mark-paid / refund и пункт «Заказы» в меню. Без
           раздела «Заказы» недоступны packing и остальной фулфилмент — добавьте «Заказы» или
           снимите finance-grant.
+        </p>
+      ) : null}
+      {sectionsMissingCertificatesCatalogHint(sections).length > 0 ? (
+        <p className={catalogStyles.lead} style={{ marginTop: 12 }}>
+          «Сертификаты: выпуск и операции» — issue / revoke / adjust. Без «Сертификаты:
+          номиналы и список» нельзя создавать и править номиналы (GET для выпуска всё равно
+          доступен).
         </p>
       ) : null}
     </div>

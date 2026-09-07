@@ -16,6 +16,10 @@ import {
   catalogSellablePrices,
   pickCatalogCardVariant,
 } from './catalog-price.util';
+import {
+  giftPurchaseSkuForDenom,
+  parseGiftDenomCartVariantId,
+} from '../gift-certificates/gift-certificate-purchase.util';
 
 type ProductCardSource = {
   id: string;
@@ -153,6 +157,45 @@ function applyCampaignToCards(cards: ProductCard[], campaigns: CampaignIn[]): Pr
   });
 }
 
+type DetailVariant = {
+  id: string;
+  price: number;
+  compareAt: number | null;
+};
+
+/** Те же кампании, что на карточках/в корзине — для PDP-вариантов. */
+function applyCampaignToDetailVariants<T extends DetailVariant>(
+  variants: T[],
+  productId: string,
+  categoryId: string,
+  campaigns: CampaignIn[],
+): T[] {
+  if (!campaigns.length || !variants.length) return variants;
+  const priced = priceCartLines(
+    variants.map((v) => ({
+      key: v.id,
+      productId,
+      categoryId,
+      qty: 1,
+      listPrice: v.price,
+    })),
+    campaigns,
+  );
+  const byKey = new Map(priced.lines.map((l) => [l.key, l]));
+  return variants.map((v) => {
+    const line = byKey.get(v.id);
+    if (!line || line.lineDiscount <= 0 || line.price >= v.price) return v;
+    const listPrice = v.price;
+    const salePrice = line.price;
+    const compareAt = Math.max(v.compareAt ?? listPrice, listPrice);
+    return {
+      ...v,
+      price: salePrice,
+      compareAt: compareAt > salePrice ? compareAt : null,
+    };
+  });
+}
+
 @Injectable()
 export class CatalogPublicService {
   private readonly logger = new Logger(CatalogPublicService.name);
@@ -208,7 +251,7 @@ export class CatalogPublicService {
       sortOrder: img.sortOrder,
     }));
 
-    const variants = row.variants.map((v) => {
+    const rawVariants = row.variants.map((v) => {
       const variantImages = v.galleryLinks.map((link) => ({
         id: link.productImage.id,
         url: link.productImage.url,
@@ -234,6 +277,14 @@ export class CatalogPublicService {
         images: variantImages.length > 0 ? variantImages : productImages,
       };
     });
+
+    const campaigns = await this.discountsPublic.loadRunningCampaigns();
+    const variants = applyCampaignToDetailVariants(
+      rawVariants,
+      row.id,
+      row.categoryId,
+      campaigns,
+    );
 
     const prices = catalogSellablePrices(variants);
 
@@ -778,44 +829,6 @@ export class CatalogPublicService {
       };
     }
 
-    const ids = [...new Set(cleaned.map((l) => l.variantId))];
-    const variants = await this.prisma.productVariant.findMany({
-      where: {
-        id: { in: ids },
-        active: true,
-        product: { active: true, excludeFromCatalog: false },
-      },
-      select: {
-        id: true,
-        name: true,
-        sku: true,
-        price: true,
-        compareAt: true,
-        orderMinQty: true,
-        orderMaxQty: true,
-        stock: true,
-        stockReserve: true,
-        product: {
-          select: {
-            id: true,
-            categoryId: true,
-            slug: true,
-            name: true,
-            images: {
-              take: 1,
-              orderBy: { sortOrder: 'asc' },
-              select: { url: true },
-            },
-          },
-        },
-        galleryLinks: {
-          take: 1,
-          orderBy: { sortOrder: 'asc' },
-          select: { productImage: { select: { url: true } } },
-        },
-      },
-    });
-    const byId = new Map(variants.map((v) => [v.id, v]));
     type RawItem = {
       key: string;
       productId: string;
@@ -835,6 +848,8 @@ export class CatalogPublicService {
       minQty: number;
       maxQty: number;
       qty: number;
+      /** Номинал сертификата — без кампаний и без FK variant. */
+      isGiftDenom?: boolean;
     };
     const rawItems: RawItem[] = [];
     const removedKeys: string[] = [];
@@ -844,7 +859,115 @@ export class CatalogPublicService {
       name?: string;
     }> = [];
 
+    const giftLines: Array<{ variantId: string; denomId: string; qty: number }> =
+      [];
+    const catalogLines: Array<{ variantId: string; qty: number }> = [];
     for (const line of cleaned) {
+      const denomId = parseGiftDenomCartVariantId(line.variantId);
+      if (denomId) {
+        giftLines.push({
+          variantId: line.variantId,
+          denomId,
+          qty: line.qty,
+        });
+      } else {
+        catalogLines.push(line);
+      }
+    }
+
+    if (giftLines.length) {
+      const denomIds = [...new Set(giftLines.map((l) => l.denomId))];
+      const denoms = await this.prisma.giftCertificateDenomination.findMany({
+        where: { id: { in: denomIds }, active: true },
+        select: {
+          id: true,
+          name: true,
+          faceValue: true,
+          validityDays: true,
+          images: {
+            take: 1,
+            orderBy: { sortOrder: 'asc' },
+            select: { url: true },
+          },
+        },
+      });
+      const denomById = new Map(denoms.map((d) => [d.id, d]));
+      for (const line of giftLines) {
+        const denom = denomById.get(line.denomId);
+        if (!denom) {
+          removedKeys.push(line.variantId);
+          removedLines.push({ key: line.variantId, reason: 'missing' });
+          continue;
+        }
+        const minQty = 1;
+        const maxQty = 10;
+        const qty = Math.min(maxQty, Math.max(minQty, Math.floor(line.qty)));
+        const validityLabel =
+          denom.validityDays != null ? `${denom.validityDays} дн.` : 'без срока';
+        rawItems.push({
+          key: line.variantId,
+          productId: denom.id,
+          categoryId: '',
+          variantId: line.variantId,
+          shadeId: null,
+          shadeName: null,
+          slug: 'gift-certificates',
+          name: `Подарочный сертификат «${denom.name}»`,
+          variantName: validityLabel,
+          sku: giftPurchaseSkuForDenom(denom.id),
+          imageUrl: denom.images[0]?.url ?? null,
+          listPrice: denom.faceValue,
+          compareAt: null,
+          minQty,
+          maxQty,
+          qty,
+          isGiftDenom: true,
+        });
+      }
+    }
+
+    const ids = [...new Set(catalogLines.map((l) => l.variantId))];
+    const variants = ids.length
+      ? await this.prisma.productVariant.findMany({
+          where: {
+            id: { in: ids },
+            active: true,
+            product: { active: true, excludeFromCatalog: false },
+          },
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            price: true,
+            compareAt: true,
+            orderMinQty: true,
+            orderMaxQty: true,
+            stock: true,
+            stockReserve: true,
+            product: {
+              select: {
+                id: true,
+                categoryId: true,
+                slug: true,
+                name: true,
+                images: {
+                  take: 1,
+                  orderBy: { sortOrder: 'asc' },
+                  select: { url: true },
+                },
+              },
+            },
+            galleryLinks: {
+              take: 1,
+              orderBy: { sortOrder: 'asc' },
+              select: { productImage: { select: { url: true } } },
+            },
+          },
+        })
+      : [];
+    const byId = new Map(variants.map((v) => [v.id, v]));
+
+    for (const line of catalogLines) {
       const key = line.variantId;
       const v = byId.get(line.variantId);
       if (!v) {
@@ -898,18 +1021,34 @@ export class CatalogPublicService {
       });
     }
 
-    const priced = await this.discountsPublic.priceLines(
-      rawItems.map((r) => ({
-        key: r.key,
-        productId: r.productId,
-        categoryId: r.categoryId,
-        qty: r.qty,
-        listPrice: r.listPrice,
-      })),
-    );
+    const catalogRaw = rawItems.filter((r) => !r.isGiftDenom);
+    const giftRaw = rawItems.filter((r) => r.isGiftDenom);
+
+    const priced = catalogRaw.length
+      ? await this.discountsPublic.priceLines(
+          catalogRaw.map((r) => ({
+            key: r.key,
+            productId: r.productId,
+            categoryId: r.categoryId,
+            qty: r.qty,
+            listPrice: r.listPrice,
+          })),
+        )
+      : {
+          lines: [] as Array<{
+            key: string;
+            price: number;
+            lineDiscount: number;
+            discountId: string | null;
+            discountName: string | null;
+          }>,
+          listSubtotal: 0,
+          subtotal: 0,
+          campaignDiscountTotal: 0,
+        };
     const byKey = new Map(priced.lines.map((l) => [l.key, l]));
 
-    const items = rawItems.map((r) => {
+    const catalogItems = catalogRaw.map((r) => {
       const p = byKey.get(r.key);
       const salePrice = p?.price ?? r.listPrice;
       // Зачёркивание как на карточках: marketing compareAt ∪ pre-campaign price.
@@ -935,12 +1074,36 @@ export class CatalogPublicService {
       };
     });
 
+    const giftItems = giftRaw.map((r) => ({
+      productId: r.productId,
+      variantId: r.variantId,
+      shadeId: r.shadeId,
+      shadeName: r.shadeName,
+      slug: r.slug,
+      name: r.name,
+      variantName: r.variantName,
+      sku: r.sku,
+      imageUrl: r.imageUrl,
+      listPrice: r.listPrice,
+      price: r.listPrice,
+      lineDiscount: 0,
+      discountId: null as string | null,
+      discountName: null as string | null,
+      minQty: r.minQty,
+      maxQty: r.maxQty,
+      qty: r.qty,
+      isGiftDenom: true as const,
+    }));
+
+    const giftSubtotal = giftItems.reduce((s, i) => s + i.price * i.qty, 0);
+    const items = [...catalogItems, ...giftItems];
+
     return {
       items,
       removedKeys,
       removedLines,
-      listSubtotal: priced.listSubtotal,
-      subtotal: priced.subtotal,
+      listSubtotal: priced.listSubtotal + giftSubtotal,
+      subtotal: priced.subtotal + giftSubtotal,
       campaignDiscountTotal: priced.campaignDiscountTotal,
     };
   }

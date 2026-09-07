@@ -438,16 +438,44 @@ export function buildOrderRefundEmail(params: {
   };
 }
 
-function codesListHtml(codes: string[]): string {
-  const rows = codes
-    .map((c, i) => {
+export type GiftEmailCertItem = {
+  code: string;
+  faceValue: number;
+  expiresAt: Date | null;
+};
+
+function formatFace(faceValue: number): string {
+  return `${faceValue.toLocaleString('ru-RU')} ₽`;
+}
+
+function formatExpiry(expiresAt: Date | null): string {
+  return expiresAt != null
+    ? `Действует до ${expiresAt.toLocaleDateString('ru-RU')}`
+    : 'Срок действия не ограничен';
+}
+
+function giftItemsListText(items: GiftEmailCertItem[]): string {
+  return items
+    .map((i) => `• ${i.code} — ${formatFace(i.faceValue)} — ${formatExpiry(i.expiresAt)}`)
+    .join('\n');
+}
+
+function giftItemsListHtml(items: GiftEmailCertItem[]): string {
+  const rows = items
+    .map((item, i) => {
       const border =
-        i < codes.length - 1
+        i < items.length - 1
           ? `border-bottom:1px solid ${MAIL_BRAND.line};`
           : '';
+      const meta = `${formatFace(item.faceValue)} · ${formatExpiry(item.expiresAt)}`;
       return `<tr>
-      <td style="padding:14px 18px;${border}font-family:Georgia,'Times New Roman',serif;font-size:18px;letter-spacing:0.12em;color:${MAIL_BRAND.green};font-weight:700;">
-        ${escapeHtml(c)}
+      <td style="padding:14px 18px;${border}">
+        <div style="font-family:Georgia,'Times New Roman',serif;font-size:18px;letter-spacing:0.12em;color:${MAIL_BRAND.green};font-weight:700;">
+          ${escapeHtml(item.code)}
+        </div>
+        <div style="margin-top:6px;font-size:13px;line-height:1.4;color:${MAIL_BRAND.muted};">
+          ${escapeHtml(meta)}
+        </div>
       </td>
     </tr>`;
     })
@@ -457,35 +485,38 @@ function codesListHtml(codes: string[]): string {
   </table>`;
 }
 
-function codesListText(codes: string[]): string {
-  return codes.map((c) => `• ${c}`).join('\n');
-}
-
-function formatFace(faceValue: number): string {
-  return `${faceValue.toLocaleString('ru-RU')} ₽`;
-}
-
-function formatExpiry(expiresAt: Date | null): string {
-  return expiresAt != null
-    ? `Действует до ${expiresAt.toLocaleDateString('ru-RU')}.`
-    : 'Срок действия не ограничен.';
+function normalizeGiftEmailItems(params: {
+  items?: GiftEmailCertItem[];
+  codes?: string[];
+  faceValue?: number;
+  expiresAt?: Date | null;
+}): GiftEmailCertItem[] {
+  if (params.items?.length) return params.items;
+  const codes = params.codes ?? [];
+  const face = Math.max(0, Math.floor(params.faceValue ?? 0));
+  return codes.map((code) => ({
+    code,
+    faceValue: face,
+    expiresAt: params.expiresAt ?? null,
+  }));
 }
 
 /** Подарочный сертификат после оплаты на сайте. */
 export function buildGiftPurchasePaidEmail(params: {
   orderNumber: string;
-  codes: string[];
-  faceValue: number;
-  expiresAt: Date | null;
+  /** Предпочтительно: код + номинал + срок по каждому сертификату. */
+  items?: GiftEmailCertItem[];
+  /** @deprecated используйте items. */
+  codes?: string[];
+  faceValue?: number;
+  expiresAt?: Date | null;
   buyerEmail?: string;
   siteUrl?: string | null;
 }): BuiltEmail {
   const number = params.orderNumber.trim();
-  const codes = params.codes;
-  const face = formatFace(params.faceValue);
-  const expiry = formatExpiry(params.expiresAt);
+  const items = normalizeGiftEmailItems(params);
   const site = siteUrl(params.siteUrl);
-  const plural = codes.length > 1;
+  const plural = items.length > 1;
   const subject = plural
     ? `Ваши подарочные сертификаты (${number}) — ${MAIL_BRAND.name}`
     : `Ваш подарочный сертификат (${number}) — ${MAIL_BRAND.name}`;
@@ -497,10 +528,7 @@ export function buildGiftPurchasePaidEmail(params: {
       ? `Оплата заказа ${number} прошла успешно. Ваши подарочные сертификаты Miraflores:`
       : `Оплата заказа ${number} прошла успешно. Ваш подарочный сертификат Miraflores:`,
     '',
-    codesListText(codes),
-    '',
-    `Номинал: ${face}`,
-    expiry,
+    giftItemsListText(items),
     '',
     'Введите код при оформлении заказа на сайте в поле «Промокод или сертификат».',
     params.buyerEmail ? `Покупка оформлена на ${params.buyerEmail}.` : '',
@@ -513,8 +541,7 @@ export function buildGiftPurchasePaidEmail(params: {
     eyebrow('Подарок'),
     title(plural ? 'Ваши сертификаты' : 'Ваш сертификат'),
     `<p style="margin:0 0 16px;">Оплата заказа <strong>${escapeHtml(number)}</strong> прошла успешно.</p>`,
-    codesListHtml(codes),
-    `<p style="margin:0 0 8px;">Номинал: <strong>${escapeHtml(face)}</strong><br/>${escapeHtml(expiry)}</p>`,
+    giftItemsListHtml(items),
     `<p style="margin:0 0 8px;">Введите код при оформлении заказа в поле «Промокод или сертификат».</p>`,
     mailCtaButton(site, 'Перейти в магазин'),
     mailMutedNote('Сохраните это письмо — код понадобится при оплате.'),
@@ -535,17 +562,16 @@ export function buildGiftPurchasePaidEmail(params: {
 
 /** Ручной выпуск / resend сертификата из админки. */
 export function buildGiftCertificateIssuedEmail(params: {
-  codes: string[];
-  faceValue: number;
-  expiresAt: Date | null;
+  items?: GiftEmailCertItem[];
+  codes?: string[];
+  faceValue?: number;
+  expiresAt?: Date | null;
   resend?: boolean;
   siteUrl?: string | null;
 }): BuiltEmail {
-  const codes = params.codes;
-  const face = formatFace(params.faceValue);
-  const expiry = formatExpiry(params.expiresAt);
+  const items = normalizeGiftEmailItems(params);
   const site = siteUrl(params.siteUrl);
-  const plural = codes.length > 1;
+  const plural = items.length > 1;
   const resend = Boolean(params.resend);
 
   const subject = plural
@@ -567,10 +593,7 @@ export function buildGiftCertificateIssuedEmail(params: {
     '',
     intro,
     '',
-    codesListText(codes),
-    '',
-    `Номинал: ${face}`,
-    expiry,
+    giftItemsListText(items),
     '',
     'Введите код при оформлении заказа на сайте в поле «Промокод или сертификат».',
     '',
@@ -582,8 +605,7 @@ export function buildGiftCertificateIssuedEmail(params: {
     eyebrow('Подарок'),
     title(resend ? 'Повторная отправка' : plural ? 'Ваши сертификаты' : 'Ваш сертификат'),
     `<p style="margin:0 0 16px;">${escapeHtml(intro)}</p>`,
-    codesListHtml(codes),
-    `<p style="margin:0 0 8px;">Номинал: <strong>${escapeHtml(face)}</strong><br/>${escapeHtml(expiry)}</p>`,
+    giftItemsListHtml(items),
     `<p style="margin:0 0 8px;">Введите код при оформлении заказа в поле «Промокод или сертификат».</p>`,
     mailCtaButton(site, 'Перейти в магазин'),
     mailMutedNote(

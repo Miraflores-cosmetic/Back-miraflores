@@ -1,6 +1,9 @@
 import type { AdminSectionId } from '@/lib/adminSections';
 import type { StaffContext } from '@/lib/adminStaffTypes';
-import { staffCanSeeOrdersNav } from '@miraflores/admin-sections';
+import {
+  staffCanSeeCertificatesNav,
+  staffCanSeeOrdersNav,
+} from '@miraflores/admin-sections';
 
 export type NavChild = {
   href: string;
@@ -153,6 +156,9 @@ export function canSeeSection(
   if (section === 'dashboard') return true;
   if (section === 'orders') {
     return staffCanSeeOrdersNav(staff.sections, staff.isSuperAdmin);
+  }
+  if (section === 'certificates') {
+    return staffCanSeeCertificatesNav(staff.sections, staff.isSuperAdmin);
   }
   return staff.sections.includes(section);
 }

@@ -4,6 +4,7 @@ import {
   buildGiftBuyerCopyEmail,
   buildGiftCertificateIssuedEmail,
   buildGiftPurchasePaidEmail,
+  type GiftEmailCertItem,
 } from '../mail/email-templates';
 
 function siteFromEnv(): string | null {
@@ -13,20 +14,15 @@ function siteFromEnv(): string | null {
 /** После оплаты покупки на сайте. */
 export function giftPurchasePaidEmail(params: {
   orderNumber: string;
-  codes: string[];
-  faceValue: number;
-  expiresAt: Date | null;
+  items: GiftEmailCertItem[];
   recipientEmail: string;
   buyerEmail: string;
 }): { subject: string; text: string; html: string; to: string } {
-  const { orderNumber, codes, faceValue, expiresAt, recipientEmail, buyerEmail } =
-    params;
+  const { orderNumber, items, recipientEmail, buyerEmail } = params;
   const to = recipientEmail || buyerEmail;
   const built = buildGiftPurchasePaidEmail({
     orderNumber,
-    codes,
-    faceValue,
-    expiresAt,
+    items,
     buyerEmail: buyerEmail !== to ? buyerEmail : undefined,
     siteUrl: siteFromEnv(),
   });
@@ -49,16 +45,12 @@ export function giftBuyerCopyEmail(params: {
 
 /** Ручной выпуск / повторная отправка из админки. */
 export function giftCertificateIssuedEmail(params: {
-  codes: string[];
-  faceValue: number;
-  expiresAt: Date | null;
+  items: GiftEmailCertItem[];
   to: string;
   resend?: boolean;
 }): { subject: string; text: string; html: string; to: string } {
   const built = buildGiftCertificateIssuedEmail({
-    codes: params.codes,
-    faceValue: params.faceValue,
-    expiresAt: params.expiresAt,
+    items: params.items,
     resend: params.resend,
     siteUrl: siteFromEnv(),
   });

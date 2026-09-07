@@ -58,17 +58,18 @@ describe('email templates', () => {
   it('gift + staff templates use layout', () => {
     const gift = buildGiftPurchasePaidEmail({
       orderNumber: 'G1',
-      codes: ['CODE-1'],
-      faceValue: 3000,
-      expiresAt: null,
+      items: [
+        { code: 'CODE-1', faceValue: 3000, expiresAt: null },
+        { code: 'CODE-2', faceValue: 1500, expiresAt: null },
+      ],
     });
     expect(gift.html).toContain('CODE-1');
+    expect(gift.html).toContain('CODE-2');
+    expect(gift.text).toContain('1\u00a0500');
     expect(gift.html).toContain('Miraflores');
 
     const issued = buildGiftCertificateIssuedEmail({
-      codes: ['CODE-2'],
-      faceValue: 1000,
-      expiresAt: null,
+      items: [{ code: 'CODE-2', faceValue: 1000, expiresAt: null }],
       resend: true,
     });
     expect(issued.subject).toContain('Повторная');

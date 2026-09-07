@@ -5,10 +5,12 @@ import {
   resolveAdminSectionFromApiPath,
   resolveAdminSectionFromPathname,
   sectionsMissingCatalogHint,
+  sectionsMissingCertificatesCatalogHint,
   sectionsMissingFulfillmentHint,
   sectionsMissingOrdersHint,
   staffCanAccessAdminPath,
   staffCanAssistant,
+  staffCanCertificatesFinance,
   staffCanOrdersFinance,
 } from './index';
 
@@ -125,11 +127,20 @@ describe('resolveAdminSectionFromApiPath', () => {
     expect(resolveAdminSectionFromApiPath('/api/v1/catalog/admin/products')).toBe('catalog');
     expect(resolveAdminSectionFromApiPath('/api/v1/promo/admin')).toBe('discounts');
     expect(resolveAdminSectionFromApiPath('/api/v1/gift-certificates/admin')).toBe(
-      'certificates',
+      'certificates_read',
     );
     expect(resolveAdminSectionFromApiPath('/api/v1/gift-certificates/admin/issue')).toBe(
-      'certificates',
+      'certificates_finance',
     );
+    expect(
+      resolveAdminSectionFromApiPath('/api/v1/gift-certificates/admin/abc/revoke'),
+    ).toBe('certificates_finance');
+    expect(
+      resolveAdminSectionFromApiPath('/api/v1/gift-certificates/admin/denominations', 'GET'),
+    ).toBe('certificates_read');
+    expect(
+      resolveAdminSectionFromApiPath('/api/v1/gift-certificates/admin/denominations', 'POST'),
+    ).toBe('certificates');
     expect(resolveAdminSectionFromApiPath('/api/v1/auth/admin/me')).toBe('dashboard');
     expect(resolveAdminSectionFromApiPath('/api/v1/orders/admin')).toBe('orders');
     expect(resolveAdminSectionFromApiPath('/api/v1/orders/admin/abc')).toBe('orders');
@@ -160,6 +171,12 @@ describe('staffCanAccessAdminPath', () => {
     expect(staffCanAccessAdminPath('/admin/orders/abc', ['orders_finance'], false)).toBe(true);
   });
 
+  it('certificates_finance без certificates — UI сертификатов доступен', () => {
+    expect(
+      staffCanAccessAdminPath('/admin/certificates', ['certificates_finance'], false),
+    ).toBe(true);
+  });
+
   it('settings hub только суперадмин', () => {
     expect(staffCanAccessAdminPath('/admin/settings', ['settings'], false)).toBe(false);
     expect(staffCanAccessAdminPath('/admin/settings', ['settings'], true)).toBe(true);
@@ -187,6 +204,17 @@ describe('sectionsMissingFulfillmentHint', () => {
   });
 });
 
+describe('sectionsMissingCertificatesCatalogHint', () => {
+  it('подсказывает certificates для certificates_finance', () => {
+    expect(sectionsMissingCertificatesCatalogHint(['certificates_finance'])).toEqual([
+      'certificates_finance',
+    ]);
+    expect(
+      sectionsMissingCertificatesCatalogHint(['certificates_finance', 'certificates']),
+    ).toEqual([]);
+  });
+});
+
 describe('sectionsMissingOrdersHint (deprecated alias)', () => {
   it('делегирует в sectionsMissingFulfillmentHint', () => {
     expect(sectionsMissingOrdersHint(['orders_finance'])).toEqual(['orders_finance']);
@@ -198,6 +226,14 @@ describe('staffCanOrdersFinance', () => {
     expect(staffCanOrdersFinance([], true)).toBe(true);
     expect(staffCanOrdersFinance(['orders'], false)).toBe(false);
     expect(staffCanOrdersFinance(['orders', 'orders_finance'], false)).toBe(true);
+  });
+});
+
+describe('staffCanCertificatesFinance', () => {
+  it('суперадмин или явный grant', () => {
+    expect(staffCanCertificatesFinance([], true)).toBe(true);
+    expect(staffCanCertificatesFinance(['certificates'], false)).toBe(false);
+    expect(staffCanCertificatesFinance(['certificates_finance'], false)).toBe(true);
   });
 });
 

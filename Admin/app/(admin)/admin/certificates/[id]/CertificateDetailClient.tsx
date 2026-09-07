@@ -19,7 +19,13 @@ import styles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
 
 const LEDGER_LIMIT = 20;
 
-export function CertificateDetailClient({ certificateId }: { certificateId: string }) {
+export function CertificateDetailClient({
+  certificateId,
+  canCertificatesFinance = false,
+}: {
+  certificateId: string;
+  canCertificatesFinance?: boolean;
+}) {
   const router = useRouter();
   const [row, setRow] = useState<AdminGiftCertificate | null>(null);
   const [ledgerPage, setLedgerPage] = useState(1);
@@ -227,7 +233,7 @@ export function CertificateDetailClient({ certificateId }: { certificateId: stri
         <AdminCompactBtn type="button" onClick={() => void copyCode()}>
           {copied ? 'Скопировано' : 'Копировать код'}
         </AdminCompactBtn>
-        {row.recipientEmail && row.status !== 'REVOKED' ? (
+        {canCertificatesFinance && row.recipientEmail && row.status !== 'REVOKED' ? (
           <AdminCompactBtn
             type="button"
             disabled={saving}
@@ -236,7 +242,7 @@ export function CertificateDetailClient({ certificateId }: { certificateId: stri
             Отправить письмо
           </AdminCompactBtn>
         ) : null}
-        {row.status !== 'REVOKED' ? (
+        {canCertificatesFinance && row.status !== 'REVOKED' ? (
           <AdminCompactBtn type="button" variant="danger" disabled={saving} onClick={() => void onRevoke()}>
             Отозвать
           </AdminCompactBtn>
@@ -253,7 +259,7 @@ export function CertificateDetailClient({ certificateId }: { certificateId: stri
       </p>
       {row.note ? <p className={styles.lead}>Комментарий: {row.note}</p> : null}
 
-      {row.status !== 'REVOKED' ? (
+      {canCertificatesFinance && row.status !== 'REVOKED' ? (
         <>
           <h2 className={styles.groupHeading}>Корректировка баланса</h2>
           <form className={styles.form} onSubmit={(e) => void onAdjust(e)}>

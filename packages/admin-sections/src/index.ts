@@ -17,6 +17,8 @@ export const ADMIN_SECTION_IDS = [
   'reviews',
   'discounts',
   'certificates',
+  /** issue / adjust / revoke / extend / resend — отдельно от номиналов и списка. */
+  'certificates_finance',
   'orders',
   /** mark-paid / refund — отдельно от просмотра и фулфилмента заказов. */
   'orders_finance',
@@ -65,14 +67,15 @@ export const ADMIN_SECTION_LABELS_RU: Record<AdminSectionId, string> = {
   blog: 'Блог',
   reviews: 'Отзывы',
   discounts: 'Скидки и промо',
-  certificates: 'Сертификаты',
+  certificates: 'Сертификаты: номиналы и список',
+  certificates_finance: 'Сертификаты: выпуск и операции',
   orders: 'Заказы',
   orders_finance: 'Заказы: оплата и возвраты',
   settings: 'Настройки',
   assistant: '🤦‍♀️ Ассистент',
 };
 
-export type AdminApiAccessTarget = AdminSectionId | 'staff';
+export type AdminApiAccessTarget = AdminSectionId | 'staff' | 'certificates_read';
 
 /**
  * Префиксы Nest admin API, разрешённые через Next BFF (`/api/admin/backend/...`).
@@ -117,9 +120,16 @@ export function isAllowedAdminBackendPath(segments: string[]): boolean {
  * Профиль сотрудника: `/settings/admin/staff-profile` (не под `/staff/:id`).
  * CRUD staff: `/settings/admin/staff` — только суперадмин.
  * mark-paid / refund — секция `orders_finance`, остальной orders API — `orders`.
+ * gift-certificates: номиналы — `certificates`; issue/revoke/adjust/extend/resend —
+ * `certificates_finance`; список и карточка кода / GET denoms — `certificates_read`
+ * (нужен certificates или certificates_finance).
  */
-export function resolveAdminSectionFromApiPath(pathOnly: string): AdminApiAccessTarget | null {
+export function resolveAdminSectionFromApiPath(
+  pathOnly: string,
+  method?: string,
+): AdminApiAccessTarget | null {
   const p = pathOnly.split('?')[0].replace(/\/+$/, '');
+  const m = (method ?? 'GET').toUpperCase();
 
   if (p.includes('/settings/admin/staff-profile')) return 'dashboard';
   if (p.includes('/settings/admin/staff')) return 'staff';
@@ -137,7 +147,23 @@ export function resolveAdminSectionFromApiPath(pathOnly: string): AdminApiAccess
   if (p.includes('/reviews/admin')) return 'reviews';
   if (p.includes('/discounts/admin')) return 'discounts';
   if (p.includes('/promo/admin')) return 'discounts';
-  if (p.includes('/gift-certificates/admin')) return 'certificates';
+  if (p.includes('/gift-certificates/admin')) {
+    if (
+      /\/gift-certificates\/admin\/issue\/?$/.test(p) ||
+      /\/gift-certificates\/admin\/[^/]+\/(revoke|adjust|extend|resend-email)\/?$/.test(p)
+    ) {
+      return 'certificates_finance';
+    }
+    if (
+      p.includes('/gift-certificates/admin/denominations') ||
+      p.includes('/gift-certificates/admin/denomination-images')
+    ) {
+      // GET denoms — для вкладки «Выпуск»; мутации — только certificates.
+      return m === 'GET' ? 'certificates_read' : 'certificates';
+    }
+    // GET list / GET :id
+    return 'certificates_read';
+  }
   if (p.includes('/quiz/admin')) return 'settings';
   if (p.includes('/assistant/admin')) return 'assistant';
   if (p.includes('/dashboard/admin')) return 'dashboard';
@@ -210,6 +236,9 @@ export function staffCanAccessAdminPath(
   if (target === 'orders') {
     return staffCanAccessOrdersUi(sections, isSuperAdmin);
   }
+  if (target === 'certificates') {
+    return staffCanAccessCertificatesUi(sections, isSuperAdmin);
+  }
   return sections.includes(target);
 }
 
@@ -222,12 +251,29 @@ export function staffCanAccessOrdersUi(
   return sections.includes('orders') || sections.includes('orders_finance');
 }
 
+/** Hub / список / карточка сертификатов — `certificates` или `certificates_finance`. */
+export function staffCanAccessCertificatesUi(
+  sections: readonly string[],
+  isSuperAdmin: boolean,
+): boolean {
+  if (isSuperAdmin) return true;
+  return sections.includes('certificates') || sections.includes('certificates_finance');
+}
+
 /** Nav «Заказы» — тот же критерий, что и UI заказов. */
 export function staffCanSeeOrdersNav(
   sections: readonly string[],
   isSuperAdmin: boolean,
 ): boolean {
   return staffCanAccessOrdersUi(sections, isSuperAdmin);
+}
+
+/** Nav «Сертификаты» — тот же критерий, что и UI сертификатов. */
+export function staffCanSeeCertificatesNav(
+  sections: readonly string[],
+  isSuperAdmin: boolean,
+): boolean {
+  return staffCanAccessCertificatesUi(sections, isSuperAdmin);
 }
 
 /** Суперадмин или явный grant `orders_finance`. */
@@ -237,6 +283,24 @@ export function staffCanOrdersFinance(
 ): boolean {
   if (isSuperAdmin) return true;
   return sections.includes('orders_finance');
+}
+
+/** Суперадмин или явный grant `certificates_finance` (выпуск / revoke / adjust). */
+export function staffCanCertificatesFinance(
+  sections: readonly string[],
+  isSuperAdmin: boolean,
+): boolean {
+  if (isSuperAdmin) return true;
+  return sections.includes('certificates_finance');
+}
+
+/** Суперадмин или явный grant `certificates` (номиналы). */
+export function staffCanCertificatesCatalog(
+  sections: readonly string[],
+  isSuperAdmin: boolean,
+): boolean {
+  if (isSuperAdmin) return true;
+  return sections.includes('certificates');
 }
 
 /** Суперадмин или явный grant `assistant` (FAB + API). */
@@ -252,6 +316,7 @@ export function staffCanAssistant(
 export const SECTIONS_NEEDING_CATALOG: readonly ModeratorAssignableSectionId[] = [
   'discounts',
   'certificates',
+  'certificates_finance',
   'reviews',
 ];
 
@@ -284,4 +349,20 @@ export function sectionsMissingOrdersHint(
   sections: readonly string[],
 ): ModeratorAssignableSectionId[] {
   return sectionsMissingFulfillmentHint(sections);
+}
+
+/**
+ * `certificates_finance` без `certificates` — выпуск есть, CRUD номиналов — нет.
+ * GET denoms для выпуска всё равно доступен через certificates_read.
+ */
+export const SECTIONS_NEEDING_CERTIFICATES_CATALOG: readonly ModeratorAssignableSectionId[] = [
+  'certificates_finance',
+];
+
+export function sectionsMissingCertificatesCatalogHint(
+  sections: readonly string[],
+): ModeratorAssignableSectionId[] {
+  const set = new Set(sections);
+  if (set.has('certificates')) return [];
+  return SECTIONS_NEEDING_CERTIFICATES_CATALOG.filter((id) => set.has(id));
 }

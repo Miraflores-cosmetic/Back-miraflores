@@ -32,7 +32,7 @@ export class GiftCertificatesPublicController {
   }
 
   @UseGuards(ThrottlerGuard)
-  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('validate')
   validate(@Body() dto: ValidateGiftCertificateDto) {
     return this.gifts.validate(dto.code, dto.payableBeforeGift);

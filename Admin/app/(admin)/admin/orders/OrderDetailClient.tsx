@@ -23,6 +23,7 @@ import {
   paymentStatusBadgeClass,
 } from '@/lib/orderStatusLabels';
 import { parseJcosAddressMeta } from '@/lib/shipping/addressShippingMeta';
+import { GIFT_PARTIAL_REFUND_POLICY } from '@/lib/giftHoldCopy';
 import { OrderAccordion, OrderIconBtn } from './OrderAccordion';
 import { OrderAddressEditModal } from './OrderAddressEditModal';
 import { OrderItemsEditModal } from './OrderItemsEditModal';
@@ -136,6 +137,11 @@ export function OrderDetailClient({
       setOrder(row);
       if (row.refundRemaining > 0) {
         setRefundAmount(String(row.refundRemaining));
+      } else if (
+        (row.giftCertificateAmount ?? 0) > 0 ||
+        row.giftPurchaseDenominationId
+      ) {
+        setRefundAmount('0');
       }
       softPollFailsRef.current = 0;
       setSoftPollStale(false);
@@ -157,6 +163,11 @@ export function OrderDetailClient({
       setOrder(row);
       if (row.refundRemaining > 0) {
         setRefundAmount(String(row.refundRemaining));
+      } else if (
+        (row.giftCertificateAmount ?? 0) > 0 ||
+        row.giftPurchaseDenominationId
+      ) {
+        setRefundAmount('0');
       }
       softPollFailsRef.current = 0;
       setSoftPollStale(false);
@@ -231,6 +242,11 @@ export function OrderDetailClient({
         setOrder(row);
         if (row.refundRemaining > 0) {
           setRefundAmount(String(row.refundRemaining));
+        } else if (
+          (row.giftCertificateAmount ?? 0) > 0 ||
+          row.giftPurchaseDenominationId
+        ) {
+          setRefundAmount('0');
         }
       } else {
         await load();
@@ -298,6 +314,15 @@ export function OrderDetailClient({
       return;
     }
     if (refundSug > 0 && canOrdersFinance && row.actions?.canRefund) {
+      const giftBlocksPartial =
+        (row.giftCertificateAmount ?? 0) > 0 ||
+        Boolean(row.giftPurchaseDenominationId);
+      if (giftBlocksPartial && refundSug < (row.refundRemaining ?? 0)) {
+        setError(
+          `${GIFT_PARTIAL_REFUND_POLICY} Переплата ${formatAdminMoney(refundSug)} — оформите полный возврат вручную в блоке «Возврат».`,
+        );
+        return;
+      }
       askConfirm({
         title: 'Возврат',
         message: `Сумма заказа уменьшилась. Оформить возврат ${formatAdminMoney(refundSug)} через ЮKassa?`,
@@ -726,6 +751,17 @@ export function OrderDetailClient({
                         {order.giftCertificateAmount
                           ? ` (−${formatAdminMoney(order.giftCertificateAmount)})`
                           : ''}
+                        {order.status === 'AWAITING_PAYMENT' ||
+                        order.status === 'NEW' ? (
+                          <p className={styles.lead} style={{ marginTop: 8 }}>
+                            CAPTURE при создании заказа: баланс уже уменьшен, код
+                            заморожен до оплаты или TTL (~60 мин).
+                          </p>
+                        ) : (
+                          <p className={styles.lead} style={{ marginTop: 8 }}>
+                            {GIFT_PARTIAL_REFUND_POLICY}
+                          </p>
+                        )}
                       </dd>
                     </div>
                   ) : null}
@@ -737,6 +773,36 @@ export function OrderDetailClient({
                         {order.giftPurchaseRecipientEmail
                           ? ` → ${order.giftPurchaseRecipientEmail}`
                           : ''}
+                      </dd>
+                    </div>
+                  ) : null}
+                  {(order.issuedGiftCertificates?.length ?? 0) > 0 ? (
+                    <div className={styles.detailDlRow}>
+                      <dt>Выданные коды</dt>
+                      <dd>
+                        <ul style={{ margin: 0, paddingLeft: 18 }}>
+                          {order.issuedGiftCertificates!.map((c) => (
+                            <li key={c.id}>
+                              <AdminCompactBtnLink href={`/admin/certificates/${c.id}`}>
+                                {c.code}
+                              </AdminCompactBtnLink>
+                              {` · ${formatAdminMoney(c.faceValue)} · остаток ${formatAdminMoney(c.balance)} · ${c.status}`}
+                            </li>
+                          ))}
+                        </ul>
+                        <p className={styles.lead} style={{ marginTop: 8 }}>
+                          Полный refund заказа автоматически отзывает эти коды,
+                          только если они ещё не потрачены (баланс = номинал).
+                        </p>
+                        {order.giftPurchaseRefundBlocked ? (
+                          <p className={styles.error} role="alert" style={{ marginTop: 8 }}>
+                            Refund покупки заблокирован: коды уже использованы на{' '}
+                            {formatAdminMoney(order.giftPurchaseSpentTotal ?? 0)}.
+                            Сначала полный возврат товарного заказа с сертификатом
+                            (баланс вернётся) или ручная корректировка в «Сертификаты».
+                            Clawback на redeem-заказ не делается.
+                          </p>
+                        ) : null}
                       </dd>
                     </div>
                   ) : null}
@@ -1299,15 +1365,32 @@ export function OrderDetailClient({
                         PACKING.
                       </p>
                     ) : null}
+                    {(order.giftCertificateAmount ?? 0) > 0 ||
+                    order.giftPurchaseDenominationId ? (
+                      <p className={styles.orderHint} role="note">
+                        {GIFT_PARTIAL_REFUND_POLICY}
+                      </p>
+                    ) : null}
                     <AdminTextField
                       label="Сумма ₽"
                       value={refundAmount}
                       onChange={(e) =>
                         setRefundAmount(e.target.value.replace(/\D/g, ''))
                       }
-                      disabled={busy}
+                      disabled={
+                        busy ||
+                        (order.giftCertificateAmount ?? 0) > 0 ||
+                        Boolean(order.giftPurchaseDenominationId)
+                      }
                       inputMode="numeric"
                     />
+                    {(order.giftCertificateAmount ?? 0) > 0 ||
+                    order.giftPurchaseDenominationId ? (
+                      <p className={styles.orderHint}>
+                        Сумма зафиксирована на полный остаток по карте (
+                        {formatAdminMoney(order.refundRemaining)}).
+                      </p>
+                    ) : null}
                     <AdminTextField
                       label="Причина"
                       value={refundReason}
@@ -1334,25 +1417,57 @@ export function OrderDetailClient({
                     <AdminCompactBtn
                       type="button"
                       variant="danger"
-                      disabled={busy || !refundAmount}
+                      disabled={
+                        busy ||
+                        (order.refundRemaining > 0
+                          ? !refundAmount
+                          : !(
+                              (order.giftCertificateAmount ?? 0) > 0 ||
+                              order.giftPurchaseDenominationId
+                            ))
+                      }
                       onClick={() =>
                         askConfirm({
                           title: 'Возврат средств',
-                          message: providerRefund
-                            ? `Вернуть ${refundAmount} ₽ через ЮKassa по заказу ${order.number}?`
-                            : `Учесть возврат ${refundAmount} ₽ без ЮKassa (деньги на карте не вернутся)?`,
+                          message: (() => {
+                            const giftFullOnly =
+                              (order.giftCertificateAmount ?? 0) > 0 ||
+                              Boolean(order.giftPurchaseDenominationId);
+                            const amt =
+                              giftFullOnly && order.refundRemaining > 0
+                                ? order.refundRemaining
+                                : Number(refundAmount);
+                            if (providerRefund) {
+                              return `Вернуть ${amt} ₽ через ЮKassa по заказу ${order.number}?${
+                                giftFullOnly
+                                  ? ' Сертификат вернётся на баланс только при полном возврате.'
+                                  : ''
+                              }`;
+                            }
+                            return amt > 0
+                              ? `Учесть возврат ${amt} ₽ без ЮKassa (деньги на карте не вернутся)?`
+                              : `Полный возврат без карты (открутка сертификата / отзыв кодов) по заказу ${order.number}?`;
+                          })(),
                           confirmLabel: 'Вернуть',
                           danger: true,
-                          run: () =>
-                            runAction(
+                          run: () => {
+                            const giftFullOnly =
+                              (order.giftCertificateAmount ?? 0) > 0 ||
+                              Boolean(order.giftPurchaseDenominationId);
+                            const amount =
+                              giftFullOnly && order.refundRemaining > 0
+                                ? order.refundRemaining
+                                : Number(refundAmount);
+                            return runAction(
                               `orders/admin/${orderId}/refund`,
                               {
-                                amount: Number(refundAmount),
+                                amount,
                                 reason: refundReason.trim() || undefined,
                                 providerRefund,
                               },
                               'Возврат выполнен',
-                            ),
+                            );
+                          },
                         })
                       }
                     >

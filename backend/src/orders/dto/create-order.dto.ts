@@ -209,16 +209,19 @@ export class CreateOrderDto {
   /**
    * Подписанный Nest shipping quote (`POST /orders/shipping-quote`).
    * Стоимость доставки берётся только из него — не с клиента.
+   * Не нужен для digital-only gift-denom корзины.
    */
+  @IsOptional()
   @IsString()
   @MinLength(20)
   @MaxLength(2000)
-  shippingQuote!: string;
+  shippingQuote?: string;
 
-  /** Перевозчик: CDEK | YANDEX (обязан совпасть с quote). */
+  /** Перевозчик: CDEK | YANDEX (обязан совпасть с quote). Не нужен для gift-denom-only. */
+  @IsOptional()
   @IsString()
   @MaxLength(20)
-  shippingMethod!: string;
+  shippingMethod?: string;
 
   /** @deprecated Игнорируется — cost только из shippingQuote. */
   @IsOptional()

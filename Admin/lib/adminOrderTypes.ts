@@ -105,6 +105,17 @@ export type AdminOrderDetail = {
   giftCertificateCode?: string | null;
   giftPurchaseDenominationId?: string | null;
   giftPurchaseRecipientEmail?: string | null;
+  issuedGiftCertificates?: Array<{
+    id: string;
+    code: string;
+    faceValue: number;
+    balance: number;
+    status: string;
+    expiresAt: string | null;
+  }>;
+  /** Покупка сертификата: коды уже потрачены — refund покупки запрещён. */
+  giftPurchaseRefundBlocked?: boolean;
+  giftPurchaseSpentTotal?: number;
   total: number;
   refundedAmount: number;
   refundRemaining: number;

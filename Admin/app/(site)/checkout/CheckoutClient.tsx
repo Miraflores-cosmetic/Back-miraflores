@@ -44,6 +44,11 @@ import { calcPayableTotal } from '@/lib/payableTotal';
 import { readApiError } from '@/lib/readApiError';
 import { useBuyerAuth } from '@/lib/BuyerAuthProvider';
 import { useYooKassaOrderPayment } from '@/lib/payments/useYooKassaOrderPayment';
+import { useToast } from '@/components/Toast/ToastProvider';
+import {
+  GIFT_HOLD_APPLIED_TOAST,
+  GIFT_HOLD_CAPTURED_TOAST,
+} from '@/lib/giftHoldCopy';
 import type { BuyerAddress } from '../account/accountTypes';
 import styles from './CheckoutPage.module.css';
 
@@ -146,11 +151,13 @@ export function CheckoutClient() {
     promo,
     promoBusy,
     applyPromo,
+    revalidatePromoForShipping,
     clearPromo,
     hydrated,
     syncCart,
     clearCart,
   } = useCart();
+  const { showToast } = useToast();
 
   const [contact, setContact] = useState<CheckoutContactValues>({
     email: '',
@@ -492,11 +499,26 @@ export function CheckoutClient() {
 
   const catalogDiscount = useMemo(() => computeCatalogDiscount(items), [items]);
   const listSubtotal = useMemo(() => computeListSubtotal(items), [items]);
-  /** Один итог для CTA / summary / create (goods + shipping). */
+  /** Один итог для CTA / summary / create (gift гасит товары+доставку). */
   const payableTotal = useMemo(
-    () => calcPayableTotal({ goodsTotal: total, shippingCost }),
-    [total, shippingCost],
+    () =>
+      calcPayableTotal({
+        goodsSubtotal: subtotal,
+        goodsAfterPromo: total,
+        shippingCost,
+        voucherKind: promo?.kind ?? null,
+        giftAmount: promo?.kind === 'gift' ? discountAmount : 0,
+      }),
+    [subtotal, total, shippingCost, promo?.kind, discountAmount],
   );
+
+  // Gift validate зависит от shipping — как на Nest create.
+  const shippingForGiftKey =
+    promo?.kind === 'gift' && shippingCost != null ? String(shippingCost) : '';
+  useEffect(() => {
+    if (!shippingForGiftKey) return;
+    void revalidatePromoForShipping(Number(shippingForGiftKey));
+  }, [shippingForGiftKey, revalidatePromoForShipping]);
 
   const linesPayload = useMemo(
     () =>
@@ -750,6 +772,9 @@ export function CheckoutClient() {
         setOrder(data);
         setPayToken(data.payToken);
         setOrderFingerprint(fp);
+        if (promo?.kind === 'gift') {
+          showToast(GIFT_HOLD_CAPTURED_TOAST, 4500);
+        }
       }
 
       const tokenForPay = (current as CreatedOrder)?.payToken || payToken;
@@ -851,6 +876,7 @@ export function CheckoutClient() {
               confirmationToken={payment.confirmationToken}
               paymentId={payment.paymentId}
               payToken={payment.payToken || payToken}
+              giftHoldActive={showWidget && promo?.kind === 'gift'}
               onPaymentSuccess={() => void payment.checkPaid()}
               onPaymentError={() =>
                 setError('Ошибка оплаты. Попробуйте ещё раз или обновите страницу.')
@@ -930,9 +956,14 @@ export function CheckoutClient() {
               setPromoError('Введите промокод или сертификат');
               return;
             }
-            const result = await applyPromo(code);
+            const result = await applyPromo(code, { shippingRub: shippingCost });
             if (!result.ok) setPromoError(result.message);
-            else setPromoError(undefined);
+            else {
+              setPromoError(undefined);
+              if (result.kind === 'gift') {
+                showToast(GIFT_HOLD_APPLIED_TOAST, 4000);
+              }
+            }
           })();
         }}
       />

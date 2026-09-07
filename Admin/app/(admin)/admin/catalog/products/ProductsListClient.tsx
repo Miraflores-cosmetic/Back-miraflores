@@ -9,13 +9,16 @@ import { AdminListShell } from '@/components/admin/AdminListShell/AdminListShell
 import { AdminSearchBox } from '@/components/SearchBox/SearchBox';
 import { AdminSelect } from '@/components/AdminTextField/AdminTextField';
 import { AdminTabs } from '@/components/AdminTabs/AdminTabs';
-import { adminBackendJson } from '@/lib/adminBackendFetch';
+import { ConfirmDialog } from '@/components/ConfirmDialog/ConfirmDialog';
+import {
+  AdminBackendRequestError,
+  adminBackendJson,
+} from '@/lib/adminBackendFetch';
 import type {
   AdminCategory,
   AdminProductListItem,
 } from '@/lib/adminCatalogTypes';
 import { adminBackendListAllPages } from '@/lib/adminListAll';
-import { adminConfirmDelete } from '@/lib/adminConfirmDelete';
 import { formatAdminMoney } from '@/lib/adminFormat';
 import { revalidateCatalogStorefront } from '@/lib/revalidateCatalogStorefront';
 import { useAdminPaginatedList } from '@/lib/useAdminPaginatedList';
@@ -87,6 +90,8 @@ export function ProductsListClient() {
   );
   const [categories, setCategories] = useState<AdminCategory[]>([]);
   const [collections, setCollections] = useState<CollectionPick[]>([]);
+  const [pendingDelete, setPendingDelete] = useState<AdminProductListItem | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   const initialQ = searchParams.get('q') ?? '';
   const initialPage = Math.max(1, Number(searchParams.get('page')) || 1);
@@ -191,15 +196,20 @@ export function ProductsListClient() {
     [categories],
   );
 
-  async function deleteProduct(p: AdminProductListItem) {
-    await adminConfirmDelete({
-      message: `Удалить товар «${p.name}»?`,
-      url: `catalog/admin/products/${p.id}`,
-      onDone: async () => {
-        await reload();
-        await revalidateCatalogStorefront({ productSlug: p.slug });
-      },
-    });
+  async function deleteProductConfirmed() {
+    const p = pendingDelete;
+    if (!p || deleteBusy) return;
+    setDeleteBusy(true);
+    try {
+      await adminBackendJson(`catalog/admin/products/${p.id}`, { method: 'DELETE' });
+      setPendingDelete(null);
+      await reload();
+      await revalidateCatalogStorefront({ productSlug: p.slug });
+    } catch (e) {
+      alert(e instanceof AdminBackendRequestError ? e.message : 'Не удалось удалить товар');
+    } finally {
+      setDeleteBusy(false);
+    }
   }
 
   const emptyLabel = searching
@@ -352,7 +362,7 @@ export function ProductsListClient() {
                     type="button"
                     variant="danger"
                     className={styles.iconDangerBtn}
-                    onClick={() => void deleteProduct(p)}
+                    onClick={() => setPendingDelete(p)}
                     aria-label={`Удалить товар «${p.name}»`}
                     title="Удалить"
                   >
@@ -364,6 +374,23 @@ export function ProductsListClient() {
           </tbody>
         </table>
       </AdminListShell>
+
+      <ConfirmDialog
+        open={pendingDelete != null}
+        title="Удалить товар?"
+        message={
+          pendingDelete
+            ? `Товар «${pendingDelete.name}» и все его варианты будут удалены. Если товар есть в заказах — удаление будет отклонено, скройте его.`
+            : ''
+        }
+        confirmLabel={deleteBusy ? 'Удаляем…' : 'Удалить'}
+        danger
+        confirmDisabled={deleteBusy}
+        onConfirm={() => void deleteProductConfirmed()}
+        onCancel={() => {
+          if (!deleteBusy) setPendingDelete(null);
+        }}
+      />
     </>
   );
 }

@@ -73,6 +73,7 @@ describe('AdminGuard', () => {
       UserRole.MODERATOR,
       '/api/v1/orders/admin',
       undefined,
+      undefined,
     );
   });
 
@@ -90,6 +91,7 @@ describe('AdminGuard', () => {
       UserRole.MODERATOR,
       '/api/v1/orders/admin',
       3,
+      undefined,
     );
   });
 

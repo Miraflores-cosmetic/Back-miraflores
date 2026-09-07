@@ -12,23 +12,46 @@ import styles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
 
 export type CertificatesHubTab = 'list' | 'issue' | 'denoms';
 
-const TAB_ITEMS: { id: CertificatesHubTab; label: string }[] = [
-  { id: 'list', label: 'Список' },
-  { id: 'issue', label: 'Выпуск' },
-  { id: 'denoms', label: 'Номиналы' },
-];
-
-function parseTab(raw: string | null): CertificatesHubTab {
-  if (raw === 'issue' || raw === 'denoms' || raw === 'list') return raw;
-  return 'list';
+function parseTab(
+  raw: string | null,
+  allowed: readonly CertificatesHubTab[],
+): CertificatesHubTab {
+  if (raw === 'issue' || raw === 'denoms' || raw === 'list') {
+    if (allowed.includes(raw)) return raw;
+  }
+  return allowed[0] ?? 'list';
 }
 
-export function CertificatesHubClient() {
+export function CertificatesHubClient({
+  canCertificatesCatalog,
+  canCertificatesFinance,
+}: {
+  canCertificatesCatalog: boolean;
+  canCertificatesFinance: boolean;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const tab = useMemo(() => parseTab(searchParams.get('tab')), [searchParams]);
   const [createDenomOpen, setCreateDenomOpen] = useState(false);
+
+  const tabItems = useMemo(() => {
+    const items: { id: CertificatesHubTab; label: string }[] = [
+      { id: 'list', label: 'Список' },
+    ];
+    if (canCertificatesFinance) items.push({ id: 'issue', label: 'Выпуск' });
+    if (canCertificatesCatalog) items.push({ id: 'denoms', label: 'Номиналы' });
+    return items;
+  }, [canCertificatesCatalog, canCertificatesFinance]);
+
+  const allowedTabs = useMemo(
+    () => tabItems.map((t) => t.id),
+    [tabItems],
+  );
+
+  const tab = useMemo(
+    () => parseTab(searchParams.get('tab'), allowedTabs),
+    [searchParams, allowedTabs],
+  );
   const denomsTab = tab === 'denoms';
 
   const setTab = useCallback(
@@ -52,26 +75,32 @@ export function CertificatesHubClient() {
         compact
         activeId={tab}
         onChange={(id) => setTab(id as CertificatesHubTab)}
-        items={TAB_ITEMS}
+        items={tabItems}
         end={
-          <span className={denomsTab ? undefined : tabStyles.endSlotHidden}>
-            <AdminCompactBtn
-              type="button"
-              variant="accent"
-              onClick={() => setCreateDenomOpen(true)}
-              tabIndex={denomsTab ? 0 : -1}
-              aria-hidden={!denomsTab}
-            >
-              Создать
-            </AdminCompactBtn>
-          </span>
+          canCertificatesCatalog ? (
+            <span className={denomsTab ? undefined : tabStyles.endSlotHidden}>
+              <AdminCompactBtn
+                type="button"
+                variant="accent"
+                onClick={() => setCreateDenomOpen(true)}
+                tabIndex={denomsTab ? 0 : -1}
+                aria-hidden={!denomsTab}
+              >
+                Создать
+              </AdminCompactBtn>
+            </span>
+          ) : undefined
         }
       />
       {tab === 'list' ? <CertificateListClient /> : null}
-      {tab === 'issue' ? (
-        <CertificateIssueClient onGoToDenoms={() => setTab('denoms')} />
+      {tab === 'issue' && canCertificatesFinance ? (
+        <CertificateIssueClient
+          onGoToDenoms={
+            canCertificatesCatalog ? () => setTab('denoms') : undefined
+          }
+        />
       ) : null}
-      {tab === 'denoms' ? (
+      {tab === 'denoms' && canCertificatesCatalog ? (
         <DenominationListClient
           createOpen={createDenomOpen}
           onCreateOpenChange={setCreateDenomOpen}

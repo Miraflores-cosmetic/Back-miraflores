@@ -4,15 +4,30 @@ import { OrderStatus } from '@prisma/client';
 import { OrdersAdminService } from './orders-admin.service';
 
 const releaseGiftCertificateForOrder = vi.fn(async () => true);
+const revokeGiftCertificatesIssuedByPurchaseOrder = vi.fn(async () => 1);
 
 vi.mock('../gift-certificates/gift-certificate-hold.util', () => ({
   releaseGiftCertificateForOrder: (...args: unknown[]) =>
     releaseGiftCertificateForOrder(...args),
 }));
 
+vi.mock('../gift-certificates/gift-certificate-purchase.util', async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import('../gift-certificates/gift-certificate-purchase.util')
+  >();
+  return {
+    ...actual,
+    revokeGiftCertificatesIssuedByPurchaseOrder: (...args: unknown[]) =>
+      revokeGiftCertificatesIssuedByPurchaseOrder(...args),
+  };
+});
+
 const order = {
   findUnique: vi.fn(),
   update: vi.fn(),
+};
+const giftCertificate = {
+  findMany: vi.fn().mockResolvedValue([]),
 };
 const payment = {
   updateMany: vi.fn(),
@@ -22,6 +37,9 @@ const payment = {
 };
 const orderEvent = {
   create: vi.fn(),
+};
+const promoCodeRedemption = {
+  deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
 };
 const productVariant = {
   update: vi.fn(),
@@ -33,7 +51,9 @@ const tx = {
   order,
   payment,
   orderEvent,
+  promoCodeRedemption,
   productVariant,
+  giftCertificate,
   $executeRaw,
   $queryRaw,
 };
@@ -71,12 +91,15 @@ const prisma = {
   order: {
     findUnique: vi.fn(),
     findUniqueOrThrow: vi.fn(),
+    update: vi.fn().mockResolvedValue({}),
   },
 };
 
 const lifecycle = {
   addEvent: vi.fn(async () => ({})),
   notifyCustomer: vi.fn(async () => undefined),
+  notifyOrderRefund: vi.fn(async () => undefined),
+  notifyOrderCancelled: vi.fn(async () => undefined),
 };
 
 const yookassa = {
@@ -213,13 +236,19 @@ describe('OrdersAdminService.refund + gift RELEASE', () => {
     order.update.mockReset();
     payment.updateMany.mockReset();
     productVariant.update.mockReset();
+    giftCertificate.findMany.mockReset();
+    giftCertificate.findMany.mockResolvedValue([]);
     $executeRaw.mockReset();
     $queryRaw.mockReset();
     $queryRaw.mockResolvedValue([{ id: 'o1' }]);
     releaseGiftCertificateForOrder.mockClear();
     releaseGiftCertificateForOrder.mockResolvedValue(true);
+    revokeGiftCertificatesIssuedByPurchaseOrder.mockClear();
+    revokeGiftCertificatesIssuedByPurchaseOrder.mockResolvedValue(1);
     lifecycle.addEvent.mockClear();
     lifecycle.notifyCustomer.mockClear();
+    lifecycle.notifyOrderRefund.mockClear();
+    prisma.order.update.mockClear();
     prisma.$transaction.mockImplementation(async (fn: (t: typeof tx) => unknown) =>
       fn(tx),
     );
@@ -251,7 +280,7 @@ describe('OrdersAdminService.refund + gift RELEASE', () => {
       refundedAmount: 0,
       giftCertificateAmount: 2000,
       items: [{ variantId: 'v1', qty: 1 }],
-      payments: [],
+      payments: [{ id: 'p1', amount: 3000, status: 'SUCCEEDED', provider: 'yookassa' }],
     });
     order.update.mockResolvedValue({});
 
@@ -272,7 +301,7 @@ describe('OrdersAdminService.refund + gift RELEASE', () => {
     );
   });
 
-  it('частичный refund карты → без RELEASE', async () => {
+  it('частичный refund при gift → запрет (политика: только full)', async () => {
     order.findUnique.mockResolvedValue({
       id: 'o1',
       number: 'JCOS-1',
@@ -282,21 +311,18 @@ describe('OrdersAdminService.refund + gift RELEASE', () => {
       refundedAmount: 0,
       giftCertificateAmount: 2000,
       items: [{ variantId: 'v1', qty: 1 }],
-      payments: [],
+      payments: [{ id: 'p1', amount: 3000, status: 'SUCCEEDED', provider: 'yookassa' }],
     });
     order.update.mockResolvedValue({});
 
-    await service.refund('o1', 'admin1', { amount: 1000 });
+    await expect(
+      service.refund('o1', 'admin1', { amount: 1000 }),
+    ).rejects.toMatchObject({
+      message: expect.stringMatching(/только полный возврат/i),
+    });
 
     expect(releaseGiftCertificateForOrder).not.toHaveBeenCalled();
-    expect(order.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          status: OrderStatus.PAID,
-          refundedAmount: 1000,
-        }),
-      }),
-    );
+    expect(order.update).not.toHaveBeenCalled();
   });
 
   it('gift-only (total 0) → RELEASE при refund 0', async () => {
@@ -324,5 +350,100 @@ describe('OrdersAdminService.refund + gift RELEASE', () => {
         }),
       }),
     );
+  });
+
+  it('gift purchase order → revoke issued codes on full refund', async () => {
+    order.findUnique.mockResolvedValue({
+      id: 'o-purchase',
+      number: 'JCOS-GC-1',
+      status: OrderStatus.PAID,
+      email: 'buyer@b.com',
+      total: 5000,
+      refundedAmount: 0,
+      giftCertificateAmount: 0,
+      giftPurchaseDenominationId: 'denom1',
+      items: [{ variantId: null, qty: 1 }],
+      payments: [
+        {
+          id: 'p1',
+          provider: 'yookassa',
+          externalId: 'yk-1',
+          amount: 5000,
+          status: 'SUCCEEDED',
+        },
+      ],
+    });
+    order.update.mockResolvedValue({});
+    // pre-check before PSP: unused codes
+    giftCertificate.findMany.mockResolvedValue([
+      {
+        id: 'c1',
+        code: 'JC-OK',
+        faceValue: 5000,
+        balance: 5000,
+        status: 'ACTIVE',
+      },
+    ]);
+
+    await service.refund('o-purchase', 'admin1', {});
+
+    expect(releaseGiftCertificateForOrder).not.toHaveBeenCalled();
+    expect(revokeGiftCertificatesIssuedByPurchaseOrder).toHaveBeenCalledWith(
+      expect.anything(),
+      'o-purchase',
+      expect.objectContaining({
+        actorUserId: 'admin1',
+        note: expect.stringContaining('возврате'),
+      }),
+    );
+    expect(order.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: OrderStatus.REFUNDED,
+          refundedAmount: 5000,
+        }),
+      }),
+    );
+  });
+
+  it('gift purchase after redeem → block refund (no clawback)', async () => {
+    order.findUnique.mockResolvedValue({
+      id: 'o-purchase',
+      number: 'JCOS-GC-2',
+      status: OrderStatus.PAID,
+      email: 'buyer@b.com',
+      total: 5000,
+      refundedAmount: 0,
+      giftCertificateAmount: 0,
+      giftPurchaseDenominationId: 'denom1',
+      items: [{ variantId: null, qty: 1 }],
+      payments: [
+        {
+          id: 'p1',
+          provider: 'yookassa',
+          externalId: 'yk-2',
+          amount: 5000,
+          status: 'SUCCEEDED',
+        },
+      ],
+    });
+    giftCertificate.findMany.mockResolvedValue([
+      {
+        id: 'c1',
+        code: 'JC-SPENT',
+        faceValue: 5000,
+        balance: 1000,
+        status: 'ACTIVE',
+      },
+    ]);
+
+    await expect(
+      service.refund('o-purchase', 'admin1', { providerRefund: true }),
+    ).rejects.toMatchObject({
+      message: expect.stringMatching(/уже использованы/i),
+    });
+
+    expect(revokeGiftCertificatesIssuedByPurchaseOrder).not.toHaveBeenCalled();
+    expect(order.update).not.toHaveBeenCalled();
   });
 });

@@ -18,6 +18,10 @@ import {
   parseJcosAddressMeta,
 } from '@/lib/shipping/addressShippingMeta';
 import type { BuyerOrderDetail } from './accountTypes';
+import {
+  GIFT_HOLD_ACCOUNT_UNPAID,
+  GIFT_HOLD_RESERVED,
+} from '@/lib/giftHoldCopy';
 import styles from './AccountPage.module.css';
 
 type Props = { orderId: string };
@@ -238,6 +242,15 @@ export function AccountOrderDetailClient({ orderId }: Props) {
         </p>
       ) : null}
 
+      {canPay && (order.giftCertificateAmount ?? 0) > 0 ? (
+        <p className={styles.orderMetaComment} role="status">
+          {GIFT_HOLD_ACCOUNT_UNPAID}
+          {order.giftCertificateCode
+            ? ` Код: ${order.giftCertificateCode}.`
+            : ''}
+        </p>
+      ) : null}
+
       {(order.refundedAmount ?? 0) > 0 ? (
         <p className={styles.orderMetaComment}>
           Возвращено: {formatRub(order.refundedAmount ?? 0)}
@@ -315,6 +328,15 @@ export function AccountOrderDetailClient({ orderId }: Props) {
             <dd>−{formatRub(order.discountTotal)}</dd>
           </div>
         ) : null}
+        {(order.giftCertificateAmount ?? 0) > 0 ? (
+          <div className={styles.orderMetaRow}>
+            <dt>
+              Сертификат
+              {order.giftCertificateCode ? ` (${order.giftCertificateCode})` : ''}
+            </dt>
+            <dd>−{formatRub(order.giftCertificateAmount ?? 0)}</dd>
+          </div>
+        ) : null}
         {order.shippingCost > 0 ? (
           <div className={styles.orderMetaRow}>
             <dt>Доставка</dt>
@@ -337,6 +359,11 @@ export function AccountOrderDetailClient({ orderId }: Props) {
               <p className={styles.sectionHint}>
                 Оплатите заказ {order.number} через ЮKassa.
               </p>
+              {(order.giftCertificateAmount ?? 0) > 0 ? (
+                <p className={styles.sectionHint} role="status">
+                  {GIFT_HOLD_RESERVED}
+                </p>
+              ) : null}
               <YooKassaWidget
                 confirmationToken={confirmationToken!}
                 paymentId={paymentId}

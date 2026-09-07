@@ -98,7 +98,17 @@ type CartContextValue = {
   total: number;
   promo: AppliedPromo | null;
   promoBusy: boolean;
-  applyPromo: (code: string) => Promise<{ ok: true } | { ok: false; message: string }>;
+  applyPromo: (
+    code: string,
+    opts?: { shippingRub?: number | null },
+  ) => Promise<
+    | { ok: true; kind: 'promo' | 'gift' }
+    | { ok: false; message: string }
+  >;
+  /** Пересчёт gift с актуальной доставкой (checkout). */
+  revalidatePromoForShipping: (
+    shippingRub: number | null,
+  ) => Promise<void>;
   clearPromo: () => void;
   open: boolean;
   hydrated: boolean;
@@ -255,23 +265,10 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const listSubtotal = useMemo(() => computeListSubtotal(items), [items]);
   const catalogDiscount = useMemo(() => computeCatalogDiscount(items), [items]);
 
-  const refreshPromo = useCallback(async (code: string, amount: number) => {
-    const trimmed = code.trim();
-    if (!trimmed) {
-      setPromo(null);
-      promoCodeRef.current = null;
-      try {
-        window.localStorage.removeItem(PROMO_STORAGE_KEY);
-      } catch {
-        /* ignore */
-      }
-      return { ok: false as const, message: 'Введите промокод или сертификат' };
-    }
-    const appliedNorm = (promoCodeRef.current?.code ?? '').trim().toUpperCase();
-    const requestNorm = trimmed.toUpperCase();
-
-    const clearIfSameApplied = (isClientReject: boolean) => {
-      if (isClientReject && appliedNorm && appliedNorm === requestNorm) {
+  const refreshPromo = useCallback(
+    async (code: string, goodsAmount: number, shippingRub?: number | null) => {
+      const trimmed = code.trim();
+      if (!trimmed) {
         setPromo(null);
         promoCodeRef.current = null;
         try {
@@ -279,112 +276,150 @@ export function CartProvider({ children }: { children: ReactNode }) {
         } catch {
           /* ignore */
         }
+        return { ok: false as const, message: 'Введите промокод или сертификат' };
       }
-    };
+      const appliedNorm = (promoCodeRef.current?.code ?? '').trim().toUpperCase();
+      const requestNorm = trimmed.toUpperCase();
 
-    try {
-      // 1) Подарочный сертификат
-      const giftRes = await fetch('/api/public/gift-certificates/validate', {
-        method: 'POST',
-        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: trimmed, payableBeforeGift: amount }),
-        cache: 'no-store',
-      });
-      const giftData = (await giftRes.json().catch(() => ({}))) as {
-        message?: string | string[];
-        kind?: string;
-        code?: string;
-        applyAmount?: number;
-      };
-      if (giftRes.ok && giftData.kind === 'gift') {
-        const applyAmount =
-          typeof giftData.applyAmount === 'number' && Number.isFinite(giftData.applyAmount)
-            ? giftData.applyAmount
-            : 0;
-        if (applyAmount >= 1) {
-          const next: AppliedPromo = {
-            kind: 'gift',
-            code: giftData.code ?? trimmed.toUpperCase(),
-            type: 'GIFT',
-            value: applyAmount,
-            discountAmount: applyAmount,
-          };
-          setPromo(next);
-          promoCodeRef.current = { code: next.code, kind: 'gift' };
-          return { ok: true as const };
+      const clearIfSameApplied = (isClientReject: boolean) => {
+        if (isClientReject && appliedNorm && appliedNorm === requestNorm) {
+          setPromo(null);
+          promoCodeRef.current = null;
+          try {
+            window.localStorage.removeItem(PROMO_STORAGE_KEY);
+          } catch {
+            /* ignore */
+          }
         }
-      }
+      };
 
-      // 2) Промокод
-      const res = await fetch('/api/public/promo/validate', {
-        method: 'POST',
-        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          code: trimmed,
-          subtotal: amount,
-          guestId: getOrCreateGuestId() || undefined,
-        }),
-        cache: 'no-store',
-      });
-      const data = (await res.json().catch(() => ({}))) as {
-        message?: string | string[];
-        code?: string;
-        type?: string;
-        value?: number;
-        discountAmount?: number;
-      };
-      if (!res.ok) {
-        const giftMsg = Array.isArray(giftData.message)
-          ? giftData.message[0]
-          : typeof giftData.message === 'string'
-            ? giftData.message
-            : null;
-        const msg = Array.isArray(data.message)
-          ? data.message[0]
-          : typeof data.message === 'string'
-            ? data.message
-            : giftMsg || 'Код недействителен';
-        const isClientReject = res.status >= 400 && res.status < 500;
-        clearIfSameApplied(isClientReject);
-        return {
-          ok: false as const,
-          message: isClientReject ? msg || 'Код недействителен' : 'Не удалось проверить код',
+      const goods = Math.max(0, Math.floor(goodsAmount));
+      const ship = Math.max(0, Math.floor(shippingRub ?? 0));
+
+      try {
+        // 1) Подарочный сертификат — payable = товары + доставка (как на create).
+        const giftRes = await fetch('/api/public/gift-certificates/validate', {
+          method: 'POST',
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            code: trimmed,
+            payableBeforeGift: goods + ship,
+          }),
+          cache: 'no-store',
+        });
+        const giftData = (await giftRes.json().catch(() => ({}))) as {
+          message?: string | string[];
+          kind?: string;
+          code?: string;
+          applyAmount?: number;
         };
+        if (giftRes.ok && giftData.kind === 'gift') {
+          const applyAmount =
+            typeof giftData.applyAmount === 'number' && Number.isFinite(giftData.applyAmount)
+              ? giftData.applyAmount
+              : 0;
+          if (applyAmount >= 1) {
+            const next: AppliedPromo = {
+              kind: 'gift',
+              code: giftData.code ?? trimmed.toUpperCase(),
+              type: 'GIFT',
+              value: applyAmount,
+              discountAmount: applyAmount,
+            };
+            setPromo(next);
+            promoCodeRef.current = { code: next.code, kind: 'gift' };
+            return { ok: true as const, kind: 'gift' as const };
+          }
+        }
+
+        // 2) Промокод — только товары.
+        const res = await fetch('/api/public/promo/validate', {
+          method: 'POST',
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            code: trimmed,
+            subtotal: goods,
+            guestId: getOrCreateGuestId() || undefined,
+          }),
+          cache: 'no-store',
+        });
+        const data = (await res.json().catch(() => ({}))) as {
+          message?: string | string[];
+          code?: string;
+          type?: string;
+          value?: number;
+          discountAmount?: number;
+        };
+        if (!res.ok) {
+          const giftMsg = Array.isArray(giftData.message)
+            ? giftData.message[0]
+            : typeof giftData.message === 'string'
+              ? giftData.message
+              : null;
+          const msg = Array.isArray(data.message)
+            ? data.message[0]
+            : typeof data.message === 'string'
+              ? data.message
+              : giftMsg || 'Код недействителен';
+          const isClientReject = res.status >= 400 && res.status < 500;
+          clearIfSameApplied(isClientReject);
+          return {
+            ok: false as const,
+            message: isClientReject ? msg || 'Код недействителен' : 'Не удалось проверить код',
+          };
+        }
+        if (data.type !== 'PERCENT' && data.type !== 'FIXED') {
+          return { ok: false as const, message: 'Некорректный ответ сервера' };
+        }
+        if (typeof data.value !== 'number' || !Number.isFinite(data.value)) {
+          return { ok: false as const, message: 'Некорректный ответ сервера' };
+        }
+        const next: AppliedPromo = {
+          kind: 'promo',
+          code: data.code ?? trimmed.toUpperCase(),
+          type: data.type,
+          value: data.value,
+          discountAmount:
+            typeof data.discountAmount === 'number' && Number.isFinite(data.discountAmount)
+              ? data.discountAmount
+              : 0,
+        };
+        setPromo(next);
+        promoCodeRef.current = { code: next.code, kind: 'promo' };
+        return { ok: true as const, kind: 'promo' as const };
+      } catch {
+        return { ok: false as const, message: 'Не удалось проверить код' };
       }
-      if (data.type !== 'PERCENT' && data.type !== 'FIXED') {
-        return { ok: false as const, message: 'Некорректный ответ сервера' };
-      }
-      if (typeof data.value !== 'number' || !Number.isFinite(data.value)) {
-        return { ok: false as const, message: 'Некорректный ответ сервера' };
-      }
-      const next: AppliedPromo = {
-        kind: 'promo',
-        code: data.code ?? trimmed.toUpperCase(),
-        type: data.type,
-        value: data.value,
-        discountAmount:
-          typeof data.discountAmount === 'number' && Number.isFinite(data.discountAmount)
-            ? data.discountAmount
-            : 0,
-      };
-      setPromo(next);
-      promoCodeRef.current = { code: next.code, kind: 'promo' };
-      return { ok: true as const };
-    } catch {
-      return { ok: false as const, message: 'Не удалось проверить код' };
-    }
-  }, []);
+    },
+    [],
+  );
 
   const applyPromo = useCallback(
-    async (code: string) => {
+    async (code: string, opts?: { shippingRub?: number | null }) => {
       setPromoBusy(true);
       try {
-        return await refreshPromo(code, subtotal);
+        return await refreshPromo(code, subtotal, opts?.shippingRub);
       } finally {
         setPromoBusy(false);
       }
     },
     [refreshPromo, subtotal],
+  );
+
+  const revalidatePromoForShipping = useCallback(
+    async (shippingRub: number | null) => {
+      const code = promo?.code ?? promoCodeRef.current?.code;
+      const kind = promo?.kind ?? promoCodeRef.current?.kind;
+      if (!code || kind !== 'gift') return;
+      if (shippingRub == null) return;
+      setPromoBusy(true);
+      try {
+        await refreshPromo(code, subtotal, shippingRub);
+      } finally {
+        setPromoBusy(false);
+      }
+    },
+    [promo?.code, promo?.kind, refreshPromo, subtotal],
   );
 
   const clearPromo = useCallback(() => {
@@ -397,7 +432,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Пересчёт при изменении суммы / восстановление из storage.
+  // Пересчёт при изменении суммы / восстановление из storage (без shipping — drawer).
   useEffect(() => {
     if (!hydrated) return;
     const stored = promo?.code
@@ -663,6 +698,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
         : null,
       promoBusy,
       applyPromo,
+      revalidatePromoForShipping,
       clearPromo,
       open,
       hydrated,
@@ -690,6 +726,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       promo,
       promoBusy,
       applyPromo,
+      revalidatePromoForShipping,
       clearPromo,
       open,
       hydrated,

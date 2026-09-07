@@ -10,6 +10,7 @@ function makePrisma() {
       create: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(),
+      aggregate: vi.fn().mockResolvedValue({ _max: { sortOrder: 0 } }),
     },
     giftCertificate: {
       findUnique: vi.fn(),
@@ -21,8 +22,8 @@ function makePrisma() {
     },
     giftCertificateLedger: {
       create: vi.fn(),
-      findMany: vi.fn(),
-      count: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
+      count: vi.fn().mockResolvedValue(0),
     },
     user: {
       findUnique: vi.fn(),

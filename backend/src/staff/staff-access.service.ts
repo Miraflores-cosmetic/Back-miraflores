@@ -136,10 +136,11 @@ export class StaffAccessService implements OnModuleInit, OnModuleDestroy {
     role: string,
     pathOnly: string,
     tokenVersion?: number,
+    method?: string,
   ): Promise<boolean> {
     if (role !== UserRole.ADMIN && role !== UserRole.MODERATOR) return false;
 
-    const target = resolveAdminSectionFromApiPath(pathOnly);
+    const target = resolveAdminSectionFromApiPath(pathOnly, method);
     if (target == null) return false;
     if (target === 'staff') return role === UserRole.ADMIN;
 
@@ -148,6 +149,11 @@ export class StaffAccessService implements OnModuleInit, OnModuleDestroy {
     if (role === UserRole.ADMIN) return snapshot.role === UserRole.ADMIN;
 
     const sections = this.effectiveSections(UserRole.MODERATOR, snapshot.adminSections);
+    if (target === 'certificates_read') {
+      return (
+        sections.includes('certificates') || sections.includes('certificates_finance')
+      );
+    }
     return sections.includes(target);
   }
 

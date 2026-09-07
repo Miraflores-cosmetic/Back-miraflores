@@ -93,8 +93,9 @@ export async function findUsableGiftCertificate(
 }
 
 /**
- * Soft-hold: CAPTURE баланса под заказ (FOR UPDATE).
- * RELEASE — при abandon/cancel/TTL.
+ * Резерв (CAPTURE) баланса под заказ при create (FOR UPDATE).
+ * Баланс уменьшается сразу — до оплаты или отмены/TTL (~60 мин).
+ * RELEASE — при abandon/cancel/TTL/full refund.
  */
 export async function holdGiftCertificateForOrder(
   tx: Prisma.TransactionClient,
@@ -156,7 +157,11 @@ export async function holdGiftCertificateForOrder(
   });
 }
 
-/** Идемпотентный RELEASE по orderId (если был CAPTURE без RELEASE). */
+/**
+ * Идемпотентный RELEASE по orderId (CAPTURE без RELEASE на этот certificateId).
+ * REVOKED: баланс не восстанавливаем, но пишем RELEASE — иначе hold «сгорает»
+ * без закрытия в ledger и повторные попытки не догоняют остальные CAPTURE.
+ */
 export async function releaseGiftCertificateForOrder(
   tx: Prisma.TransactionClient,
   orderId: string,
@@ -169,14 +174,17 @@ export async function releaseGiftCertificateForOrder(
     });
     if (!captures.length) return false;
 
-    const releases = await tx.giftCertificateLedger.count({
+    const alreadyReleased = await tx.giftCertificateLedger.findMany({
       where: { orderId, kind: GiftCertificateLedgerKind.RELEASE },
+      select: { certificateId: true },
     });
-    if (releases > 0) return false;
+    const releasedCertIds = new Set(alreadyReleased.map((r) => r.certificateId));
 
     const note = opts?.note?.trim() || 'Возврат при отмене заказа';
     let released = false;
     for (const cap of captures) {
+      if (releasedCertIds.has(cap.certificateId)) continue;
+
       const restore = Math.abs(cap.amount);
       if (restore <= 0) continue;
 
@@ -188,7 +196,22 @@ export async function releaseGiftCertificateForOrder(
       `;
       const row = locked[0];
       if (!row) continue;
-      if (row.status === GiftCertificateStatus.REVOKED) continue;
+
+      if (row.status === GiftCertificateStatus.REVOKED) {
+        await tx.giftCertificateLedger.create({
+          data: {
+            certificateId: row.id,
+            kind: GiftCertificateLedgerKind.RELEASE,
+            amount: restore,
+            balanceAfter: 0,
+            orderId,
+            note: `${note} (сертификат отозван — баланс не восстановлен)`,
+          },
+        });
+        releasedCertIds.add(row.id);
+        released = true;
+        continue;
+      }
 
       const nextBalance = row.balance + restore;
       const expired =
@@ -211,10 +234,60 @@ export async function releaseGiftCertificateForOrder(
           note,
         },
       });
+      releasedCertIds.add(row.id);
       released = true;
     }
     return released;
   });
+}
+
+/**
+ * Закрыть открытые CAPTURE сертификата RELEASE-ами без восстановления баланса.
+ * Нужен при REVOKED (admin revoke / purchase refund), иначе hold «висит» в ledger.
+ */
+export async function closeOpenGiftCapturesOnRevoke(
+  tx: Prisma.TransactionClient,
+  certificateId: string,
+  opts?: { actorUserId?: string | null; note?: string },
+): Promise<number> {
+  const openCaptures = await tx.giftCertificateLedger.findMany({
+    where: {
+      certificateId,
+      kind: GiftCertificateLedgerKind.CAPTURE,
+      orderId: { not: null },
+    },
+    select: { orderId: true, amount: true },
+  });
+  const note =
+    opts?.note?.trim() ||
+    'Закрытие hold при отзыве сертификата (баланс не восстановлен)';
+  let n = 0;
+  for (const cap of openCaptures) {
+    if (!cap.orderId) continue;
+    const hasRelease = await tx.giftCertificateLedger.count({
+      where: {
+        certificateId,
+        orderId: cap.orderId,
+        kind: GiftCertificateLedgerKind.RELEASE,
+      },
+    });
+    if (hasRelease > 0) continue;
+    const restore = Math.abs(cap.amount);
+    if (restore < 1) continue;
+    await tx.giftCertificateLedger.create({
+      data: {
+        certificateId,
+        kind: GiftCertificateLedgerKind.RELEASE,
+        amount: restore,
+        balanceAfter: 0,
+        orderId: cap.orderId,
+        actorUserId: opts?.actorUserId ?? null,
+        note,
+      },
+    });
+    n += 1;
+  }
+  return n;
 }
 
 /**

@@ -12,6 +12,11 @@ import { FloatingTextField } from '@/components/FloatingTextField/FloatingTextFi
 import { trapFocusKeydown } from '@/lib/focusTrap';
 import { sanitizeProductHtml } from '@/lib/sanitizeProductHtml';
 import { CART_SETTINGS_DEFAULTS, normalizeCartSettings } from '@/lib/cartSettings';
+import { useToast } from '@/components/Toast/ToastProvider';
+import {
+  GIFT_HOLD_APPLIED_TOAST,
+  GIFT_HOLD_WILL_RESERVE,
+} from '@/lib/giftHoldCopy';
 import styles from './CartDrawer.module.css';
 
 function CloseIcon() {
@@ -35,6 +40,7 @@ function motionMs(full: number) {
 
 export function CartDrawer() {
   const router = useRouter();
+  const { showToast } = useToast();
   const {
     open,
     closeCart,
@@ -178,7 +184,7 @@ export function CartDrawer() {
     void (async () => {
       const code = promoInput.trim();
       if (!code) {
-        setPromoError('Введите промокод');
+        setPromoError('Введите промокод или сертификат');
         return;
       }
       const result = await applyPromo(code);
@@ -187,6 +193,9 @@ export function CartDrawer() {
         return;
       }
       setPromoError(undefined);
+      if (result.kind === 'gift') {
+        showToast(GIFT_HOLD_APPLIED_TOAST, 4000);
+      }
     })();
   };
 
@@ -316,7 +325,7 @@ export function CartDrawer() {
             <footer className={styles.footer}>
               <div className={styles.promoRow}>
                 <FloatingTextField
-                  label="Промокод"
+                  label="Промокод или сертификат"
                   value={promoInput}
                   onChange={(e) => {
                     setPromoInput(e.target.value);
@@ -350,6 +359,12 @@ export function CartDrawer() {
                   </button>
                 )}
               </div>
+
+              {promo?.kind === 'gift' ? (
+                <p className={styles.giftHoldNote} role="note">
+                  {GIFT_HOLD_WILL_RESERVE}
+                </p>
+              ) : null}
 
               {discountAmount > 0 || catalogDiscount > 0 ? (
                 <CartOrderTotals

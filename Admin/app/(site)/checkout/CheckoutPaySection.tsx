@@ -2,6 +2,7 @@
 
 import { YooKassaWidget } from '@/components/YooKassaWidget/YooKassaWidget';
 import { formatRub } from '@/lib/publicCatalog';
+import { GIFT_HOLD_RESERVED } from '@/lib/giftHoldCopy';
 import styles from './CheckoutPage.module.css';
 
 type Props = {
@@ -14,6 +15,8 @@ type Props = {
   confirmationToken: string | null;
   paymentId: string | null;
   payToken?: string | null;
+  /** CAPTURE уже на балансе (gift при create). */
+  giftHoldActive?: boolean;
   onPaymentSuccess: () => void;
   onPaymentError: () => void;
   onCancelPayment?: () => void;
@@ -28,6 +31,7 @@ export function CheckoutPaySection({
   confirmationToken,
   paymentId,
   payToken,
+  giftHoldActive = false,
   onPaymentSuccess,
   onPaymentError,
   onCancelPayment,
@@ -49,6 +53,11 @@ export function CheckoutPaySection({
             Заказ {orderNumber}. Оплатите картой или другим способом через ЮKassa.
             Чтобы изменить адрес или состав — отмените оплату.
           </p>
+          {giftHoldActive ? (
+            <p className={styles.giftHoldNote} role="status">
+              {GIFT_HOLD_RESERVED}
+            </p>
+          ) : null}
           <YooKassaWidget
             confirmationToken={confirmationToken!}
             paymentId={paymentId}

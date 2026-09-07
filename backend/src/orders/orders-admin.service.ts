@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
+  GiftCertificateStatus,
   OrderStatus,
   PaymentStatus,
   Prisma,
@@ -22,6 +23,11 @@ import { cancelUnpaidOrderInTx } from './cancel-unpaid-order';
 import { CarrierShipmentService } from './carrier-shipment.service';
 import { OrderLifecycleService } from './order-lifecycle.service';
 import { releaseGiftCertificateForOrder } from '../gift-certificates/gift-certificate-hold.util';
+import {
+  analyzeGiftPurchaseSpend,
+  assertGiftPurchaseCodesUnusedForRefund,
+  revokeGiftCertificatesIssuedByPurchaseOrder,
+} from '../gift-certificates/gift-certificate-purchase.util';
 import { giftPurchasePaidEmail } from '../gift-certificates/gift-purchase-email';
 import {
   canCancel,
@@ -295,6 +301,21 @@ export class OrdersAdminService {
     });
     if (!order) throw new NotFoundException('Заказ не найден');
 
+    const issuedGiftCertificates = order.giftPurchaseDenominationId
+      ? await this.prisma.giftCertificate.findMany({
+          where: { purchaseOrderId: id },
+          orderBy: { createdAt: 'asc' },
+          select: {
+            id: true,
+            code: true,
+            faceValue: true,
+            balance: true,
+            status: true,
+            expiresAt: true,
+          },
+        })
+      : [];
+
     void this.prisma.order
       .update({
         where: { id },
@@ -322,6 +343,10 @@ export class OrdersAdminService {
       ORDER_EDITABLE_STATUSES.includes(order.status) &&
       !order.giftPurchaseDenominationId;
     const hasShipment = order.shipments.length > 0;
+    const giftPurchaseSpend = order.giftPurchaseDenominationId
+      ? analyzeGiftPurchaseSpend(issuedGiftCertificates)
+      : { unused: true, spentCerts: [], spentTotal: 0 };
+    const giftPurchaseRefundBlocked = !giftPurchaseSpend.unused;
 
     return {
       id: order.id,
@@ -354,6 +379,9 @@ export class OrdersAdminService {
       giftCertificateCode: order.giftCertificateCode,
       giftPurchaseDenominationId: order.giftPurchaseDenominationId,
       giftPurchaseRecipientEmail: order.giftPurchaseRecipientEmail,
+      issuedGiftCertificates,
+      giftPurchaseRefundBlocked,
+      giftPurchaseSpentTotal: giftPurchaseSpend.spentTotal,
       total: order.total,
       refundedAmount: order.refundedAmount,
       refundRemaining: remaining,
@@ -429,7 +457,10 @@ export class OrdersAdminService {
         canShip: canShip(order.status),
         canSendTracking: canSendTracking(order.status),
         canDeliver: canDeliver(order.status),
-        canRefund: canRefund(order.status) && remaining > 0,
+        canRefund:
+          canRefund(order.status) &&
+          remaining > 0 &&
+          !giftPurchaseRefundBlocked,
         canEditAddress: canEditCore && !hasShipment,
         canEditItems: canEditCore,
         canCreateSurcharge:
@@ -471,9 +502,11 @@ export class OrdersAdminService {
       if (order && certs.length) {
         const mail = giftPurchasePaidEmail({
           orderNumber: result.number,
-          codes: certs.map((c) => c.code),
-          faceValue: certs[0]!.faceValue,
-          expiresAt: certs[0]!.expiresAt,
+          items: certs.map((c) => ({
+            code: c.code,
+            faceValue: c.faceValue,
+            expiresAt: c.expiresAt,
+          })),
           recipientEmail: order.giftPurchaseRecipientEmail || order.email,
           buyerEmail: order.email,
         });
@@ -1130,6 +1163,10 @@ export class OrdersAdminService {
   /**
    * Возврат: при providerRefund ЮKassa вызывается внутри tx до записи БД —
    * ошибка PSP откатывает транзакцию (нет «в системе возвращено / на карте нет»).
+   *
+   * Политика gift: при redeem/purchase частичный card refund запрещён.
+   * RELEASE / revoke issued codes — только на полный возврат. Ручная правка
+   * баланса — в admin «Сертификаты».
    */
   async refund(
     id: string,
@@ -1165,8 +1202,9 @@ export class OrdersAdminService {
           ),
         );
         const giftApplied = (order.giftCertificateAmount ?? 0) > 0;
-        // Карта уже вся возвращена, но сертификат ещё можно открутить (0 ₽ заказ / gift-only).
-        if (remainingCard <= 0 && !giftApplied) {
+        const isGiftPurchase = Boolean(order.giftPurchaseDenominationId);
+        // Карта уже вся возвращена, но ещё можно открутить redeem или отозвать purchase-коды.
+        if (remainingCard <= 0 && !giftApplied && !isGiftPurchase) {
           throw new BadRequestException('По заказу уже возвращена вся сумма');
         }
         if (remainingCard <= 0 && order.status === OrderStatus.REFUNDED) {
@@ -1175,11 +1213,13 @@ export class OrdersAdminService {
 
         let amount: number;
         if (remainingCard <= 0) {
-          // gift-only / card already 0: только RELEASE + REFUNDED
+          // gift-only / card already 0 / purchase revoke: только RELEASE/REVOKE + REFUNDED
           amount = 0;
           if (opts.amount != null && Math.round(opts.amount) !== 0) {
             throw new BadRequestException(
-              'По карте возвращать нечего — оформите полный возврат (0 ₽) для открутки сертификата',
+              isGiftPurchase
+                ? 'По карте возвращать нечего — оформите полный возврат (0 ₽) для отзыва кодов покупки'
+                : 'По карте возвращать нечего — оформите полный возврат (0 ₽) для открутки сертификата',
             );
           }
         } else {
@@ -1189,6 +1229,36 @@ export class OrdersAdminService {
               `Сумма возврата должна быть от 1 до ${remainingCard} ₽`,
             );
           }
+          // Политика: gift redeem / purchase — только полный card refund (иначе hold/balance
+          // и issued codes остаются в подвешенном состоянии без proportional RELEASE).
+          if (
+            amount < remainingCard &&
+            (giftApplied || isGiftPurchase)
+          ) {
+            throw new BadRequestException(
+              giftApplied
+                ? 'Заказ с подарочным сертификатом: доступен только полный возврат. Частичный возврат картой не трогает резерв сертификата — оформите полный refund или скорректируйте баланс вручную в «Сертификаты».'
+                : 'Покупка сертификата: доступен только полный возврат (иначе выданные коды не отзовутся). Частичный возврат запрещён.',
+            );
+          }
+        }
+
+        // До PSP: покупка сертификата с уже потраченным кодом — блок (нет clawback).
+        if (isGiftPurchase) {
+          const issued = await tx.giftCertificate.findMany({
+            where: {
+              purchaseOrderId: id,
+              status: { not: GiftCertificateStatus.REVOKED },
+            },
+            select: {
+              id: true,
+              code: true,
+              faceValue: true,
+              balance: true,
+              status: true,
+            },
+          });
+          assertGiftPurchaseCodesUnusedForRefund(issued);
         }
 
         const wantProvider = opts.providerRefund === true;
@@ -1234,10 +1304,10 @@ export class OrdersAdminService {
 
         const newRefunded = order.refundedAmount + amount;
         const paidSucceeded = sumSucceededPayments(order.payments);
-        // Полный возврат: вернули все успешные платежи (или gift-only 0₽).
+        // Полный возврат: вернули все успешные платежи (или gift-only / purchase revoke 0₽).
         const full =
           paidSucceeded <= 0
-            ? amount === 0 && Boolean(giftApplied)
+            ? amount === 0 && (giftApplied || isGiftPurchase)
             : newRefunded >= paidSucceeded;
         const nextStatus = full ? OrderStatus.REFUNDED : order.status;
 
@@ -1251,10 +1321,22 @@ export class OrdersAdminService {
           );
         }
 
+        let giftReleased = false;
+        let purchaseCodesRevoked = 0;
         if (full && giftApplied) {
-          await releaseGiftCertificateForOrder(tx, id, {
+          giftReleased = await releaseGiftCertificateForOrder(tx, id, {
             note: 'Возврат при полном refund заказа',
           });
+        }
+        if (full && isGiftPurchase) {
+          purchaseCodesRevoked = await revokeGiftCertificatesIssuedByPurchaseOrder(
+            tx,
+            id,
+            {
+              note: 'Отзыв кодов при возврате покупки сертификата',
+              actorUserId,
+            },
+          );
         }
 
         await tx.order.update({
@@ -1278,14 +1360,17 @@ export class OrdersAdminService {
           message: full
             ? amount > 0
               ? `Полный возврат ${amount} ₽`
-              : 'Полный возврат (сертификат)'
+              : isGiftPurchase
+                ? 'Полный возврат (отзыв кодов покупки)'
+                : 'Полный возврат (сертификат)'
             : `Частичный возврат ${amount} ₽`,
           actorUserId,
           meta: {
             amount,
             reason: opts.reason ?? null,
             full,
-            giftReleased: full && giftApplied,
+            giftReleased,
+            purchaseCodesRevoked,
             providerRequested: wantProvider,
             yookassaPaymentId: providerPaymentId,
             refundId: yookassaRefundId,

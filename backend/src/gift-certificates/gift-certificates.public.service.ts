@@ -18,9 +18,6 @@ import { GIFT_PURCHASE_SKU } from './gift-certificate-purchase.util';
 
 export type GiftValidateResult = {
   code: string;
-  certificateId: string;
-  faceValue: number;
-  balance: number;
   applyAmount: number;
   payableBeforeGift: number;
   total: number;
@@ -57,24 +54,33 @@ export class GiftCertificatesPublicService {
     });
   }
 
+  /**
+   * Публичная проверка кода для корзины.
+   * Не отдаёт balance/faceValue/certificateId и не различает причины отказа
+   * (anti-enumeration). Детали — только на create order.
+   */
   async validate(codeRaw: string, payableBeforeGift: number): Promise<GiftValidateResult> {
     await expireOverdueGiftCertificates(this.prisma);
     const payable = Math.max(0, Math.floor(payableBeforeGift));
-    const row = await findUsableGiftCertificate(this.prisma, codeRaw);
-    const applyAmount = computeGiftApplyAmount(row.balance, payable);
-    if (applyAmount < 1) {
-      throw new BadRequestException('Нечего оплачивать сертификатом');
+    try {
+      const row = await findUsableGiftCertificate(this.prisma, codeRaw);
+      const applyAmount = computeGiftApplyAmount(row.balance, payable);
+      if (applyAmount < 1) {
+        throw new BadRequestException('Нечего оплачивать сертификатом');
+      }
+      return {
+        kind: 'gift',
+        code: row.code,
+        applyAmount,
+        payableBeforeGift: payable,
+        total: Math.max(0, payable - applyAmount),
+      };
+    } catch (e) {
+      if (e instanceof BadRequestException) {
+        throw new BadRequestException('Неверный или недоступный код сертификата');
+      }
+      throw e;
     }
-    return {
-      kind: 'gift',
-      code: row.code,
-      certificateId: row.id,
-      faceValue: row.faceValue,
-      balance: row.balance,
-      applyAmount,
-      payableBeforeGift: payable,
-      total: Math.max(0, payable - applyAmount),
-    };
   }
 
   async applyForCheckout(

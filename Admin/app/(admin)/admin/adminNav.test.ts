@@ -46,14 +46,26 @@ describe('canSeeSection', () => {
     };
     expect(canSeeSection('orders', financeOnly)).toBe(true);
   });
+
+  it('certificates_finance видит пункт «Сертификаты»', () => {
+    const financeOnly: StaffContext = {
+      isSuperAdmin: false,
+      sections: ['certificates_finance'],
+      staffDisplayName: null,
+      staffAvatarUrl: null,
+    };
+    expect(canSeeSection('certificates', financeOnly)).toBe(true);
+  });
 });
 
 describe('filterAdminNav', () => {
   it('модератор с orders видит заказы, не видит каталог', () => {
     const nav = filterAdminNav(ADMIN_NAV, moderatorOrders);
-    const labels = nav.flatMap((item) =>
-      item.type === 'link' ? [item.label] : item.children.map((c) => c.label),
-    );
+    const labels = nav.flatMap((item) => {
+      if (item.type === 'link') return [item.label];
+      if (item.type === 'group') return item.children.map((c) => c.label);
+      return [];
+    });
     expect(labels).toContain('Заказы');
     expect(labels).not.toContain('Товары');
     expect(labels).not.toContain('Сотрудники');

@@ -1,15 +1,28 @@
 /**
- * Единый итог к оплате: товары (после промо) + доставка.
- * null — доставка ещё не готова (не показываем сумму «без shipping» на CTA).
+ * Единый итог к оплате.
+ * promo/нет: goodsAfterPromo + shipping.
+ * gift: max(0, goodsSubtotal + shipping − giftAmount) — сертификат гасит и доставку.
+ * null — доставка ещё не готова (кроме gift-only digital, shippingCost=0).
  */
 export function calcPayableTotal(opts: {
-  goodsTotal: number;
+  goodsSubtotal: number;
+  goodsAfterPromo?: number;
   shippingCost: number | null | undefined;
+  voucherKind?: 'promo' | 'gift' | null;
+  giftAmount?: number;
 }): number | null {
-  const goods = Math.max(0, Math.floor(opts.goodsTotal || 0));
+  const goods = Math.max(0, Math.floor(opts.goodsSubtotal || 0));
   if (opts.shippingCost == null || !Number.isFinite(opts.shippingCost)) {
     return null;
   }
   const shipping = Math.max(0, Math.floor(opts.shippingCost));
-  return goods + shipping;
+  if (opts.voucherKind === 'gift') {
+    const gift = Math.max(0, Math.floor(opts.giftAmount || 0));
+    return Math.max(0, goods + shipping - gift);
+  }
+  const afterPromo = Math.max(
+    0,
+    Math.floor(opts.goodsAfterPromo ?? goods),
+  );
+  return afterPromo + shipping;
 }

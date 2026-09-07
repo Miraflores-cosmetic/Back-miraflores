@@ -4,6 +4,10 @@ import { FloatingTextField } from '@/components/FloatingTextField/FloatingTextFi
 import { CartOrderTotals } from '@/components/CartOrderTotals/CartOrderTotals';
 import { formatRub } from '@/lib/publicCatalog';
 import type { CartLine } from '@/lib/cart/CartContext';
+import {
+  GIFT_HOLD_RESERVED,
+  GIFT_HOLD_WILL_RESERVE,
+} from '@/lib/giftHoldCopy';
 import styles from './CheckoutPage.module.css';
 
 type Props = {
@@ -117,6 +121,16 @@ export function CheckoutSummary({
               </button>
             )}
           </div>
+          {promoKind === 'gift' && !disabled ? (
+            <p className={styles.giftHoldNote} role="note">
+              {GIFT_HOLD_WILL_RESERVE}
+            </p>
+          ) : null}
+          {promoKind === 'gift' && disabled ? (
+            <p className={styles.giftHoldNote} role="status">
+              {GIFT_HOLD_RESERVED}
+            </p>
+          ) : null}
         </div>
 
         <div className={styles.totals}>
