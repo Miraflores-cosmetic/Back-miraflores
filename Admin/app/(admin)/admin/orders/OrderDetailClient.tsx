@@ -434,6 +434,15 @@ export function OrderDetailClient({
   const canMarkPaid = a.canMarkPaid && canOrdersFinance;
   const canRefund = a.canRefund && canOrdersFinance;
   const canSendTracking = Boolean(a.canSendTracking);
+  const carrierAlreadyCreated = Boolean(
+    order.shipments?.some(
+      (s) =>
+        Boolean(s.externalId) ||
+        s.status === 'registered' ||
+        s.status === 'registering' ||
+        s.status === 'shipped',
+    ),
+  );
 
   const primaryActions =
     canMarkPaid || a.canStartPacking || a.canDeliver || a.canCancel;
@@ -458,6 +467,7 @@ export function OrderDetailClient({
     .join(' · ');
 
   const events = order.events ?? [];
+  const supportNotes = events.filter((e) => e.type === 'NOTE');
   const visibleEvents = historyOpen ? events : events.slice(0, HISTORY_PREVIEW);
 
   return (
@@ -1193,25 +1203,33 @@ export function OrderDetailClient({
                         Заказ отправлен
                       </AdminCompactBtn>
                       {shipProvider === 'CDEK' ? (
-                        <AdminCompactBtn
-                          type="button"
-                          disabled={busy}
-                          onClick={() =>
-                            askConfirm({
-                              title: 'Создать в СДЭК',
-                              message: `Создать отправление СДЭК для заказа ${order.number} без смены статуса?`,
-                              confirmLabel: 'Создать',
-                              run: () =>
-                                runAction(
-                                  `orders/admin/${orderId}/register-carrier`,
-                                  { provider: shipProvider },
-                                  'Отправление создано у перевозчика',
-                                ),
-                            })
-                          }
-                        >
-                          Создать в СДЭК
-                        </AdminCompactBtn>
+                        <>
+                          {carrierAlreadyCreated ? (
+                            <p className={styles.orderHint}>
+                              Отправление у перевозчика уже создано — повторно
+                              «Создать в СДЭК» не нужно.
+                            </p>
+                          ) : null}
+                          <AdminCompactBtn
+                            type="button"
+                            disabled={busy || carrierAlreadyCreated}
+                            onClick={() =>
+                              askConfirm({
+                                title: 'Создать в СДЭК',
+                                message: `Создать отправление СДЭК для заказа ${order.number} без смены статуса?`,
+                                confirmLabel: 'Создать',
+                                run: () =>
+                                  runAction(
+                                    `orders/admin/${orderId}/register-carrier`,
+                                    { provider: shipProvider },
+                                    'Отправление создано у перевозчика',
+                                  ),
+                              })
+                            }
+                          >
+                            Создать в СДЭК
+                          </AdminCompactBtn>
+                        </>
                       ) : null}
                     </>
                   ) : null}
@@ -1396,6 +1414,28 @@ export function OrderDetailClient({
             onToggle={() => setOpenNote((v) => !v)}
           >
             <div className={styles.orderNoteForm}>
+              {supportNotes.length === 0 ? (
+                <p className={styles.orderHint} style={{ marginTop: 0 }}>
+                  Внутренние заметки саппорта. Каждая запись также попадает в
+                  историю заказа.
+                </p>
+              ) : (
+                <ul className={styles.orderNoteList}>
+                  {supportNotes.map((ev) => (
+                    <li key={ev.id} className={styles.orderNoteItem}>
+                      <div className={styles.orderNoteMeta}>
+                        <span>{formatAdminDateTime(ev.createdAt)}</span>
+                        {ev.actor ? (
+                          <span>
+                            {ev.actor.displayName?.trim() || ev.actor.email}
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className={styles.orderNoteText}>{ev.message}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
               <textarea
                 className={styles.orderNoteTextarea}
                 value={noteDraft}

@@ -168,9 +168,15 @@ describe('staffCanAccessAdminPath', () => {
 });
 
 describe('sectionsMissingCatalogHint', () => {
-  it('подсказывает catalog для discounts', () => {
+  it('подсказывает catalog для discounts / certificates / reviews', () => {
     expect(sectionsMissingCatalogHint(['discounts'])).toEqual(['discounts']);
     expect(sectionsMissingCatalogHint(['discounts', 'catalog'])).toEqual([]);
+    expect(sectionsMissingCatalogHint(['reviews'])).toEqual(['reviews']);
+    expect(sectionsMissingCatalogHint(['reviews', 'catalog'])).toEqual([]);
+    expect(sectionsMissingCatalogHint(['certificates', 'reviews'])).toEqual([
+      'certificates',
+      'reviews',
+    ]);
   });
 });
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useRef } from 'react';
+import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { PrimaryBtn } from '@/components/PrimaryBtn/PrimaryBtn';
 import { focusablesIn, trapFocusKeydown } from '@/lib/focusTrap';
 import styles from './ConfirmDialog.module.css';
@@ -13,6 +13,10 @@ type Props = {
   cancelLabel?: string;
   /** Money / destructive confirms. */
   danger?: boolean;
+  /** Extra controls (e.g. reject reason). */
+  children?: ReactNode;
+  /** Disable confirm (e.g. empty required reason). */
+  confirmDisabled?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 };
@@ -24,6 +28,8 @@ export function ConfirmDialog({
   confirmLabel = 'Подтвердить',
   cancelLabel = 'Отмена',
   danger = false,
+  children,
+  confirmDisabled = false,
   onConfirm,
   onCancel,
 }: Props) {
@@ -75,6 +81,7 @@ export function ConfirmDialog({
           {title}
         </h2>
         <p className={styles.message}>{message}</p>
+        {children ? <div className={styles.extra}>{children}</div> : null}
         <div className={styles.actions}>
           <button type="button" className={styles.cancel} onClick={onCancel}>
             {cancelLabel}
@@ -84,6 +91,7 @@ export function ConfirmDialog({
             className={[styles.confirm, danger ? styles.confirmDanger : '']
               .filter(Boolean)
               .join(' ')}
+            disabled={confirmDisabled}
             onClick={onConfirm}
           >
             {confirmLabel}

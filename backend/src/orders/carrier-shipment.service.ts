@@ -229,37 +229,95 @@ export class CarrierShipmentService {
     });
     const raw = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const msg =
-        (raw as { error?: string; message?: string })?.message ||
-        (raw as { error?: string })?.error ||
-        `СДЭК orders ${res.status}`;
+      const msg = this.formatCdekError(raw, `СДЭК orders ${res.status}`);
       this.logger.warn(`CDEK register failed for ${order.number}: ${msg}`);
-      throw new BadRequestException(
-        typeof msg === 'string' ? msg : 'СДЭК отклонил создание отправления',
-      );
+      throw new BadRequestException(msg);
     }
 
     const entity = (raw as { entity?: { uuid?: string; cdek_number?: string } })
       ?.entity;
     const requests = (
-      raw as { requests?: Array<{ state?: string; errors?: unknown }> }
+      raw as {
+        requests?: Array<{
+          state?: string;
+          errors?: Array<{ code?: string; message?: string }>;
+        }>;
+      }
     )?.requests;
     const failed = requests?.find((r) => r.state === 'INVALID');
     if (failed) {
+      const detail =
+        failed.errors
+          ?.map((e) => e.message || e.code)
+          .filter(Boolean)
+          .join('; ') || JSON.stringify(failed);
       this.logger.warn(
-        `CDEK register INVALID for ${order.number}: ${JSON.stringify(failed)}`,
+        `CDEK register INVALID for ${order.number}: ${detail}`,
       );
       throw new BadRequestException(
-        'СДЭК вернул INVALID при создании заказа — проверьте тариф / ПВЗ / склад',
+        `СДЭК отклонил заказ: ${detail}`.slice(0, 500),
       );
+    }
+
+    let tracking = entity?.cdek_number ? String(entity.cdek_number) : null;
+    const uuid = entity?.uuid || null;
+    if (uuid && !tracking) {
+      tracking = await this.pollCdekTracking(token, uuid);
     }
 
     return {
       provider: ShipmentProvider.CDEK,
-      externalId: entity?.uuid || null,
-      tracking: entity?.cdek_number ? String(entity.cdek_number) : null,
+      externalId: uuid,
+      tracking,
       raw,
     };
+  }
+
+  private formatCdekError(raw: unknown, fallback: string): string {
+    if (!raw || typeof raw !== 'object') return fallback;
+    const o = raw as {
+      message?: string;
+      error?: string;
+      errors?: Array<{ message?: string; code?: string }>;
+      requests?: Array<{ errors?: Array<{ message?: string; code?: string }> }>;
+    };
+    const fromRequests = o.requests
+      ?.flatMap((r) => r.errors || [])
+      .map((e) => e.message || e.code)
+      .filter(Boolean);
+    const fromErrors = o.errors
+      ?.map((e) => e.message || e.code)
+      .filter(Boolean);
+    const msg =
+      o.message ||
+      o.error ||
+      fromRequests?.[0] ||
+      fromErrors?.[0] ||
+      fallback;
+    return typeof msg === 'string' ? msg.slice(0, 500) : fallback;
+  }
+
+  /** cdek_number часто появляется с задержкой после create. */
+  private async pollCdekTracking(
+    token: string,
+    uuid: string,
+  ): Promise<string | null> {
+    for (let i = 0; i < 3; i++) {
+      await new Promise((r) => setTimeout(r, 700));
+      try {
+        const res = await fetch(`https://api.cdek.ru/v2/orders/${uuid}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const json = (await res.json().catch(() => ({}))) as {
+          entity?: { cdek_number?: string };
+        };
+        const n = json.entity?.cdek_number;
+        if (n) return String(n);
+      } catch {
+        /* ignore transient */
+      }
+    }
+    return null;
   }
 
   private buildCdekPackages(order: OrderForCarrierRegister) {

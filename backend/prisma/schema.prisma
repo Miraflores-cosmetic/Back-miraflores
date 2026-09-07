@@ -244,6 +244,9 @@ model ProductReview {
   moderatedById String?
   moderatedBy   User?     @relation("ReviewModerator", fields: [moderatedById], references: [id], onDelete: SetNull)
   moderatedAt   DateTime?
+  /// Soft-reject (не DELETE): снято с модерации / публикации с причиной
+  rejectedAt       DateTime?
+  rejectionReason  String?   @db.Text
   /// UUID из Saleor product_productreview.id — идемпотентный ETL
   saleorId      String?   @unique
   createdAt     DateTime  @default(now())
@@ -253,6 +256,7 @@ model ProductReview {
   @@index([userId])
   @@index([isPublished, createdAt])
   @@index([isPublished, sortOrder])
+  @@index([rejectedAt])
   /// Один отзыв на товар от покупателя (userId null — админ/ETL, несколько строк ок в PG)
   @@unique([productId, userId])
 }

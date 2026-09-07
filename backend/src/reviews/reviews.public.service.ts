@@ -45,6 +45,14 @@ export class ReviewsPublicService {
     private readonly storage: LocalStorageService,
   ) {}
 
+  async listMyReviewedProductIds(userId: string) {
+    const rows = await this.prisma.productReview.findMany({
+      where: { userId },
+      select: { productId: true },
+    });
+    return { productIds: rows.map((r) => r.productId) };
+  }
+
   async listByProductSlug(slug: string, opts?: { page?: number; limit?: number }) {
     const product = await this.prisma.product.findUnique({
       where: { slug },
@@ -230,6 +238,9 @@ export class ReviewsPublicService {
     if (text.length < 10) {
       throw new BadRequestException('Текст отзыва — минимум 10 символов');
     }
+    if (text.length > 2000) {
+      throw new BadRequestException('Текст отзыва — максимум 2000 символов');
+    }
 
     const resolvedOrderId = await this.resolveReviewableOrderId(
       userId,
@@ -294,19 +305,33 @@ export class ReviewsPublicService {
     if (!review || review.userId !== userId) {
       throw new NotFoundException('Отзыв не найден');
     }
+    if (review.isPublished) {
+      throw new BadRequestException('Нельзя изменить фото опубликованного отзыва');
+    }
     if (files.length > 2) throw new BadRequestException('Максимум 2 фото');
 
-    const urls: string[] = [];
+    const slots: (string | null)[] = [review.image1Url, review.image2Url];
+    const toDelete: string[] = [];
+    let replaceAt = 0;
+
     for (const file of files.slice(0, 2)) {
       const { url } = await this.storage.saveImage(file, `reviews/${reviewId}`);
-      urls.push(url);
+      const emptyIdx = slots.findIndex((s) => !s);
+      if (emptyIdx >= 0) {
+        slots[emptyIdx] = url;
+        continue;
+      }
+      const old = slots[replaceAt];
+      if (old) toDelete.push(old);
+      slots[replaceAt] = url;
+      replaceAt = (replaceAt + 1) % 2;
     }
 
     const row = await this.prisma.productReview.update({
       where: { id: reviewId },
       data: {
-        image1Url: urls[0] ?? review.image1Url,
-        image2Url: urls[1] ?? review.image2Url,
+        image1Url: slots[0],
+        image2Url: slots[1],
       },
       select: {
         id: true,
@@ -320,6 +345,13 @@ export class ReviewsPublicService {
         user: { select: { displayName: true } },
       },
     });
+
+    const keep = new Set([slots[0], slots[1]].filter((u): u is string => Boolean(u)));
+    for (const old of toDelete) {
+      if (!keep.has(old)) {
+        await this.storage.deleteByPublicUrl(old);
+      }
+    }
 
     return {
       ...publicSerialize(row),

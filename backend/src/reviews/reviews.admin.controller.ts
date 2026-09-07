@@ -18,7 +18,14 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { parseOptionalPositiveInt } from '../common/parse-positive-int';
-import { CreateReviewAdminDto, ReorderReviewsAdminDto, UpdateReviewAdminDto } from './dto/reviews.dto';
+import {
+  BulkRejectReviewsDto,
+  BulkReviewIdsDto,
+  CreateReviewAdminDto,
+  RejectReviewAdminDto,
+  ReorderReviewsAdminDto,
+  UpdateReviewAdminDto,
+} from './dto/reviews.dto';
 import { ReviewsAdminService } from './reviews.admin.service';
 
 @Controller('reviews/admin')
@@ -41,13 +48,18 @@ export class ReviewsAdminController {
   @Get()
   list(
     @Query('q') q?: string,
-    @Query('status') status?: 'all' | 'pending' | 'published',
+    @Query('status') status?: 'all' | 'pending' | 'published' | 'rejected',
     @Query('productId') productId?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
     const st =
-      status === 'pending' || status === 'published' || status === 'all' ? status : 'all';
+      status === 'pending' ||
+      status === 'published' ||
+      status === 'all' ||
+      status === 'rejected'
+        ? status
+        : 'all';
     return this.reviews.list({
       q,
       status: st,
@@ -60,6 +72,21 @@ export class ReviewsAdminController {
   @Post('reorder')
   reorder(@Body() dto: ReorderReviewsAdminDto) {
     return this.reviews.reorder(dto.orderedIds);
+  }
+
+  @Post('bulk-publish')
+  bulkPublish(@Body() dto: BulkReviewIdsDto, @CurrentUser('sub') userId: string) {
+    return this.reviews.bulkPublish(dto.ids, userId);
+  }
+
+  @Post('bulk-reject')
+  bulkReject(@Body() dto: BulkRejectReviewsDto, @CurrentUser('sub') userId: string) {
+    return this.reviews.bulkReject(dto.ids, dto.reason, userId);
+  }
+
+  @Post('bulk-delete')
+  bulkDelete(@Body() dto: BulkReviewIdsDto) {
+    return this.reviews.bulkRemove(dto.ids);
   }
 
   @Post()
@@ -89,6 +116,15 @@ export class ReviewsAdminController {
   @Post(':id/unpublish')
   unpublish(@Param('id') id: string) {
     return this.reviews.unpublish(id);
+  }
+
+  @Post(':id/reject')
+  reject(
+    @Param('id') id: string,
+    @Body() dto: RejectReviewAdminDto,
+    @CurrentUser('sub') userId: string,
+  ) {
+    return this.reviews.reject(id, dto.reason, userId);
   }
 
   @Delete(':id')

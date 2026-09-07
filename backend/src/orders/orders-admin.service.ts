@@ -500,79 +500,212 @@ export class OrdersAdminService {
       registerCarrier?: boolean;
     } = {},
   ) {
-    const orderRow = await this.prisma.order.findUnique({
-      where: { id },
-      include: {
-        items: {
-          select: {
-            title: true,
-            sku: true,
-            qty: true,
-            unitPrice: true,
-            isGratitudeGift: true,
-          },
-        },
-        shipments: { orderBy: { createdAt: 'desc' }, take: 5 },
-      },
-    });
-    if (!orderRow) throw new NotFoundException('Заказ не найден');
-    if (!canShip(orderRow.status)) {
-      throw new BadRequestException(
-        'Заказ нельзя отправить из текущего статуса',
-      );
-    }
-
-    const provider = this.resolveShipmentProvider(
-      opts.provider,
-      orderRow.shippingMethod,
-      orderRow.shippingAddress,
-    );
-    let tracking = opts.tracking?.trim() || null;
-    let externalId: string | null = null;
-    let raw: Prisma.InputJsonValue | undefined;
-    let carrierNote: string | null = null;
-    let reuseShipmentId: string | null = null;
-
-    const existing = orderRow.shipments[0] ?? null;
-    if (existing?.externalId && !tracking) {
-      tracking = existing.tracking;
-      externalId = existing.externalId;
-      reuseShipmentId = existing.id;
-      carrierNote = tracking
-        ? `ранее создано у перевозчика, трек ${tracking}`
-        : 'ранее создано у перевозчика';
-    }
-
-    if (provider === ShipmentProvider.YANDEX && !tracking) {
-      throw new BadRequestException(
-        'Для Яндекс Доставки укажите трек-номер. Автосоздание заявки пока не подключено.',
-      );
-    }
-
-    /** Авторегистрация только для СДЭК при пустом треке (не Яндекс / не stub). */
-    const wantRegister =
-      !reuseShipmentId &&
-      !tracking &&
-      provider === ShipmentProvider.CDEK &&
-      opts.registerCarrier !== false;
-
-    if (wantRegister) {
-      if (!this.carrier.isCdekConfigured()) {
-        if (opts.registerCarrier === true) {
-          throw new BadRequestException(
-            'Не заданы CDEK_ACCOUNT / CDEK_SECURE для автосоздания отправления',
-          );
+    type ShipClaim =
+      | {
+          mode: 'reuse';
+          provider: ShipmentProvider;
+          tracking: string | null;
+          externalId: string | null;
+          shipmentId: string;
+          carrierNote: string;
         }
-      } else {
-        const registered = await this.carrier.register(orderRow, provider);
+      | {
+          mode: 'register';
+          provider: ShipmentProvider;
+          shipmentId: string;
+          orderForCarrier: {
+            id: string;
+            number: string;
+            email: string;
+            phone: string;
+            customerName: string | null;
+            shippingMethod: ShipmentProvider | null;
+            shippingAddress: unknown;
+            items: Array<{
+              title: string;
+              sku: string;
+              qty: number;
+              unitPrice: number;
+              isGratitudeGift: boolean;
+            }>;
+          };
+        }
+      | {
+          mode: 'manual';
+          provider: ShipmentProvider;
+          tracking: string | null;
+          shipmentId: string | null;
+        };
+
+    const claim = await this.prisma.$transaction(async (tx) => {
+      await lockOrderForUpdate(tx, id);
+      const orderRow = await tx.order.findUnique({
+        where: { id },
+        include: {
+          items: {
+            select: {
+              title: true,
+              sku: true,
+              qty: true,
+              unitPrice: true,
+              isGratitudeGift: true,
+            },
+          },
+          shipments: { orderBy: { createdAt: 'desc' }, take: 5 },
+        },
+      });
+      if (!orderRow) throw new NotFoundException('Заказ не найден');
+      if (!canShip(orderRow.status)) {
+        throw new BadRequestException(
+          'Заказ нельзя отправить из текущего статуса',
+        );
+      }
+
+      const shipments = await this.clearStaleRegisteringShipments(
+        tx,
+        orderRow.shipments,
+      );
+
+      const provider = this.resolveShipmentProvider(
+        opts.provider,
+        orderRow.shippingMethod,
+        orderRow.shippingAddress,
+      );
+      const tracking = opts.tracking?.trim() || null;
+
+      const existingWithCarrier =
+        shipments.find(
+          (s) =>
+            Boolean(s.externalId) ||
+            s.status === 'registered' ||
+            s.status === 'shipped',
+        ) ?? null;
+      const registering = shipments.find((s) => s.status === 'registering');
+      if (registering) {
+        throw new BadRequestException(
+          'Регистрация у перевозчика уже выполняется — подождите или обновите страницу',
+        );
+      }
+
+      if (existingWithCarrier && !tracking) {
+        const t = existingWithCarrier.tracking;
+        return {
+          mode: 'reuse',
+          provider,
+          tracking: t,
+          externalId: existingWithCarrier.externalId,
+          shipmentId: existingWithCarrier.id,
+          carrierNote: t
+            ? `ранее создано у перевозчика, трек ${t}`
+            : 'ранее создано у перевозчика',
+        } satisfies ShipClaim;
+      }
+
+      if (provider === ShipmentProvider.YANDEX && !tracking) {
+        throw new BadRequestException(
+          'Для Яндекс Доставки укажите трек-номер. Автосоздание заявки пока не подключено.',
+        );
+      }
+
+      const wantRegister =
+        !existingWithCarrier &&
+        !tracking &&
+        provider === ShipmentProvider.CDEK &&
+        opts.registerCarrier !== false;
+
+      if (wantRegister) {
+        if (!this.carrier.isCdekConfigured()) {
+          if (opts.registerCarrier === true) {
+            throw new BadRequestException(
+              'Не заданы CDEK_ACCOUNT / CDEK_SECURE для автосоздания отправления',
+            );
+          }
+          return {
+            mode: 'manual',
+            provider,
+            tracking: null,
+            shipmentId: null,
+          } satisfies ShipClaim;
+        }
+
+        const placeholder = await tx.shipment.create({
+          data: {
+            orderId: id,
+            provider,
+            status: 'registering',
+          },
+        });
+        await tx.order.update({
+          where: { id },
+          data: { shippingMethod: provider },
+        });
+
+        return {
+          mode: 'register',
+          provider,
+          shipmentId: placeholder.id,
+          orderForCarrier: {
+            id: orderRow.id,
+            number: orderRow.number,
+            email: orderRow.email,
+            phone: orderRow.phone,
+            customerName: orderRow.customerName,
+            shippingMethod: provider,
+            shippingAddress: orderRow.shippingAddress,
+            items: orderRow.items,
+          },
+        } satisfies ShipClaim;
+      }
+
+      return {
+        mode: 'manual',
+        provider,
+        tracking,
+        shipmentId: existingWithCarrier?.id ?? null,
+      } satisfies ShipClaim;
+    });
+
+    let tracking: string | null =
+      claim.mode === 'manual' || claim.mode === 'reuse' ? claim.tracking : null;
+    let externalId: string | null =
+      claim.mode === 'reuse' ? claim.externalId : null;
+    let raw: Prisma.InputJsonValue | undefined;
+    let carrierNote: string | null =
+      claim.mode === 'reuse' ? claim.carrierNote : null;
+    let shipmentId: string | null =
+      claim.mode === 'manual' ? claim.shipmentId : claim.shipmentId;
+
+    if (claim.mode === 'register') {
+      try {
+        const registered = await this.carrier.register(
+          claim.orderForCarrier,
+          claim.provider,
+        );
         tracking = registered.tracking;
         externalId = registered.externalId;
         raw = registered.raw as Prisma.InputJsonValue;
         carrierNote = tracking
           ? `СДЭК: создано, трек ${tracking}`
           : 'СДЭК: заявка создана (трек появится позже)';
+        // Сразу пишем uuid/трек — иначе при ошибке SHIPPED потеряем отправление в СДЭК.
+        await this.prisma.shipment.update({
+          where: { id: claim.shipmentId },
+          data: {
+            tracking,
+            externalId,
+            status: 'registered',
+            ...(raw !== undefined ? { raw } : {}),
+          },
+        });
+      } catch (err) {
+        await this.prisma.shipment
+          .delete({ where: { id: claim.shipmentId } })
+          .catch(() => undefined);
+        throw err;
       }
     }
+
+    const provider = claim.provider;
 
     await this.prisma.$transaction(async (tx) => {
       await lockOrderForUpdate(tx, id);
@@ -592,13 +725,15 @@ export class OrdersAdminService {
         },
       });
 
-      if (reuseShipmentId) {
+      if (shipmentId) {
         await tx.shipment.update({
-          where: { id: reuseShipmentId },
+          where: { id: shipmentId },
           data: {
             provider,
             tracking,
+            ...(externalId !== null ? { externalId } : {}),
             status: 'shipped',
+            ...(raw !== undefined ? { raw } : {}),
           },
         });
       } else {
@@ -700,63 +835,114 @@ export class OrdersAdminService {
 
   /**
    * Только регистрация у перевозчика (без смены статуса на SHIPPED).
-   * Пишет Shipment + событие CARRIER_REGISTERED.
-   * `provider` из UI должен совпадать с выбранной службой (иначе берём order.shippingMethod).
+   * Слот бронируется под FOR UPDATE до HTTP в СДЭК — без гонки двойного create.
    */
   async registerCarrier(
     id: string,
     actorUserId: string,
     opts: { provider?: string } = {},
   ) {
-    const orderRow = await this.prisma.order.findUnique({
-      where: { id },
-      include: {
-        items: {
-          select: {
-            title: true,
-            sku: true,
-            qty: true,
-            unitPrice: true,
-            isGratitudeGift: true,
-          },
-        },
-        shipments: { orderBy: { createdAt: 'desc' }, take: 5 },
-      },
-    });
-    if (!orderRow) throw new NotFoundException('Заказ не найден');
-
-    if (orderRow.shipments.some((s) => s.externalId)) {
-      throw new BadRequestException(
-        'Отправление у перевозчика уже создано — см. shipments',
-      );
-    }
-
-    const resolvedProvider = this.resolveShipmentProvider(
-      opts.provider,
-      orderRow.shippingMethod,
-      orderRow.shippingAddress,
-    );
-
-    if (resolvedProvider === ShipmentProvider.PICKUP) {
-      throw new BadRequestException(
-        'Автосоздание отправления недоступно для самовывоза',
-      );
-    }
-
-    const registered = await this.carrier.register(
-      orderRow,
-      resolvedProvider,
-    );
-
-    await this.prisma.$transaction(async (tx) => {
+    const claim = await this.prisma.$transaction(async (tx) => {
       await lockOrderForUpdate(tx, id);
-      await tx.order.update({
+      const orderRow = await tx.order.findUnique({
         where: { id },
-        data: { shippingMethod: registered.provider },
+        include: {
+          items: {
+            select: {
+              title: true,
+              sku: true,
+              qty: true,
+              unitPrice: true,
+              isGratitudeGift: true,
+            },
+          },
+          shipments: { orderBy: { createdAt: 'desc' }, take: 5 },
+        },
       });
-      await tx.shipment.create({
+      if (!orderRow) throw new NotFoundException('Заказ не найден');
+      if (!canShip(orderRow.status)) {
+        throw new BadRequestException(
+          'Создать отправление можно только в статусе «Сборка»',
+        );
+      }
+
+      const shipments = await this.clearStaleRegisteringShipments(
+        tx,
+        orderRow.shipments,
+      );
+
+      if (
+        shipments.some(
+          (s) =>
+            Boolean(s.externalId) ||
+            s.status === 'registered' ||
+            s.status === 'shipped',
+        )
+      ) {
+        throw new BadRequestException(
+          'Отправление у перевозчика уже создано — см. shipments',
+        );
+      }
+      if (shipments.some((s) => s.status === 'registering')) {
+        throw new BadRequestException(
+          'Регистрация у перевозчика уже выполняется — подождите или обновите страницу',
+        );
+      }
+
+      const resolvedProvider = this.resolveShipmentProvider(
+        opts.provider,
+        orderRow.shippingMethod,
+        orderRow.shippingAddress,
+      );
+
+      if (resolvedProvider === ShipmentProvider.PICKUP) {
+        throw new BadRequestException(
+          'Автосоздание отправления недоступно для самовывоза',
+        );
+      }
+      if (resolvedProvider === ShipmentProvider.YANDEX) {
+        throw new BadRequestException(
+          'Автосоздание заявки Яндекс Доставки пока не подключено. Укажите трек вручную или зарегистрируйте отправление в кабинете Яндекса.',
+        );
+      }
+
+      const placeholder = await tx.shipment.create({
         data: {
           orderId: id,
+          provider: resolvedProvider,
+          status: 'registering',
+        },
+      });
+      await tx.order.update({
+        where: { id },
+        data: { shippingMethod: resolvedProvider },
+      });
+
+      return {
+        shipmentId: placeholder.id,
+        provider: resolvedProvider,
+        orderForCarrier: {
+          id: orderRow.id,
+          number: orderRow.number,
+          email: orderRow.email,
+          phone: orderRow.phone,
+          customerName: orderRow.customerName,
+          shippingMethod: resolvedProvider,
+          shippingAddress: orderRow.shippingAddress,
+          items: orderRow.items,
+        },
+      };
+    });
+
+    let registered;
+    try {
+      registered = await this.carrier.register(
+        claim.orderForCarrier,
+        claim.provider,
+      );
+      await this.prisma.shipment.update({
+        where: { id: claim.shipmentId },
+        data: {
           provider: registered.provider,
           tracking: registered.tracking,
           externalId: registered.externalId,
@@ -764,22 +950,48 @@ export class OrdersAdminService {
           raw: registered.raw as Prisma.InputJsonValue,
         },
       });
-      await this.lifecycle.addEvent(tx, {
-        orderId: id,
-        type: 'CARRIER_REGISTERED',
-        message: registered.tracking
-          ? `Создано отправление ${registered.provider}, трек: ${registered.tracking}`
-          : `Создано отправление ${registered.provider}`,
-        actorUserId,
-        meta: {
-          provider: registered.provider,
-          tracking: registered.tracking,
-          externalId: registered.externalId,
-        },
-      });
+    } catch (err) {
+      await this.prisma.shipment
+        .delete({ where: { id: claim.shipmentId } })
+        .catch(() => undefined);
+      throw err;
+    }
+
+    await this.lifecycle.addEvent(this.prisma, {
+      orderId: id,
+      type: 'CARRIER_REGISTERED',
+      message: registered.tracking
+        ? `Создано отправление ${registered.provider}, трек: ${registered.tracking}`
+        : `Создано отправление ${registered.provider}`,
+      actorUserId,
+      meta: {
+        provider: registered.provider,
+        tracking: registered.tracking,
+        externalId: registered.externalId,
+      },
     });
 
     return this.getById(id);
+  }
+
+  /** Зависший placeholder после краша — можно повторить create. */
+  private async clearStaleRegisteringShipments<
+    T extends { id: string; status: string | null; createdAt: Date },
+  >(tx: Prisma.TransactionClient, shipments: T[]): Promise<T[]> {
+    const staleMs = 2 * 60 * 1000;
+    const now = Date.now();
+    const remaining: T[] = [];
+    for (const s of shipments) {
+      if (
+        s.status === 'registering' &&
+        now - s.createdAt.getTime() >= staleMs
+      ) {
+        await tx.shipment.delete({ where: { id: s.id } });
+        continue;
+      }
+      remaining.push(s);
+    }
+    return remaining;
   }
 
   /**

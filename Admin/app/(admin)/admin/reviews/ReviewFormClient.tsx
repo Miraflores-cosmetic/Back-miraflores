@@ -65,11 +65,17 @@ export function ReviewFormClient({ reviewId: reviewIdProp }: { reviewId?: string
   const [orderId, setOrderId] = useState<string | null>(null);
   const [createdAt, setCreatedAt] = useState<string | null>(null);
   const [moderatedAt, setModeratedAt] = useState<string | null>(null);
+  const [rejectedAt, setRejectedAt] = useState<string | null>(null);
+  const [rejectionReason, setRejectionReason] = useState<string | null>(null);
   const [rating, setRating] = useState(5);
   const [text, setText] = useState('');
   const [authorName, setAuthorName] = useState('');
   const [isPublished, setIsPublished] = useState(false);
+  /** Отображаемый слот (image1, иначе image2). */
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
+  const [savedImage1Url, setSavedImage1Url] = useState<string | null>(null);
+  const [savedImage2Url, setSavedImage2Url] = useState<string | null>(null);
+  const [mediaTouched, setMediaTouched] = useState(false);
 
   function markDirty() {
     setDirty(true);
@@ -84,11 +90,18 @@ export function ReviewFormClient({ reviewId: reviewIdProp }: { reviewId?: string
     setOrderId(row.orderId);
     setCreatedAt(row.createdAt);
     setModeratedAt(row.moderatedAt);
+    setRejectedAt(row.rejectedAt);
+    setRejectionReason(row.rejectionReason);
     setRating(row.rating);
     setText(row.text);
     setAuthorName(row.authorName ?? '');
     setIsPublished(row.isPublished);
-    setMediaUrl(row.image1Url?.trim() || row.image2Url?.trim() || null);
+    const img1 = row.image1Url?.trim() || null;
+    const img2 = row.image2Url?.trim() || null;
+    setSavedImage1Url(img1);
+    setSavedImage2Url(img2);
+    setMediaUrl(img1 || img2);
+    setMediaTouched(false);
     setDirty(false);
   }
 
@@ -145,10 +158,41 @@ export function ReviewFormClient({ reviewId: reviewIdProp }: { reviewId?: string
     }
 
     const trimmed = text.trim();
-    const image1Url = mediaUrl?.trim() || null;
+    const nextMedia = mediaUrl?.trim() || null;
+    if (trimmed.length > 2000) {
+      setError('Текст отзыва — максимум 2000 символов');
+      return;
+    }
+
+    let hasMedia: boolean;
+    if (!mediaTouched) {
+      hasMedia = Boolean(savedImage1Url || savedImage2Url);
+    } else {
+      // «Убрать» чистит оба слота; иначе в форме остаётся хотя бы одно медиа.
+      hasMedia = Boolean(nextMedia);
+    }
+
+    if (!hasMedia && trimmed.length < 10) {
+      setError('Текст — минимум 10 символов, если нет медиа');
+      return;
+    }
+
     setSaving(true);
     setError(null);
     try {
+      /** Не шлём image2Url: null «на всякий» — бэкенд иначе чистит второе фото с диска. */
+      const mediaPatch = (): { image1Url?: string | null; image2Url?: string | null } => {
+        if (!mediaTouched) return {};
+        if (!nextMedia) {
+          return { image1Url: null, image2Url: null };
+        }
+        // В UI один слот: правим тот, что был показан; второй не трогаем.
+        if (savedImage1Url || !savedImage2Url) {
+          return { image1Url: nextMedia };
+        }
+        return { image2Url: nextMedia };
+      };
+
       if (isEdit && reviewId) {
         const row = await adminBackendJson<AdminReviewRow>(`reviews/admin/${reviewId}`, {
           method: 'PATCH',
@@ -156,9 +200,8 @@ export function ReviewFormClient({ reviewId: reviewIdProp }: { reviewId?: string
             rating,
             text: trimmed,
             authorName: authorName.trim() || null,
-            image1Url,
-            image2Url: null,
             isPublished,
+            ...mediaPatch(),
           }),
         });
         applyRow(row);
@@ -172,9 +215,8 @@ export function ReviewFormClient({ reviewId: reviewIdProp }: { reviewId?: string
             rating,
             text: trimmed,
             authorName: authorName.trim() || null,
-            image1Url,
-            image2Url: null,
             isPublished,
+            ...(nextMedia ? { image1Url: nextMedia } : {}),
           }),
         });
         applyRow(created);
@@ -304,6 +346,18 @@ export function ReviewFormClient({ reviewId: reviewIdProp }: { reviewId?: string
                   Модерация: {formatAdminDateTime(moderatedAt)}
                 </>
               ) : null}
+              {rejectedAt ? (
+                <>
+                  <br />
+                  Отклонён: {formatAdminDateTime(rejectedAt)}
+                  {rejectionReason ? (
+                    <>
+                      <br />
+                      Причина: {rejectionReason}
+                    </>
+                  ) : null}
+                </>
+              ) : null}
               {orderId ? (
                 <>
                   <br />
@@ -376,6 +430,7 @@ export function ReviewFormClient({ reviewId: reviewIdProp }: { reviewId?: string
             setText(e.target.value);
           }}
           rows={8}
+          maxLength={2000}
         />
 
         <div className={styles.labelCheckboxRow}>
@@ -396,6 +451,7 @@ export function ReviewFormClient({ reviewId: reviewIdProp }: { reviewId?: string
           url={mediaUrl}
           onChange={(next) => {
             markDirty();
+            setMediaTouched(true);
             setMediaUrl(next);
           }}
         />

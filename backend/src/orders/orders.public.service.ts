@@ -40,6 +40,8 @@ import {
   giftPurchasePaidEmail,
 } from '../gift-certificates/gift-purchase-email';
 
+import { allocateNextOrderNumber } from './order-number';
+
 type SyncedCartItem = {
   variantId: string;
   shadeId: string | null;
@@ -51,12 +53,6 @@ type SyncedCartItem = {
   qty: number;
   isGratitudeGift?: boolean;
 };
-
-function genOrderNumber(): string {
-  // Формат: 2 буквы + дефис + 6 цифр (MF-004281)
-  const n = Math.floor(Math.random() * 1_000_000);
-  return `MF-${String(n).padStart(6, '0')}`;
-}
 
 type LockedPromo = {
   id: string;
@@ -511,9 +507,10 @@ export class OrdersPublicService {
       let created;
       for (let attempt = 0; attempt < 5; attempt++) {
         try {
+          const number = await allocateNextOrderNumber(tx);
           created = await tx.order.create({
             data: {
-              number: genOrderNumber(),
+              number,
               idempotencyKey,
               status: OrderStatus.AWAITING_PAYMENT,
               email,

@@ -1,6 +1,6 @@
 /** Shared types for admin reviews UI. */
 
-export type AdminReviewStatusFilter = 'all' | 'pending' | 'published';
+export type AdminReviewStatusFilter = 'all' | 'pending' | 'published' | 'rejected';
 
 export type AdminReviewProductRef = {
   id: string;
@@ -30,6 +30,8 @@ export type AdminReviewRow = {
   sortOrder?: number;
   moderatedById: string | null;
   moderatedAt: string | null;
+  rejectedAt: string | null;
+  rejectionReason: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -38,6 +40,7 @@ export type AdminReviewCounts = {
   all: number;
   pending: number;
   published: number;
+  rejected: number;
 };
 
 export type AdminReviewListResponse = {
@@ -49,7 +52,9 @@ export type AdminReviewListResponse = {
 };
 
 export function parseReviewStatusFilter(raw: string | null): AdminReviewStatusFilter {
-  if (raw === 'pending' || raw === 'published' || raw === 'all') return raw;
+  if (raw === 'pending' || raw === 'published' || raw === 'all' || raw === 'rejected') {
+    return raw;
+  }
   return 'pending';
 }
 
@@ -60,4 +65,10 @@ export function reviewAuthorLabel(r: Pick<AdminReviewRow, 'authorName' | 'user'>
     r.user?.email ||
     '—'
   );
+}
+
+export function reviewModerationLabel(r: AdminReviewRow): string {
+  if (r.rejectedAt) return 'Отклонён';
+  if (r.isPublished) return 'Опубликован';
+  return 'На модерации';
 }

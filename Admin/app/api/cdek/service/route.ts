@@ -158,13 +158,15 @@ export async function GET(req: NextRequest) {
       return handleDeliveryPoints(searchParams)
     }
 
-    // ✅ ORDERS
+    // ✅ ORDERS (read) — только через Nest admin register-carrier / кабинет СДЭК
     if (action === 'order') {
-      const uuid = searchParams.get('uuid')
-      if (!uuid) return json({ error: 'uuid required' }, 400)
-
-      const res = await cdekRequest(`orders/${uuid}`)
-      return json(await res.json(), res.status)
+      return json(
+        {
+          error:
+            'Чтение заказа СДЭК через публичный BFF отключено. Используйте админку заказов.',
+        },
+        403,
+      )
     }
 
     return json({ error: 'Unknown request' }, 400)
@@ -269,25 +271,15 @@ export async function POST(req: NextRequest) {
       return json(result, res.status)
     }
 
-    // Создание заказа
-    if (action === 'orders') {
-      const res = await cdekRequest('orders', {
-        method: 'POST',
-        body: data,
-      })
-      const result = await res.json()
-      return json(result, res.status)
-    }
-
-    // Отказ от заказа
-    if (action === 'refusal') {
-      const uuid = body.uuid
-      if (!uuid) return json({ error: 'uuid required' }, 400)
-      const res = await cdekRequest(`orders/${uuid}/refusal`, {
-        method: 'POST',
-      })
-      const result = await res.json()
-      return json(result, res.status)
+    // Создание / отказ — только Nest CarrierShipmentService (admin JWT)
+    if (action === 'orders' || action === 'refusal') {
+      return json(
+        {
+          error:
+            'Создание и отказ заказа СДЭК через публичный BFF отключены. Используйте «Создать в СДЭК» в карточке заказа.',
+        },
+        403,
+      )
     }
 
     return json({ error: 'Unknown POST action' }, 400)

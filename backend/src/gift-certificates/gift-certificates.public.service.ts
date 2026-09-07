@@ -13,6 +13,7 @@ import {
 import { OrderStatus, Prisma } from '@prisma/client';
 import { formatPhoneE164, isValidPhone } from '../common/phone.util';
 import { OrderPayTokenService } from '../orders/order-pay-token.service';
+import { allocateNextOrderNumber } from '../orders/order-number';
 import { GIFT_PURCHASE_SKU } from './gift-certificate-purchase.util';
 
 export type GiftValidateResult = {
@@ -25,11 +26,6 @@ export type GiftValidateResult = {
   total: number;
   kind: 'gift';
 };
-
-function genOrderNumber(): string {
-  const n = Math.floor(Math.random() * 1_000_000);
-  return `MF-${String(n).padStart(6, '0')}`;
-}
 
 @Injectable()
 export class GiftCertificatesPublicService {
@@ -158,9 +154,10 @@ export class GiftCertificatesPublicService {
       let created;
       for (let attempt = 0; attempt < 5; attempt++) {
         try {
+          const number = await allocateNextOrderNumber(tx);
           created = await tx.order.create({
             data: {
-              number: genOrderNumber(),
+              number,
               idempotencyKey,
               status: OrderStatus.AWAITING_PAYMENT,
               email,

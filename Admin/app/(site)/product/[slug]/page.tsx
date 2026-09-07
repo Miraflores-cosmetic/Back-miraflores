@@ -12,6 +12,11 @@ import {
 import { ProductInteractive } from './ProductInteractive';
 import styles from './ProductPageLayout.module.css';
 
+/**
+ * Admin `(site)` PDP — не покупательская витрина.
+ * Рейтинг / отзывы / `/reviews` — только Vite Front (см. Admin/README.md).
+ */
+
 type Props = {
   params: { slug: string };
   searchParams?: { v?: string; shade?: string };

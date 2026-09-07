@@ -54,6 +54,13 @@ export class ReviewsPublicController {
     });
   }
 
+  /** Product ids, по которым текущий пользователь уже оставлял отзыв (любой статус). */
+  @UseGuards(JwtAuthGuard)
+  @Get('mine/product-ids')
+  mineProductIds(@CurrentUser('sub') userId: string) {
+    return this.reviews.listMyReviewedProductIds(userId);
+  }
+
   @UseGuards(JwtAuthGuard)
   @Post()
   create(

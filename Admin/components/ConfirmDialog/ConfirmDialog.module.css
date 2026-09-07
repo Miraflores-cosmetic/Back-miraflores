@@ -38,6 +38,23 @@
   color: var(--color-ink-black);
 }
 
+.extra {
+  margin: -12px 0 24px;
+}
+
+.extra textarea {
+  display: block;
+  width: 100%;
+  min-height: 72px;
+  padding: 10px 12px;
+  border: 1px solid #d0d5d8;
+  border-radius: 4px;
+  font-family: var(--font-open-sans);
+  font-size: var(--text-body);
+  line-height: 1.4;
+  resize: vertical;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;

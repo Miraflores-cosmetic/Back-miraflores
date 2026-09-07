@@ -22,6 +22,7 @@ import {
 import { formatAdminDateTime } from '@/lib/adminFormat';
 import {
   parseReviewStatusFilter,
+  reviewModerationLabel,
   type AdminReviewCounts,
   type AdminReviewListResponse,
   type AdminReviewRow,
@@ -110,11 +111,11 @@ export function ReviewsListClient() {
     kind: ConfirmKind;
     row?: AdminReviewRow;
   } | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
 
   const initialQ = searchParams.get('q') ?? '';
   const initialPage = Math.max(1, Number(searchParams.get('page')) || 1);
   const filterKey = `${status}|${productId}`;
-  const sortable = status === 'published';
 
   const buildPath = useCallback(
     ({ page, limit, q }: { page: number; limit: number; q: string }) => {
@@ -160,6 +161,9 @@ export function ReviewsListClient() {
     errorFallback: 'Не удалось загрузить отзывы',
     onResponse,
   });
+
+  /** Глобальный reorder только без фильтра/поиска — окно страницы непрерывно в полном списке. */
+  const sortable = status === 'published' && !productId && !qDebounced.trim();
 
   useEffect(() => {
     setSelected(new Set());
@@ -230,8 +234,30 @@ export function ReviewsListClient() {
   }
 
   async function removeIds(ids: string[], toastOk: string) {
-    for (const id of ids) {
-      await adminBackendJson(`reviews/admin/${id}`, { method: 'DELETE' });
+    if (ids.length === 1) {
+      await adminBackendJson(`reviews/admin/${ids[0]}`, { method: 'DELETE' });
+    } else {
+      await adminBackendJson('reviews/admin/bulk-delete', {
+        method: 'POST',
+        body: JSON.stringify({ ids }),
+      });
+    }
+    showToast(toastOk);
+    setSelected(new Set());
+    await reload();
+  }
+
+  async function rejectIds(ids: string[], reason: string, toastOk: string) {
+    if (ids.length === 1) {
+      await adminBackendJson(`reviews/admin/${ids[0]}/reject`, {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      });
+    } else {
+      await adminBackendJson('reviews/admin/bulk-reject', {
+        method: 'POST',
+        body: JSON.stringify({ ids, reason }),
+      });
     }
     showToast(toastOk);
     setSelected(new Set());
@@ -239,8 +265,13 @@ export function ReviewsListClient() {
   }
 
   async function publishIds(ids: string[]) {
-    for (const id of ids) {
-      await adminBackendJson(`reviews/admin/${id}/publish`, { method: 'POST' });
+    if (ids.length === 1) {
+      await adminBackendJson(`reviews/admin/${ids[0]}/publish`, { method: 'POST' });
+    } else {
+      await adminBackendJson('reviews/admin/bulk-publish', {
+        method: 'POST',
+        body: JSON.stringify({ ids }),
+      });
     }
     showToast(ids.length === 1 ? 'Отзыв опубликован' : `Опубликовано: ${ids.length}`);
     setSelected(new Set());
@@ -270,20 +301,28 @@ export function ReviewsListClient() {
     if (!confirm) return;
     const kind = confirm.kind;
     const row = confirm.row;
+    const reason = rejectReason.trim();
+    if (kind === 'reject' || kind === 'bulk-reject') {
+      if (reason.length < 3) {
+        showToast('Укажите причину отклонения (мин. 3 символа)');
+        return;
+      }
+    }
     setConfirm(null);
+    setRejectReason('');
     try {
       if (kind === 'delete' && row) {
         setBusyId(row.id);
         await removeIds([row.id], 'Отзыв удалён');
       } else if (kind === 'reject' && row) {
         setBusyId(row.id);
-        await removeIds([row.id], 'Отзыв отклонён');
+        await rejectIds([row.id], reason, 'Отзыв отклонён');
       } else if (kind === 'bulk-delete') {
         setBulkBusy(true);
         await removeIds([...selected], `Удалено: ${selected.size}`);
       } else if (kind === 'bulk-reject') {
         setBulkBusy(true);
-        await removeIds([...selected], `Отклонено: ${selected.size}`);
+        await rejectIds([...selected], reason, `Отклонено: ${selected.size}`);
       } else if (kind === 'bulk-publish') {
         setBulkBusy(true);
         await publishIds([...selected]);
@@ -302,16 +341,22 @@ export function ReviewsListClient() {
       ? 'У этого товара нет отзывов'
       : status === 'pending'
         ? 'Очередь модерации пуста'
-        : 'Отзывов нет';
+        : status === 'rejected'
+          ? 'Отклонённых отзывов нет'
+          : 'Отзывов нет';
+
+  const isRejectConfirm =
+    confirm?.kind === 'reject' || confirm?.kind === 'bulk-reject';
 
   const confirmCopy =
-    confirm?.kind === 'reject' || confirm?.kind === 'bulk-reject'
+    isRejectConfirm
       ? {
           title:
-            confirm.kind === 'bulk-reject'
+            confirm!.kind === 'bulk-reject'
               ? `Отклонить выбранные (${selected.size})?`
               : 'Отклонить отзыв?',
-          message: 'Отзыв будет удалён безвозвратно.',
+          message:
+            'Отзыв останется в базе (вкладка «Отклонённые») и исчезнет с витрины. Удаление — отдельная кнопка.',
           confirmLabel: 'Отклонить',
         }
       : confirm?.kind === 'bulk-publish'
@@ -328,6 +373,11 @@ export function ReviewsListClient() {
             message: 'Отзыв будет удалён безвозвратно.',
             confirmLabel: 'Удалить',
           };
+
+  function openReject(row?: AdminReviewRow) {
+    setRejectReason('');
+    setConfirm(row ? { kind: 'reject', row } : { kind: 'bulk-reject' });
+  }
 
   function renderRowCells(r: AdminReviewRow, drag?: Parameters<typeof DragHandleCell>[0]) {
     return (
@@ -367,6 +417,13 @@ export function ReviewsListClient() {
           {r.image1Url || r.image2Url ? (
             <span className={styles.mutedInline}> · медиа</span>
           ) : null}
+          {r.rejectionReason ? (
+            <div className={styles.mutedInline} title={r.rejectionReason}>
+              Причина: {r.rejectionReason.length > 80
+                ? `${r.rejectionReason.slice(0, 80)}…`
+                : r.rejectionReason}
+            </div>
+          ) : null}
         </td>
         <td className={styles.mutedInline}>{formatAdminDateTime(r.createdAt)}</td>
         <td className={styles.mutedInline}>
@@ -375,10 +432,14 @@ export function ReviewsListClient() {
         <td>
           <span
             className={`${styles.badge} ${
-              r.isPublished ? styles.badgeOn : styles.badgeDraft
+              r.rejectedAt
+                ? styles.badgeDraft
+                : r.isPublished
+                  ? styles.badgeOn
+                  : styles.badgeDraft
             }`}
           >
-            {r.isPublished ? 'Опубликован' : 'На модерации'}
+            {reviewModerationLabel(r)}
           </span>
         </td>
         <td className={styles.tableCellActions}>
@@ -402,16 +463,27 @@ export function ReviewsListClient() {
                 >
                   Опубликовать
                 </AdminCompactBtn>
-                <AdminCompactBtn
-                  type="button"
-                  variant="outline"
-                  disabled={busyId === r.id || bulkBusy}
-                  onClick={() => setConfirm({ kind: 'reject', row: r })}
-                >
-                  Отклонить
-                </AdminCompactBtn>
+                {!r.rejectedAt ? (
+                  <AdminCompactBtn
+                    type="button"
+                    variant="outline"
+                    disabled={busyId === r.id || bulkBusy}
+                    onClick={() => openReject(r)}
+                  >
+                    Отклонить
+                  </AdminCompactBtn>
+                ) : null}
               </>
-            ) : null}
+            ) : (
+              <AdminCompactBtn
+                type="button"
+                variant="outline"
+                disabled={busyId === r.id || bulkBusy}
+                onClick={() => openReject(r)}
+              >
+                Отклонить
+              </AdminCompactBtn>
+            )}
             <AdminCompactBtn
               type="button"
               variant="danger"
@@ -461,6 +533,7 @@ export function ReviewsListClient() {
         items={[
           { id: 'pending', label: tabLabel('На модерации', counts?.pending) },
           { id: 'published', label: tabLabel('Опубликованные', counts?.published) },
+          { id: 'rejected', label: tabLabel('Отклонённые', counts?.rejected) },
           { id: 'all', label: tabLabel('Все', counts?.all) },
         ]}
       />
@@ -511,7 +584,7 @@ export function ReviewsListClient() {
                     type="button"
                     variant="outline"
                     disabled={bulkBusy}
-                    onClick={() => setConfirm({ kind: 'bulk-reject' })}
+                    onClick={() => openReject()}
                   >
                     Отклонить ({selected.size})
                   </AdminCompactBtn>
@@ -573,9 +646,28 @@ export function ReviewsListClient() {
         message={confirmCopy.message}
         confirmLabel={confirmCopy.confirmLabel}
         danger={confirm?.kind !== 'bulk-publish'}
+        confirmDisabled={isRejectConfirm && rejectReason.trim().length < 3}
         onConfirm={() => void runConfirm()}
-        onCancel={() => setConfirm(null)}
-      />
+        onCancel={() => {
+          setConfirm(null);
+          setRejectReason('');
+        }}
+      >
+        {isRejectConfirm ? (
+          <label style={{ display: 'block' }}>
+            <span className={styles.mutedInline} style={{ display: 'block', marginBottom: 6 }}>
+              Причина отклонения
+            </span>
+            <textarea
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              maxLength={1000}
+              placeholder="Например: спам, оффтоп, нарушение правил…"
+              aria-label="Причина отклонения"
+            />
+          </label>
+        ) : null}
+      </ConfirmDialog>
     </>
   );
 }

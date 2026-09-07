@@ -349,6 +349,38 @@
   gap: 10px;
 }
 
+.orderNoteList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.orderNoteItem {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--account-hairline-color, #e2e6e8);
+  border-radius: 8px;
+  background: #fafbfb;
+}
+
+.orderNoteMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-bottom: 6px;
+  font-size: 0.75rem;
+  color: var(--color-gray, #6e6d67);
+}
+
+.orderNoteItem .orderNoteText {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .orderNoteTextarea {
   width: 100%;
   min-height: 72px;

@@ -252,6 +252,7 @@ export function staffCanAssistant(
 export const SECTIONS_NEEDING_CATALOG: readonly ModeratorAssignableSectionId[] = [
   'discounts',
   'certificates',
+  'reviews',
 ];
 
 export function sectionsMissingCatalogHint(

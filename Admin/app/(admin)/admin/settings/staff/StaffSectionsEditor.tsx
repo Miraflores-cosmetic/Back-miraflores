@@ -75,9 +75,9 @@ export function StaffSectionsEditor({
       </div>
       {sectionsMissingCatalogHint(sections).length > 0 ? (
         <p className={catalogStyles.lead} style={{ marginTop: 12 }}>
-          Для «Скидки и промо» пикеры товаров/категорий ходят в API каталога. Без раздела
-          «Каталог» UI откроется, но запросы вернут 403 — добавьте «Каталог» или уберите
-          скидки.
+          Для «Скидки и промо», «Сертификаты» и «Отзывы» пикеры товаров/категорий ходят в
+          API каталога. Без раздела «Каталог» UI откроется, но запросы вернут 403 —
+          добавьте «Каталог» или уберите эти разделы.
         </p>
       ) : null}
       {sectionsMissingFulfillmentHint(sections).length > 0 ? (
