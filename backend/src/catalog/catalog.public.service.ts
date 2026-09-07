@@ -1,10 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { DiscountsPublicService } from '../discounts/discounts-public.service';
-import {
-  type CampaignIn,
-  priceCartLines,
-} from '../discounts/discount-pricing.engine';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   PUBLIC_HIDDEN_CATEGORY_SLUGS,
@@ -16,6 +12,10 @@ import {
   catalogSellablePrices,
   pickCatalogCardVariant,
 } from './catalog-price.util';
+import {
+  applyCampaignToCards,
+  applyCampaignToDetailVariants,
+} from './catalog-campaign-price.util';
 import {
   giftPurchaseSkuForDenom,
   parseGiftDenomCartVariantId,
@@ -126,74 +126,6 @@ function toProductCard(p: ProductCardSource) {
 function stripCategoryId<T extends { categoryId: string }>(card: T) {
   const { categoryId: _cid, ...rest } = card;
   return rest;
-}
-
-/** Кампании (qty=1) поверх compareAt — как в корзине. */
-function applyCampaignToCards(cards: ProductCard[], campaigns: CampaignIn[]): ProductCard[] {
-  if (!campaigns.length || !cards.length) return cards;
-  const priced = priceCartLines(
-    cards.map((c) => ({
-      key: c.id,
-      productId: c.id,
-      categoryId: c.categoryId,
-      qty: 1,
-      listPrice: c.price,
-    })),
-    campaigns,
-  );
-  const byKey = new Map(priced.lines.map((l) => [l.key, l]));
-  return cards.map((card) => {
-    const line = byKey.get(card.id);
-    if (!line || line.lineDiscount <= 0 || line.price >= card.price) return card;
-    const listPrice = card.price;
-    const salePrice = line.price;
-    const oldPrice = Math.max(card.oldPrice ?? listPrice, listPrice);
-    return {
-      ...card,
-      price: salePrice,
-      oldPrice,
-      discountPercent: Math.round(((oldPrice - salePrice) / oldPrice) * 100),
-    };
-  });
-}
-
-type DetailVariant = {
-  id: string;
-  price: number;
-  compareAt: number | null;
-};
-
-/** Те же кампании, что на карточках/в корзине — для PDP-вариантов. */
-function applyCampaignToDetailVariants<T extends DetailVariant>(
-  variants: T[],
-  productId: string,
-  categoryId: string,
-  campaigns: CampaignIn[],
-): T[] {
-  if (!campaigns.length || !variants.length) return variants;
-  const priced = priceCartLines(
-    variants.map((v) => ({
-      key: v.id,
-      productId,
-      categoryId,
-      qty: 1,
-      listPrice: v.price,
-    })),
-    campaigns,
-  );
-  const byKey = new Map(priced.lines.map((l) => [l.key, l]));
-  return variants.map((v) => {
-    const line = byKey.get(v.id);
-    if (!line || line.lineDiscount <= 0 || line.price >= v.price) return v;
-    const listPrice = v.price;
-    const salePrice = line.price;
-    const compareAt = Math.max(v.compareAt ?? listPrice, listPrice);
-    return {
-      ...v,
-      price: salePrice,
-      compareAt: compareAt > salePrice ? compareAt : null,
-    };
-  });
 }
 
 @Injectable()
