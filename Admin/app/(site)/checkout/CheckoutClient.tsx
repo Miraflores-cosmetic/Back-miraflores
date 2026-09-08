@@ -584,8 +584,8 @@ export function CheckoutClient() {
       clearCart();
       try {
         if (opts?.confirmed) {
-          sessionStorage.setItem('jcos.pendingPaidConfirmed', orderId || '1');
-          if (number) sessionStorage.setItem('jcos.pendingOrderNumber', number);
+          sessionStorage.setItem('miraflores.pendingPaidConfirmed', orderId || '1');
+          if (number) sessionStorage.setItem('miraflores.pendingOrderNumber', number);
         }
       } catch {
         /* ignore */

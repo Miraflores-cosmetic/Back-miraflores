@@ -140,8 +140,8 @@ export type SyncCartResult = {
   error?: string;
 };
 
-const STORAGE_KEY = 'jcos.cart.v1';
-const PROMO_STORAGE_KEY = 'jcos.cart.promo.v1';
+const STORAGE_KEY = 'miraflores.cart.v1';
+const PROMO_STORAGE_KEY = 'miraflores.cart.promo.v1';
 
 const CartContext = createContext<CartContextValue | null>(null);
 

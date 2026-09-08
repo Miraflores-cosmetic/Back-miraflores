@@ -63,20 +63,20 @@ export function CertificatesSuccessClient() {
       try {
         const paymentId =
           typeof sessionStorage !== 'undefined'
-            ? sessionStorage.getItem('jcos.pendingPaymentId')
+            ? sessionStorage.getItem('miraflores.pendingPaymentId')
             : null;
         const payToken =
           payTokenParam ||
           (typeof sessionStorage !== 'undefined'
-            ? sessionStorage.getItem('jcos.pendingPayToken')
+            ? sessionStorage.getItem('miraflores.pendingPayToken')
             : null);
         const storedNumber =
           typeof sessionStorage !== 'undefined'
-            ? sessionStorage.getItem('jcos.pendingOrderNumber')
+            ? sessionStorage.getItem('miraflores.pendingOrderNumber')
             : null;
         const paidConfirmed =
           typeof sessionStorage !== 'undefined'
-            ? sessionStorage.getItem('jcos.pendingPaidConfirmed')
+            ? sessionStorage.getItem('miraflores.pendingPaidConfirmed')
             : null;
 
         if (paidConfirmed) {
@@ -138,11 +138,11 @@ export function CertificatesSuccessClient() {
         if (!cancelled) {
           setChecking(false);
           try {
-            sessionStorage.removeItem('jcos.pendingPaymentId');
-            sessionStorage.removeItem('jcos.pendingOrderId');
-            sessionStorage.removeItem('jcos.pendingOrderNumber');
-            sessionStorage.removeItem('jcos.pendingPayToken');
-            sessionStorage.removeItem('jcos.pendingPaidConfirmed');
+            sessionStorage.removeItem('miraflores.pendingPaymentId');
+            sessionStorage.removeItem('miraflores.pendingOrderId');
+            sessionStorage.removeItem('miraflores.pendingOrderNumber');
+            sessionStorage.removeItem('miraflores.pendingPayToken');
+            sessionStorage.removeItem('miraflores.pendingPaidConfirmed');
           } catch {
             /* ignore */
           }

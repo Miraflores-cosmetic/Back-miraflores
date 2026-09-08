@@ -503,7 +503,7 @@ export function RegisterForm() {
                   onChange={(e) => setConsentMarketing(e.target.checked)}
                 />
                 <label htmlFor={marketingId} className={styles.consentLabel}>
-                  Я согласен(на) получать новости и предложения Jcos на email.
+                  Я согласен(на) получать новости и предложения Miraflores на email.
                 </label>
               </div>
             </div>

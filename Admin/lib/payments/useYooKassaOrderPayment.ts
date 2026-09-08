@@ -22,7 +22,7 @@ export type PaidInfo = {
 type Options = {
   /** Интервал опроса статуса, мс (default 4000). */
   pollMs?: number;
-  /** Писать jcos.pending* в sessionStorage. */
+  /** Писать miraflores.pending* в sessionStorage. */
   persistSession?: boolean;
   onPaid: (info: PaidInfo) => void;
   onError?: (message: string) => void;
@@ -37,15 +37,15 @@ function writePendingSession(input: {
 }) {
   try {
     if (input.confirmed) {
-      sessionStorage.setItem('jcos.pendingPaidConfirmed', input.orderId || '1');
+      sessionStorage.setItem('miraflores.pendingPaidConfirmed', input.orderId || '1');
     }
-    sessionStorage.setItem('jcos.pendingOrderId', input.orderId);
-    sessionStorage.setItem('jcos.pendingOrderNumber', input.number);
+    sessionStorage.setItem('miraflores.pendingOrderId', input.orderId);
+    sessionStorage.setItem('miraflores.pendingOrderNumber', input.number);
     if (input.paymentId) {
-      sessionStorage.setItem('jcos.pendingPaymentId', input.paymentId);
+      sessionStorage.setItem('miraflores.pendingPaymentId', input.paymentId);
     }
     if (input.payToken) {
-      sessionStorage.setItem('jcos.pendingPayToken', input.payToken);
+      sessionStorage.setItem('miraflores.pendingPayToken', input.payToken);
     }
   } catch {
     /* ignore */
@@ -54,11 +54,11 @@ function writePendingSession(input: {
 
 export function clearPendingPaymentSession() {
   try {
-    sessionStorage.removeItem('jcos.pendingPaymentId');
-    sessionStorage.removeItem('jcos.pendingOrderId');
-    sessionStorage.removeItem('jcos.pendingOrderNumber');
-    sessionStorage.removeItem('jcos.pendingPayToken');
-    sessionStorage.removeItem('jcos.pendingPaidConfirmed');
+    sessionStorage.removeItem('miraflores.pendingPaymentId');
+    sessionStorage.removeItem('miraflores.pendingOrderId');
+    sessionStorage.removeItem('miraflores.pendingOrderNumber');
+    sessionStorage.removeItem('miraflores.pendingPayToken');
+    sessionStorage.removeItem('miraflores.pendingPaidConfirmed');
   } catch {
     /* ignore */
   }
@@ -102,7 +102,7 @@ export function useYooKassaOrderPayment(opts: Options) {
     const token =
       payToken ||
       (typeof sessionStorage !== 'undefined'
-        ? sessionStorage.getItem('jcos.pendingPayToken')
+        ? sessionStorage.getItem('miraflores.pendingPayToken')
         : null);
     if (!token) return false;
     try {
