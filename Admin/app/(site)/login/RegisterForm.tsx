@@ -44,6 +44,7 @@ export function RegisterForm() {
   const [consentMarketing, setConsentMarketing] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<AuthFieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
+  const [accountHint, setAccountHint] = useState(false);
   const [loading, setLoading] = useState(false);
   const [registered, setRegistered] = useState(false);
   const [resendBusy, setResendBusy] = useState(false);
@@ -92,7 +93,7 @@ export function RegisterForm() {
     return next;
   }
 
-  async function sendOtp(): Promise<boolean> {
+  async function sendOtp(): Promise<{ ok: boolean; otpSent: boolean }> {
     const res = await fetch('/api/auth/register/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -104,7 +105,11 @@ export function RegisterForm() {
         consentMarketing,
       }),
     });
-    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    const data = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      otpSent?: boolean;
+      message?: string;
+    };
     if (!res.ok) {
       const msg =
         typeof data.error === 'string' ? data.error : 'Не удалось отправить код';
@@ -115,14 +120,15 @@ export function RegisterForm() {
       } else {
         setFormError(msg);
       }
-      return false;
+      return { ok: false, otpSent: false };
     }
-    return true;
+    return { ok: true, otpSent: data.otpSent === true };
   }
 
   async function onDetailsSubmit(e: React.FormEvent) {
     e.preventDefault();
     setFormError(null);
+    setAccountHint(false);
     const next = validateDetails();
     setFieldErrors(next);
     if (Object.keys(next).length) {
@@ -132,8 +138,12 @@ export function RegisterForm() {
 
     setLoading(true);
     try {
-      const ok = await sendOtp();
+      const { ok, otpSent } = await sendOtp();
       if (!ok) return;
+      if (!otpSent) {
+        setAccountHint(true);
+        return;
+      }
       setOtp('');
       setCompletionToken(null);
       setStep('otp');
@@ -148,8 +158,15 @@ export function RegisterForm() {
     setFormError(null);
     setResendBusy(true);
     try {
-      const ok = await sendOtp();
-      if (ok) setOtp('');
+      const { ok, otpSent } = await sendOtp();
+      if (!ok) return;
+      if (!otpSent) {
+        setFormError(
+          'Код сейчас не отправлен. Если аккаунт уже есть — войдите или восстановите пароль.',
+        );
+        return;
+      }
+      setOtp('');
     } catch {
       setFormError('Сеть недоступна');
     } finally {
@@ -447,6 +464,7 @@ export function RegisterForm() {
                 onChange={(e) => {
                   setEmail(e.target.value);
                   clearAuthField(setFieldErrors, 'email');
+                  setAccountHint(false);
                 }}
                 autoComplete="email"
                 required
@@ -489,6 +507,34 @@ export function RegisterForm() {
                 </label>
               </div>
             </div>
+
+            {accountHint ? (
+              <div className={styles.accountHint} role="status">
+                <p className={styles.hint}>
+                  Код не отправлен. Если вы уже регистрировались на этот email —
+                  войдите или восстановите пароль (для старых аккаунтов без пароля
+                  подойдёт «Забыли пароль»).
+                </p>
+                <p className={styles.accountHintLinks}>
+                  <Link
+                    href={withReturnPath('/login', from)}
+                    className={styles.linkAccent}
+                  >
+                    Войти
+                  </Link>
+                  {' · '}
+                  <Link
+                    href={withReturnPath(
+                      `/login/forgot-password?email=${encodeURIComponent(email.trim().toLowerCase())}`,
+                      from,
+                    )}
+                    className={styles.linkAccent}
+                  >
+                    Восстановить пароль
+                  </Link>
+                </p>
+              </div>
+            ) : null}
 
             {formError ? (
               <p className={styles.error} role="alert">

@@ -85,8 +85,41 @@ export class OrderLifecycleService {
   }
 
   async notifyOrderPaid(to: string, orderNumber: string): Promise<void> {
+    const order = await this.prisma.order.findUnique({
+      where: { number: orderNumber },
+      select: {
+        total: true,
+        subtotal: true,
+        shippingCost: true,
+        discountTotal: true,
+        giftCertificateAmount: true,
+        items: {
+          orderBy: { id: 'asc' },
+          select: {
+            title: true,
+            qty: true,
+            lineTotal: true,
+            isGratitudeGift: true,
+          },
+        },
+      },
+    });
     await this.runMail(`Order paid mail ${orderNumber} → ${to}`, () =>
-      this.mail.sendOrderPaid({ to, orderNumber }),
+      this.mail.sendOrderPaid({
+        to,
+        orderNumber,
+        total: order?.total,
+        subtotal: order?.subtotal,
+        shippingCost: order?.shippingCost,
+        discountTotal: order?.discountTotal,
+        giftCertificateAmount: order?.giftCertificateAmount,
+        items: order?.items.map((it) => ({
+          title: it.title,
+          qty: it.qty,
+          lineTotal: it.lineTotal,
+          isGratitudeGift: it.isGratitudeGift,
+        })),
+      }),
     );
   }
 

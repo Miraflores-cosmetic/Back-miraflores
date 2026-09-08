@@ -151,12 +151,32 @@ export class MailService {
     this.logger.log(`Password reset email sent to ${params.to}`);
   }
 
-  async sendOrderPaid(params: { to: string; orderNumber: string }): Promise<void> {
+  async sendOrderPaid(params: {
+    to: string;
+    orderNumber: string;
+    total?: number;
+    subtotal?: number;
+    shippingCost?: number;
+    discountTotal?: number;
+    giftCertificateAmount?: number;
+    items?: Array<{
+      title: string;
+      qty: number;
+      lineTotal: number;
+      isGratitudeGift?: boolean;
+    }>;
+  }): Promise<void> {
     await this.sendBuilt(
       params.to,
       buildOrderPaidEmail({
         orderNumber: params.orderNumber,
         siteUrl: this.frontendPublicUrl(),
+        total: params.total,
+        subtotal: params.subtotal,
+        shippingCost: params.shippingCost,
+        discountTotal: params.discountTotal,
+        giftCertificateAmount: params.giftCertificateAmount,
+        items: params.items,
       }),
     );
     this.logger.log(`Order paid email sent to ${params.to} (${params.orderNumber})`);

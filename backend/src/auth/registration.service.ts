@@ -112,8 +112,13 @@ export class RegistrationService {
       );
     }
 
-    const existing = await this.prisma.user.findUnique({ where: { email } });
-    if (existing) {
+    const existing = await this.prisma.user.findUnique({
+      where: { email },
+      select: { id: true, passwordHash: true },
+    });
+    // Аккаунт с паролем — anti-enumeration, без письма.
+    // Passwordless (ETL Saleor) — шлём OTP, complete задаст пароль на существующий User.
+    if (existing?.passwordHash) {
       await this.padStartTiming(startedAt);
       return { message: START_MESSAGE, otpSent: false };
     }
@@ -321,9 +326,9 @@ export class RegistrationService {
 
       const taken = await tx.user.findUnique({
         where: { email: completion.email },
-        select: { id: true },
+        select: { id: true, passwordHash: true },
       });
-      if (taken) {
+      if (taken?.passwordHash) {
         // Коммитим usedAt до выхода из tx (throw Conflict снаружи — иначе rollback).
         await tx.registrationCompletion.update({
           where: { id: completion.id },
@@ -334,17 +339,45 @@ export class RegistrationService {
 
       const now = new Date();
       const marketing = completion.consentMarketing === true;
+      const displayName = completion.displayName?.trim() || null;
+      const consentData = {
+        privacyConsentAt: now,
+        privacyConsentVersion: PRIVACY_CONSENT_VERSION,
+        marketingConsent: marketing,
+        marketingConsentAt: marketing ? now : null,
+        marketingConsentVersion: marketing ? MARKETING_CONSENT_VERSION : null,
+      };
+
+      // ETL / passwordless: задаём пароль на существующий User.
+      if (taken && !taken.passwordHash) {
+        const updated = await tx.user.update({
+          where: { id: taken.id },
+          data: {
+            passwordHash,
+            ...(displayName ? { displayName } : {}),
+            ...consentData,
+          },
+          select: {
+            id: true,
+            email: true,
+            role: true,
+            tokenVersion: true,
+          },
+        });
+        await tx.registrationCompletion.update({
+          where: { id: completion.id },
+          data: { usedAt: new Date() },
+        });
+        return { kind: 'ok' as const, user: updated };
+      }
+
       const created = await tx.user.create({
         data: {
           email: completion.email,
           passwordHash,
           role: UserRole.USER,
-          displayName: completion.displayName?.trim() || null,
-          privacyConsentAt: now,
-          privacyConsentVersion: PRIVACY_CONSENT_VERSION,
-          marketingConsent: marketing,
-          marketingConsentAt: marketing ? now : null,
-          marketingConsentVersion: marketing ? MARKETING_CONSENT_VERSION : null,
+          displayName,
+          ...consentData,
         },
         select: {
           id: true,

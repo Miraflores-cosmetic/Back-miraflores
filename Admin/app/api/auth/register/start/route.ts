@@ -55,9 +55,10 @@ export async function POST(request: Request) {
     );
   }
 
-  const data = (await res.json()) as { message?: string };
+  const data = (await res.json()) as { message?: string; otpSent?: boolean };
   return NextResponse.json({
     ok: true,
-    message: data.message ?? 'Код отправлен на email',
+    otpSent: data.otpSent === true,
+    message: data.message ?? 'Если этот email свободен, мы отправили код подтверждения.',
   });
 }

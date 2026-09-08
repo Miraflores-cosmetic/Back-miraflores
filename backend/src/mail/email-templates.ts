@@ -107,31 +107,135 @@ export function buildPasswordResetEmail(params: {
 }
 
 /** Успешная оплата обычного заказа (не gift). */
+export type OrderPaidEmailItem = {
+  title: string;
+  qty: number;
+  lineTotal: number;
+  isGratitudeGift?: boolean;
+};
+
+function rubLabel(amount: number): string {
+  const n = Number.isFinite(amount) ? Math.round(amount) : 0;
+  return `${n.toLocaleString('ru-RU')} ₽`;
+}
+
+function orderPaidItemsText(items: OrderPaidEmailItem[]): string {
+  return items
+    .map((it) => {
+      const qty = Math.max(1, Math.floor(it.qty) || 1);
+      const gift = it.isGratitudeGift ? ' (подарок)' : '';
+      return `• ${it.title.trim() || 'Товар'}${gift} × ${qty} — ${rubLabel(it.lineTotal)}`;
+    })
+    .join('\n');
+}
+
+function orderPaidItemsHtml(items: OrderPaidEmailItem[]): string {
+  const rows = items
+    .map((it, i) => {
+      const qty = Math.max(1, Math.floor(it.qty) || 1);
+      const title = escapeHtml((it.title || 'Товар').trim() || 'Товар');
+      const gift = it.isGratitudeGift
+        ? ` <span style="color:${MAIL_BRAND.muted};font-size:12px;">· подарок</span>`
+        : '';
+      const border =
+        i < items.length - 1 ? `border-bottom:1px solid ${MAIL_BRAND.line};` : '';
+      return `<tr>
+        <td style="padding:10px 0;${border}vertical-align:top;">
+          <p style="margin:0;font-size:14px;color:${MAIL_BRAND.ink};line-height:1.35;">${title}${gift}</p>
+          <p style="margin:4px 0 0;font-size:12px;color:${MAIL_BRAND.muted};">${qty} шт.</p>
+        </td>
+        <td style="padding:10px 0 10px 12px;${border}vertical-align:top;text-align:right;white-space:nowrap;font-size:14px;color:${MAIL_BRAND.ink};">${escapeHtml(rubLabel(it.lineTotal))}</td>
+      </tr>`;
+    })
+    .join('');
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 16px;">${rows}</table>`;
+}
+
+function orderPaidTotalsHtml(params: {
+  subtotal?: number;
+  shippingCost?: number;
+  discountTotal?: number;
+  giftCertificateAmount?: number;
+  total: number;
+}): string {
+  const rows: string[] = [];
+  const push = (label: string, value: string, strong = false) => {
+    rows.push(`<tr>
+      <td style="padding:4px 0;font-size:13px;color:${MAIL_BRAND.muted};">${escapeHtml(label)}</td>
+      <td style="padding:4px 0;font-size:13px;text-align:right;color:${MAIL_BRAND.ink};${strong ? 'font-weight:700;font-size:15px;' : ''}">${escapeHtml(value)}</td>
+    </tr>`);
+  };
+  if (params.subtotal != null) push('Товары', rubLabel(params.subtotal));
+  if (params.shippingCost != null && params.shippingCost > 0) {
+    push('Доставка', rubLabel(params.shippingCost));
+  }
+  if (params.discountTotal != null && params.discountTotal > 0) {
+    push('Скидка', `−${rubLabel(params.discountTotal)}`);
+  }
+  if (params.giftCertificateAmount != null && params.giftCertificateAmount > 0) {
+    push('Сертификат', `−${rubLabel(params.giftCertificateAmount)}`);
+  }
+  push('Итого оплачено', rubLabel(params.total), true);
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 16px;">${rows.join('')}</table>`;
+}
+
 export function buildOrderPaidEmail(params: {
   orderNumber: string;
   siteUrl?: string | null;
   accountOrdersPath?: string;
+  total?: number;
+  subtotal?: number;
+  shippingCost?: number;
+  discountTotal?: number;
+  giftCertificateAmount?: number;
+  items?: OrderPaidEmailItem[];
 }): BuiltEmail {
   const number = params.orderNumber.trim();
   const site = siteUrl(params.siteUrl);
   const ordersPath = params.accountOrdersPath ?? '/profile?tab=orders';
   const ordersUrl = `${site}${ordersPath.startsWith('/') ? ordersPath : `/${ordersPath}`}`;
-  const subject = `Заказ ${number} оплачен — ${MAIL_BRAND.name}`;
-  const text = [
+  const items = (params.items ?? []).filter((it) => (it.title || '').trim() || it.qty > 0);
+  const hasTotal = params.total != null && Number.isFinite(params.total);
+  const totalLabel = hasTotal ? rubLabel(params.total!) : null;
+  const subject = totalLabel
+    ? `Заказ ${number} оплачен (${totalLabel}) — ${MAIL_BRAND.name}`
+    : `Заказ ${number} оплачен — ${MAIL_BRAND.name}`;
+  const textParts = [
     'Спасибо за покупку!',
     '',
     `Заказ ${number} оплачен и передан в обработку.`,
-    '',
-    `Статус заказа: ${ordersUrl}`,
-    '',
-    site,
-  ].join('\n');
+  ];
+  if (items.length) {
+    textParts.push('', 'Состав заказа:', orderPaidItemsText(items));
+  }
+  if (totalLabel) {
+    textParts.push('', `Итого оплачено: ${totalLabel}`);
+  }
+  textParts.push('', `Статус заказа: ${ordersUrl}`, '', site);
+  const text = textParts.join('\n');
 
   const bodyHtml = [
     eyebrow('Заказ'),
     title('Оплата прошла успешно'),
     `<p style="margin:0 0 16px;">Спасибо за покупку. Заказ <strong>${escapeHtml(number)}</strong> оплачен и передан в обработку.</p>`,
-    orderNumberCard(number),
+    orderNumberCard(
+      number,
+      totalLabel
+        ? `<p style="margin:10px 0 0;font-size:14px;color:${MAIL_BRAND.ink};">Сумма: <strong>${escapeHtml(totalLabel)}</strong></p>`
+        : '',
+    ),
+    items.length
+      ? `<p style="margin:16px 0 8px;font-size:12px;letter-spacing:0.06em;text-transform:uppercase;color:${MAIL_BRAND.muted};">Состав заказа</p>${orderPaidItemsHtml(items)}`
+      : '',
+    hasTotal
+      ? orderPaidTotalsHtml({
+          subtotal: params.subtotal,
+          shippingCost: params.shippingCost,
+          discountTotal: params.discountTotal,
+          giftCertificateAmount: params.giftCertificateAmount,
+          total: params.total!,
+        })
+      : '',
     mailCtaButton(ordersUrl, 'Смотреть заказ'),
     mailMutedNote(
       'Мы пришлём письмо, когда заказ будет отправлен. Вопросы — на info@miraflores.ru.',
@@ -142,7 +246,9 @@ export function buildOrderPaidEmail(params: {
     subject,
     text,
     html: renderMirafloresEmailLayout({
-      preheader: `Заказ ${number} оплачен`,
+      preheader: totalLabel
+        ? `Заказ ${number} оплачен на ${totalLabel}`
+        : `Заказ ${number} оплачен`,
       bodyHtml,
       siteUrl: site,
     }),

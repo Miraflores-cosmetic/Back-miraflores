@@ -13,6 +13,7 @@ describe('RegistrationService', () => {
     user: {
       findUnique: vi.fn(),
       create: vi.fn(),
+      update: vi.fn(),
     },
     registrationCompletion: {
       update: vi.fn(),
@@ -92,8 +93,8 @@ describe('RegistrationService', () => {
     );
   });
 
-  it('start: занятый email — тот же message, без письма и без 409', async () => {
-    prisma.user.findUnique.mockResolvedValue({ id: 'u1' });
+  it('start: email с паролем — тот же message, без письма и без 409', async () => {
+    prisma.user.findUnique.mockResolvedValue({ id: 'u1', passwordHash: 'hash' });
     const res = await svc.start({
       email: 'A@B.com',
       consentPersonalData: true,
@@ -102,6 +103,23 @@ describe('RegistrationService', () => {
     expect(res.otpSent).toBe(false);
     expect(mail.sendRegistrationOtp).not.toHaveBeenCalled();
     expect(prisma.registrationChallenge.create).not.toHaveBeenCalled();
+  });
+
+  it('start: passwordless (ETL) — шлёт OTP для claim', async () => {
+    prisma.user.findUnique.mockResolvedValue({ id: 'u1', passwordHash: null });
+    prisma.registrationChallenge.create.mockResolvedValue({ id: 'ch1' });
+    prisma.registrationOtpDispatch.create.mockResolvedValue({ id: 'd1' });
+
+    const res = await svc.start({
+      email: 'etl@jcos.local',
+      consentPersonalData: true,
+    });
+
+    expect(res.otpSent).toBe(true);
+    expect(mail.sendRegistrationOtp).toHaveBeenCalledWith(
+      'etl@jcos.local',
+      expect.stringMatching(/^\d{6}$/),
+    );
   });
 
   it('start: cooldown — тот же message, без нового письма', async () => {
@@ -255,7 +273,7 @@ describe('RegistrationService', () => {
     expect(res.access_token).toBe('jwt');
   });
 
-  it('complete: email занят → usedAt + Conflict', async () => {
+  it('complete: email с паролем → usedAt + Conflict', async () => {
     jwt.verifyAsync.mockResolvedValue({
       purpose: 'register_complete',
       jti: 'jti-1',
@@ -271,7 +289,7 @@ describe('RegistrationService', () => {
       usedAt: null,
     });
     tx.$queryRaw.mockResolvedValue([{ id: 'jti-1' }]);
-    tx.user.findUnique.mockResolvedValue({ id: 'other' });
+    tx.user.findUnique.mockResolvedValue({ id: 'other', passwordHash: 'hash' });
 
     await expect(
       svc.complete({ completionToken: 'tok', password: 'password1' }),
@@ -281,6 +299,53 @@ describe('RegistrationService', () => {
       data: { usedAt: expect.any(Date) },
     });
     expect(tx.user.create).not.toHaveBeenCalled();
+    expect(tx.user.update).not.toHaveBeenCalled();
+  });
+
+  it('complete: passwordless User → update пароля + claim', async () => {
+    jwt.verifyAsync.mockResolvedValue({
+      purpose: 'register_complete',
+      jti: 'jti-1',
+      email: 'a@b.com',
+    });
+    prisma.registrationCompletion.findUnique.mockResolvedValue({
+      id: 'jti-1',
+      email: 'a@b.com',
+      displayName: 'Ann',
+      consentPersonalData: true,
+      consentMarketing: true,
+      expiresAt: new Date(Date.now() + 60_000),
+      usedAt: null,
+    });
+    tx.$queryRaw.mockResolvedValue([{ id: 'jti-1' }]);
+    tx.user.findUnique.mockResolvedValue({ id: 'u-etl', passwordHash: null });
+    tx.user.update.mockResolvedValue({
+      id: 'u-etl',
+      email: 'a@b.com',
+      role: 'USER',
+      tokenVersion: 0,
+    });
+    tx.registrationCompletion.update.mockResolvedValue({});
+    auth.claimGuestOrders.mockResolvedValue({ claimed: 1 });
+
+    const res = await svc.complete({
+      completionToken: 'tok',
+      password: 'password1',
+      guestId: 'g1',
+    });
+
+    expect(tx.user.create).not.toHaveBeenCalled();
+    expect(tx.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'u-etl' },
+        data: expect.objectContaining({
+          passwordHash: expect.any(String),
+          displayName: 'Ann',
+        }),
+      }),
+    );
+    expect(auth.claimGuestOrders).toHaveBeenCalledWith('u-etl', 'g1', 'a@b.com');
+    expect(res.access_token).toBe('jwt');
   });
 
   it('complete: повторное использование jti → ошибка', async () => {

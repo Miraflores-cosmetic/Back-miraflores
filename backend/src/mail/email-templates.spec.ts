@@ -31,15 +31,26 @@ describe('email templates', () => {
     expect(e.subject).toContain('пароль');
   });
 
-  it('order paid shows number and account CTA', () => {
+  it('order paid shows number, total, items and account CTA', () => {
     const e = buildOrderPaidEmail({
       orderNumber: 'MF-100',
       siteUrl: 'http://localhost:5173',
+      total: 2500,
+      subtotal: 2200,
+      shippingCost: 300,
+      items: [
+        { title: 'Крем', qty: 1, lineTotal: 2200 },
+        { title: 'Пробник', qty: 1, lineTotal: 0, isGratitudeGift: true },
+      ],
     });
     expect(e.subject).toContain('MF-100');
+    expect(e.subject).toMatch(/2[\s\u00a0]?500/);
     expect(e.html).toContain('/profile?tab=orders');
     expect(e.html).toContain('MF-100');
-    expect(e.html).toContain('/profile');
+    expect(e.html).toContain('Крем');
+    expect(e.html).toContain('Состав заказа');
+    expect(e.html).toContain('Итого оплачено');
+    expect(e.text).toContain('Крем');
     expect(e.html).not.toContain('Jcos');
   });
 
