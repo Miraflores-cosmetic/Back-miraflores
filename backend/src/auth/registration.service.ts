@@ -404,6 +404,10 @@ export class RegistrationService {
       dto.guestId,
       outcome.user.email,
     );
+    this.logger.log(
+      `register complete: user=${outcome.user.id} email=${outcome.user.email}` +
+        (dto.guestId ? ` guestId=${dto.guestId}` : ''),
+    );
     return this.auth.login(outcome.user);
   }
 

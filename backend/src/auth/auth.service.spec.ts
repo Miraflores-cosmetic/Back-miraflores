@@ -128,14 +128,31 @@ describe('AuthService.registerBuyer', () => {
   it('claimGuestOrders привязывает заказы с userId=null', async () => {
     prisma.order.updateMany.mockResolvedValue({ count: 2 });
     await expect(
-      svc.claimGuestOrders('u1', 'guest-abc', 'a@b.co'),
+      svc.claimGuestOrders('u1', 'guest-abc', 'A@B.co'),
     ).resolves.toEqual({
       claimed: 2,
     });
     expect(prisma.order.updateMany).toHaveBeenCalledWith({
       where: {
         userId: null,
-        OR: [{ guestId: 'guest-abc' }, { email: 'a@b.co' }],
+        OR: [
+          { guestId: 'guest-abc' },
+          { email: { equals: 'a@b.co', mode: 'insensitive' } },
+        ],
+      },
+      data: { userId: 'u1' },
+    });
+  });
+
+  it('claimGuestOrders только по email (без guestId)', async () => {
+    prisma.order.updateMany.mockResolvedValue({ count: 1 });
+    await expect(svc.claimGuestOrders('u1', null, 'guest@mail.ru')).resolves.toEqual({
+      claimed: 1,
+    });
+    expect(prisma.order.updateMany).toHaveBeenCalledWith({
+      where: {
+        userId: null,
+        OR: [{ email: { equals: 'guest@mail.ru', mode: 'insensitive' } }],
       },
       data: { userId: 'u1' },
     });
@@ -149,8 +166,11 @@ describe('AuthService (base)', () => {
       findUnique: vi.fn(),
       update: vi.fn(),
     },
+    order: {
+      updateMany: vi.fn(),
+    },
   };
-  const jwt = { sign: vi.fn(() => 'token') };
+  const jwt = { sign: vi.fn(() => 'token'), verify: vi.fn() };
   const mail = {
     isConfigured: vi.fn(() => false),
     sendPasswordResetLink: vi.fn(),
@@ -159,6 +179,7 @@ describe('AuthService (base)', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    prisma.order.updateMany.mockResolvedValue({ count: 0 });
     svc = new AuthService(prisma as never, jwt as never, mail as never);
   });
 
@@ -217,5 +238,38 @@ describe('AuthService (base)', () => {
     const out = await svc.requestPasswordReset('missing@example.com');
     expect(out.emailSent).toBe(false);
     expect(mail.sendPasswordResetLink).not.toHaveBeenCalled();
+  });
+
+  it('confirmPasswordReset задаёт пароль и claimGuestOrders по email', async () => {
+    jwt.verify.mockReturnValue({
+      sub: 'u-etl',
+      email: 'buyer@example.com',
+      purpose: 'password_reset',
+      typ: 'pwreset',
+    });
+    prisma.user.findFirst.mockResolvedValue({ id: 'u-etl' });
+    prisma.user.update.mockResolvedValue({});
+    prisma.order.updateMany.mockResolvedValue({ count: 2 });
+
+    await expect(
+      svc.confirmPasswordReset('tok', 'password1'),
+    ).resolves.toEqual({ ok: true });
+
+    expect(prisma.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'u-etl' },
+        data: expect.objectContaining({
+          passwordHash: expect.any(String),
+          tokenVersion: { increment: 1 },
+        }),
+      }),
+    );
+    expect(prisma.order.updateMany).toHaveBeenCalledWith({
+      where: {
+        userId: null,
+        OR: [{ email: { equals: 'buyer@example.com', mode: 'insensitive' } }],
+      },
+      data: { userId: 'u-etl' },
+    });
   });
 });

@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
-import { UserRole } from '@prisma/client';
+import { UserRole, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { JwtPayload } from '../common/decorators/current-user.decorator';
 import { MailService } from '../mail/mail.service';
@@ -115,7 +115,7 @@ export class AuthService {
   }
 
   /**
-   * Привязывает гостевые заказы (userId=null) к покупателю после login/register.
+   * Привязывает гостевые заказы (userId=null) к покупателю после login/register/reset.
    * По guestId и/или email (заказы с тем же email без аккаунта).
    */
   async claimGuestOrders(
@@ -128,14 +128,21 @@ export class AuthService {
     const email = emailRaw?.trim().toLowerCase() || '';
     if (!guestId && !email) return { claimed: 0 };
 
-    const or: Array<{ guestId?: string; email?: string }> = [];
+    const or: Prisma.OrderWhereInput[] = [];
     if (guestId) or.push({ guestId });
-    if (email) or.push({ email });
+    if (email) or.push({ email: { equals: email, mode: 'insensitive' } });
 
     const result = await this.prisma.order.updateMany({
       where: { userId: null, OR: or },
       data: { userId },
     });
+    if (result.count > 0) {
+      this.logger.log(
+        `claimGuestOrders: user=${userId} claimed=${result.count}` +
+          (email ? ` email=${email}` : '') +
+          (guestId ? ` guestId=${guestId}` : ''),
+      );
+    }
     return { claimed: result.count };
   }
 
@@ -317,6 +324,8 @@ export class AuthService {
       where: { id: user.id },
       data: { passwordHash, tokenVersion: { increment: 1 } },
     });
+    // Гостевые заказы с тем же email (без ожидания следующего login).
+    await this.claimGuestOrders(user.id, null, payload.email);
     return { ok: true as const };
   }
 }
