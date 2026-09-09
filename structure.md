@@ -101,7 +101,7 @@ Miraflores 3.0/
 - Auth / регистрация / reset password  
 - Каталог, корзина, checkout, заказы  
 - Staff ACL, настройки, сертификаты, блог, отзывы, …  
-- 1С обмен: `GET|POST /api/v1/1c/exchange` (цены/остатки + выгрузка заказов)  
+- 1С обмен: `GET|POST /api/v1/1c/exchange` (по умолчанию только заказы site→1C; `ONEC_CATALOG_IMPORT=1` — ещё цены/остатки)  
 - Uploads: `LOCAL_UPLOADS_*`  
 - Почта: SMTP (заказы, staff welcome/reset)
 

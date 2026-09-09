@@ -18,13 +18,12 @@ import { buildOrdersCommerceMl } from './onec-orders.xml';
 import { OnecSessionStore } from './onec-session';
 import { OrderStatus } from '@prisma/client';
 
-const EXPORT_STATUSES: OrderStatus[] = [
+/** Заказы, которые отдаём 1С (site → 1C). Отмены — только если ONEC_EXPORT_CANCELLED=1. */
+const DEFAULT_EXPORT_STATUSES: OrderStatus[] = [
   OrderStatus.PAID,
   OrderStatus.PACKING,
   OrderStatus.SHIPPED,
   OrderStatus.DELIVERED,
-  OrderStatus.CANCELLED,
-  OrderStatus.REFUNDED,
 ];
 
 @Injectable()
@@ -51,6 +50,22 @@ export class OnecService {
 
   private password() {
     return this.config.get<string>('ONEC_PASSWORD');
+  }
+
+  /** Импорт offers.xml (цены/остатки 1С → сайт). По умолчанию выкл — только заказы на сайт. */
+  catalogImportEnabled(): boolean {
+    const raw = this.config.get<string>('ONEC_CATALOG_IMPORT')?.trim().toLowerCase();
+    return raw === '1' || raw === 'true' || raw === 'yes';
+  }
+
+  exportStatuses(): OrderStatus[] {
+    const raw = this.config.get<string>('ONEC_EXPORT_CANCELLED')?.trim().toLowerCase();
+    const includeCancelled =
+      raw === '1' || raw === 'true' || raw === 'yes';
+    if (includeCancelled) {
+      return [...DEFAULT_EXPORT_STATUSES, OrderStatus.CANCELLED, OrderStatus.REFUNDED];
+    }
+    return DEFAULT_EXPORT_STATUSES;
   }
 
   /** checkauth / любая mode: Basic обязателен. */
@@ -114,6 +129,11 @@ export class OnecService {
   }
 
   async importFile(sessionToken: string, filename: string): Promise<string> {
+    if (!this.catalogImportEnabled()) {
+      this.logger.log('1C catalog import disabled (ONEC_CATALOG_IMPORT) — skip');
+      return 'success';
+    }
+
     const safe = this.safeFilename(filename);
     const path = join(this.exchangeDir, sessionToken, safe);
     if (!existsSync(path)) {
@@ -167,7 +187,7 @@ export class OnecService {
     const orders = await this.prisma.order.findMany({
       where: {
         onecExportedAt: null,
-        status: { in: EXPORT_STATUSES },
+        status: { in: this.exportStatuses() },
       },
       include: {
         items: { include: { variant: { select: { onecId: true } } } },

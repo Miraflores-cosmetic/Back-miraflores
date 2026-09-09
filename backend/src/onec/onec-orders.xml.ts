@@ -7,6 +7,15 @@ type OrderForXml = Order & {
   payments: Payment[];
 };
 
+/** Строки для 1С: без подарков благодарности и без номенклатуры без onecId. */
+export function orderItemsForOnecExport(
+  items: OrderForXml['items'],
+): OrderForXml['items'] {
+  return items.filter(
+    (item) => !item.isGratitudeGift && Boolean(item.variant?.onecId?.trim()),
+  );
+}
+
 function xmlEscape(s: string): string {
   return s
     .replace(/&/g, '&amp;')
@@ -105,12 +114,10 @@ function buildDocument(order: OrderForXml): string {
   ].filter(Boolean);
   const address = xmlEscape(addressParts.join(', '));
 
-  const products = order.items
+  const products = orderItemsForOnecExport(order.items)
     .map((item) => {
-      const onecId = item.variant?.onecId?.trim();
-      const idXml = onecId
-        ? `<Ид>${xmlEscape(onecId)}</Ид>\n`
-        : `<Ид>${xmlEscape(item.sku)}</Ид>\n`;
+      const onecId = item.variant!.onecId!.trim();
+      const idXml = `<Ид>${xmlEscape(onecId)}</Ид>\n`;
       return (
         `      <Товар>\n` +
         `        ${idXml}` +
