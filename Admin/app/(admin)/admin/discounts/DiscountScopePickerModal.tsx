@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { AdminCompactBtn } from '@/components/AdminCompactBtn/AdminCompactBtn';
 import { AdminCheckbox } from '@/components/admin/AdminCheckbox/AdminCheckbox';
 import { AdminListPagination } from '@/components/admin/AdminListPagination/AdminListPagination';
 import { AdminModal, AdminModalActions } from '@/components/admin/AdminModal/AdminModal';
@@ -126,7 +127,7 @@ export function DiscountCategoryPickerModal({
         <AdminModalActions
           onCancel={onClose}
           onConfirm={apply}
-          confirmDisabled={single && draft.size === 0}
+          confirmDisabled={draft.size === 0}
         />
       }
     >
@@ -142,6 +143,20 @@ export function DiscountCategoryPickerModal({
         <p className={styles.error} role="alert">
           {error}
         </p>
+      ) : null}
+      {!loading && !error && !single && filtered.length > 0 ? (
+        <div className={styles.toolbarRow} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <AdminCompactBtn
+            type="button"
+            variant="outline"
+            onClick={() => setDraft(new Set(filtered.map((c) => c.id)))}
+          >
+            Выбрать все ({filtered.length})
+          </AdminCompactBtn>
+          <AdminCompactBtn type="button" variant="outline" onClick={() => setDraft(new Set())}>
+            Снять выбор
+          </AdminCompactBtn>
+        </div>
       ) : null}
       {!loading && !error ? (
         <div className={styles.tableWrap}>

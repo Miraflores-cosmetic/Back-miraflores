@@ -21,6 +21,7 @@ function makeService() {
       findMany: vi.fn(),
       upsert: vi.fn(),
       deleteMany: vi.fn(),
+      createMany: vi.fn(),
     },
     groupVariantPrice: { findMany: vi.fn() },
     catalogGroupVisibility: {
@@ -30,7 +31,7 @@ function makeService() {
       update: vi.fn(),
       delete: vi.fn(),
     },
-    category: { findFirst: vi.fn(), findUnique: vi.fn(), findMany: vi.fn() },
+    category: { findFirst: vi.fn(), findUnique: vi.fn(), findMany: vi.fn(), count: vi.fn() },
     product: { findMany: vi.fn(), findUnique: vi.fn() },
     productVariant: { findMany: vi.fn(), findUnique: vi.fn() },
     user: { findFirst: vi.fn(), count: vi.fn(), findMany: vi.fn(), update: vi.fn() },
@@ -76,6 +77,26 @@ describe('UserGroupsAdminService guards', () => {
     await expect(svc.update('ug_guest', { slug: 'new-slug' })).rejects.toBeInstanceOf(
       BadRequestException,
     );
+  });
+
+  it('bulkUpsertCategoryPrices upserts without deleting others', async () => {
+    const { svc, prisma } = makeService();
+    prisma.userGroup.findUnique.mockResolvedValue({ id: 'g1', assignable: true });
+    prisma.category.count.mockResolvedValue(2);
+    prisma.category.findUnique.mockResolvedValue({ id: 'leaf' });
+    prisma.category.findFirst.mockResolvedValue(null);
+    prisma.groupCategoryPrice.findMany.mockResolvedValue([]);
+    prisma.groupCategoryPrice.upsert = vi.fn().mockResolvedValue({});
+
+    await svc.bulkUpsertCategoryPrices('g1', {
+      items: [
+        { categoryId: 'c1', type: GroupCategoryPriceType.PERCENT_OFF, value: 10 },
+        { categoryId: 'c2', type: GroupCategoryPriceType.PERCENT_OFF, value: 10 },
+      ],
+    });
+
+    expect(prisma.groupCategoryPrice.upsert).toHaveBeenCalledTimes(2);
+    expect(prisma.groupCategoryPrice.deleteMany).not.toHaveBeenCalled();
   });
 
   it('rejects category price on non-leaf category', async () => {

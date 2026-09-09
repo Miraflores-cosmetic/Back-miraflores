@@ -457,6 +457,46 @@ export class UserGroupsAdminService {
     return this.listCategoryPrices(groupId);
   }
 
+  /** Upsert нескольких правил без удаления остальных (bulk apply). */
+  async bulkUpsertCategoryPrices(groupId: string, dto: ReplaceGroupCategoryPricesDto) {
+    await this.ensureGroup(groupId);
+    if (!Array.isArray(dto.items)) {
+      throw new BadRequestException('items обязателен (массив)');
+    }
+    const items = dto.items;
+    if (!items.length) {
+      return this.listCategoryPrices(groupId);
+    }
+    for (const item of items) {
+      assertCategoryPriceValue(item.type, item.value);
+    }
+    const categoryIds = [...new Set(items.map((i) => i.categoryId))];
+    const found = await this.prisma.category.count({ where: { id: { in: categoryIds } } });
+    if (found !== categoryIds.length) {
+      throw new BadRequestException('Некоторые categoryId не найдены');
+    }
+    for (const categoryId of categoryIds) {
+      await this.assertLeafCategory(categoryId);
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      for (const item of items) {
+        await tx.groupCategoryPrice.upsert({
+          where: { groupId_categoryId: { groupId, categoryId: item.categoryId } },
+          create: {
+            groupId,
+            categoryId: item.categoryId,
+            type: item.type,
+            value: item.value,
+          },
+          update: { type: item.type, value: item.value },
+        });
+      }
+    });
+
+    return this.listCategoryPrices(groupId);
+  }
+
   async upsertCategoryPrice(
     groupId: string,
     categoryId: string,

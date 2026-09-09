@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DiscountProductPickerModal } from '@/app/(admin)/admin/discounts/DiscountScopePickerModal';
 import { AdminCompactBtn } from '@/components/AdminCompactBtn/AdminCompactBtn';
+import { AdminPillChip, AdminPillChipList } from '@/components/AdminPillChip/AdminPillChip';
 import { AdminListPagination } from '@/components/admin/AdminListPagination/AdminListPagination';
 import { AdminTextField } from '@/components/AdminTextField/AdminTextField';
 import { AdminTabs } from '@/components/AdminTabs/AdminTabs';
@@ -275,25 +276,29 @@ export function UserGroupProductPricesTab({
               цена показана для ориентира.
             </p>
           </div>
-          {selectedProductId ? (
-            <AdminCompactBtn type="button" variant="outline" disabled={productSaving} onClick={clearProductForm}>
-              Сменить товар
-            </AdminCompactBtn>
-          ) : null}
         </div>
 
-        {!selectedProductId ? (
-          <AdminCompactBtn type="button" variant="accent" onClick={() => setProductPickerOpen(true)}>
-            Выбрать товар
+        <div className={settingsStyles.menuProductActions}>
+          <AdminCompactBtn
+            type="button"
+            variant={selectedProductId ? 'outline' : 'accent'}
+            disabled={productSaving}
+            onClick={() => setProductPickerOpen(true)}
+          >
+            {selectedProductId ? 'Сменить товар' : 'Выбрать товар'}
           </AdminCompactBtn>
-        ) : (
-          <p className={catalogStyles.muted} style={{ margin: 0 }}>
-            Товар:{' '}
-            <Link href={`/admin/catalog/products/${selectedProductId}`} className={catalogStyles.link}>
+        </div>
+
+        {selectedProductId ? (
+          <AdminPillChipList aria-label="Выбранный товар">
+            <AdminPillChip
+              onRemove={clearProductForm}
+              removeAriaLabel={`Убрать ${selectedProductName}`}
+            >
               {selectedProductName}
-            </Link>
-          </p>
-        )}
+            </AdminPillChip>
+          </AdminPillChipList>
+        ) : null}
 
         {selectedProductId ? (
           <form className={settingsStyles.menuFormStack} onSubmit={(e) => void saveProductPrices(e)}>

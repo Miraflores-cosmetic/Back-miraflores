@@ -142,6 +142,14 @@ export class UserGroupsAdminController {
     return this.groups.replaceCategoryPrices(id, dto);
   }
 
+  @Post(':id/category-prices/bulk')
+  bulkUpsertCategoryPrices(
+    @Param('id') id: string,
+    @Body() dto: ReplaceGroupCategoryPricesDto,
+  ) {
+    return this.groups.bulkUpsertCategoryPrices(id, dto);
+  }
+
   @Patch(':id/category-prices/:categoryId')
   upsertCategoryPrice(
     @Param('id') id: string,

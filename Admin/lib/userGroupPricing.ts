@@ -1,4 +1,25 @@
+import { adminBackendJson } from '@/lib/adminBackendFetch';
+import type { AdminCategory } from '@/lib/adminCatalogTypes';
 import type { AdminUserGroup } from '@/lib/adminUserGroupTypes';
+
+export type LeafCategoryOption = { id: string; label: string };
+
+function categoryLabel(c: AdminCategory): string {
+  if (c.parent?.name) return `${c.parent.name} → ${c.name}`;
+  return c.name;
+}
+
+/** Leaf-категории для правил групповых цен (без подкатегорий). */
+export async function fetchLeafCategories(): Promise<LeafCategoryOption[]> {
+  const cats = await adminBackendJson<AdminCategory[]>('catalog/admin/categories');
+  const parentIds = new Set(
+    cats.map((c) => c.parentId).filter((id): id is string => Boolean(id)),
+  );
+  return cats
+    .filter((c) => !parentIds.has(c.id))
+    .map((c) => ({ id: c.id, label: categoryLabel(c) }))
+    .sort((a, b) => a.label.localeCompare(b.label, 'ru'));
+}
 
 export type UserGroupPricingSection = 'categories' | 'products';
 

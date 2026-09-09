@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { DiscountCategoryPickerModal } from '@/app/(admin)/admin/discounts/DiscountScopePickerModal';
 import { AdminCompactBtn } from '@/components/AdminCompactBtn/AdminCompactBtn';
+import { AdminPillChip, AdminPillChipList } from '@/components/AdminPillChip/AdminPillChip';
 import { AdminTextField } from '@/components/AdminTextField/AdminTextField';
 import { AdminTabs } from '@/components/AdminTabs/AdminTabs';
 import { ConfirmDialog } from '@/components/ConfirmDialog/ConfirmDialog';
@@ -12,6 +13,7 @@ import {
   adminBackendJson,
 } from '@/lib/adminBackendFetch';
 import type { AdminGroupCategoryPriceRow } from '@/lib/adminUserGroupTypes';
+import { fetchLeafCategories } from '@/lib/userGroupPricing';
 import catalogStyles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
 import settingsStyles from '@/app/(admin)/admin/settings/Settings.module.css';
 
@@ -38,8 +40,8 @@ export function UserGroupCategoryPricesTab({ groupId, onChanged }: Props) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
-  const [selectedCategoryLabel, setSelectedCategoryLabel] = useState('');
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
+  const [selectedCategoryLabels, setSelectedCategoryLabels] = useState<Record<string, string>>({});
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const [catType, setCatType] = useState<CatType>('PERCENT_OFF');
   const [catValue, setCatValue] = useState('10');
@@ -64,20 +66,41 @@ export function UserGroupCategoryPricesTab({ groupId, onChanged }: Props) {
     void load();
   }, [load]);
 
-  async function upsertCategoryPrice(e: React.FormEvent) {
+  async function saveCategoryPrices(e: React.FormEvent) {
     e.preventDefault();
     const value = Number(catValue);
-    if (!selectedCategoryId || !Number.isFinite(value)) return;
+    if (!selectedCategoryIds.length || !Number.isFinite(value)) return;
+    const count = selectedCategoryIds.length;
+    const flooredValue = Math.floor(value);
     setSaving(true);
     setError(null);
     try {
-      await adminBackendJson(`user-groups/admin/${groupId}/category-prices/${selectedCategoryId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ type: catType, value: Math.floor(value) }),
-      });
-      setSelectedCategoryId(null);
-      setSelectedCategoryLabel('');
-      showToast('Правило категории сохранено');
+      if (count === 1) {
+        await adminBackendJson(
+          `user-groups/admin/${groupId}/category-prices/${selectedCategoryIds[0]}`,
+          {
+            method: 'PATCH',
+            body: JSON.stringify({ type: catType, value: flooredValue }),
+          },
+        );
+      } else {
+        await adminBackendJson(`user-groups/admin/${groupId}/category-prices/bulk`, {
+          method: 'POST',
+          body: JSON.stringify({
+            items: selectedCategoryIds.map((categoryId) => ({
+              categoryId,
+              type: catType,
+              value: flooredValue,
+            })),
+          }),
+        });
+      }
+
+      setSelectedCategoryIds([]);
+      setSelectedCategoryLabels({});
+      showToast(
+        count === 1 ? 'Правило категории сохранено' : `Сохранено для ${count} категорий`,
+      );
       await load();
       onChanged?.();
     } catch (err) {
@@ -87,19 +110,44 @@ export function UserGroupCategoryPricesTab({ groupId, onChanged }: Props) {
     }
   }
 
+  async function selectAllLeafCategories() {
+    setSaving(true);
+    setError(null);
+    try {
+      const leaves = await fetchLeafCategories();
+      const labels = Object.fromEntries(leaves.map((c) => [c.id, c.label]));
+      setSelectedCategoryIds(leaves.map((c) => c.id));
+      setSelectedCategoryLabels(labels);
+      showToast(`Выбрано ${leaves.length} leaf-категорий`);
+    } catch (e) {
+      setError(e instanceof AdminBackendRequestError ? e.message : 'Не удалось загрузить категории');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   function startEditCategory(row: AdminGroupCategoryPriceRow) {
-    setSelectedCategoryId(row.categoryId);
-    setSelectedCategoryLabel(row.categoryName);
+    setSelectedCategoryIds([row.categoryId]);
+    setSelectedCategoryLabels({ [row.categoryId]: row.categoryName });
     setCatType(row.type);
     setCatValue(String(row.value));
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   function clearForm() {
-    setSelectedCategoryId(null);
-    setSelectedCategoryLabel('');
+    setSelectedCategoryIds([]);
+    setSelectedCategoryLabels({});
     setCatType('PERCENT_OFF');
     setCatValue('10');
+  }
+
+  function removeCategory(categoryId: string) {
+    setSelectedCategoryIds((prev) => prev.filter((id) => id !== categoryId));
+    setSelectedCategoryLabels((prev) => {
+      const next = { ...prev };
+      delete next[categoryId];
+      return next;
+    });
   }
 
   async function confirmDeleteCategory() {
@@ -123,7 +171,8 @@ export function UserGroupCategoryPricesTab({ groupId, onChanged }: Props) {
   }
 
   const editingExisting =
-    selectedCategoryId != null && items.some((r) => r.categoryId === selectedCategoryId);
+    selectedCategoryIds.length === 1 &&
+    items.some((r) => r.categoryId === selectedCategoryIds[0]);
 
   return (
     <>
@@ -140,21 +189,51 @@ export function UserGroupCategoryPricesTab({ groupId, onChanged }: Props) {
               {editingExisting ? 'Изменить правило' : 'Новое правило'}
             </p>
             <p className={catalogStyles.muted} style={{ margin: '4px 0 0' }}>
-              Только конечные категории без подкатегорий. На витрине правило наследуется вниз; при
-              расчёте берётся ближайшее правило вверх по дереву.
+              Только конечные категории без подкатегорий. Можно выбрать несколько или сразу все
+              leaf-категории. На витрине правило наследуется вниз; при расчёте берётся ближайшее
+              правило вверх по дереву.
             </p>
           </div>
-          {selectedCategoryId ? (
+          {selectedCategoryIds.length ? (
             <AdminCompactBtn type="button" variant="outline" disabled={saving} onClick={clearForm}>
               Сбросить
             </AdminCompactBtn>
           ) : null}
         </div>
 
-        <form className={settingsStyles.menuFormStack} onSubmit={(e) => void upsertCategoryPrice(e)}>
-          <AdminCompactBtn type="button" variant="outline" onClick={() => setCategoryPickerOpen(true)}>
-            {selectedCategoryLabel || 'Выбрать категорию'}
-          </AdminCompactBtn>
+        <form className={settingsStyles.menuFormStack} onSubmit={(e) => void saveCategoryPrices(e)}>
+          <div className={settingsStyles.menuProductActions}>
+            <AdminCompactBtn
+              type="button"
+              variant="outline"
+              disabled={saving}
+              onClick={() => setCategoryPickerOpen(true)}
+            >
+              {selectedCategoryIds.length ? 'Изменить выбор' : 'Выбрать категории'}
+            </AdminCompactBtn>
+            <AdminCompactBtn
+              type="button"
+              variant="outline"
+              disabled={saving}
+              onClick={() => void selectAllLeafCategories()}
+            >
+              Все leaf-категории
+            </AdminCompactBtn>
+          </div>
+
+          {selectedCategoryIds.length > 0 ? (
+            <AdminPillChipList aria-label="Выбранные категории">
+              {selectedCategoryIds.map((id) => (
+                <AdminPillChip
+                  key={id}
+                  onRemove={() => removeCategory(id)}
+                  removeAriaLabel={`Убрать ${selectedCategoryLabels[id] ?? 'категорию'}`}
+                >
+                  {selectedCategoryLabels[id] ?? id}
+                </AdminPillChip>
+              ))}
+            </AdminPillChipList>
+          ) : null}
 
           <AdminTabs
             ariaLabel="Тип правила категории"
@@ -170,7 +249,13 @@ export function UserGroupCategoryPricesTab({ groupId, onChanged }: Props) {
           />
 
           <AdminTextField
-            label={catType === 'PERCENT_OFF' ? 'Скидка, %' : catType === 'FIXED_OFF' ? 'Скидка, ₽' : 'Цена, ₽'}
+            label={
+              catType === 'PERCENT_OFF'
+                ? 'Скидка, %'
+                : catType === 'FIXED_OFF'
+                  ? 'Скидка, ₽'
+                  : 'Цена, ₽'
+            }
             value={catValue}
             onChange={(e) => setCatValue(e.target.value)}
             disabled={saving}
@@ -178,8 +263,16 @@ export function UserGroupCategoryPricesTab({ groupId, onChanged }: Props) {
           />
 
           <div className={settingsStyles.menuProductActions}>
-            <AdminCompactBtn type="submit" variant="accent" disabled={saving || !selectedCategoryId}>
-              {editingExisting ? 'Обновить' : 'Сохранить'}
+            <AdminCompactBtn
+              type="submit"
+              variant="accent"
+              disabled={saving || selectedCategoryIds.length === 0}
+            >
+              {editingExisting
+                ? 'Обновить'
+                : selectedCategoryIds.length > 1
+                  ? `Сохранить для ${selectedCategoryIds.length} категорий`
+                  : 'Сохранить'}
             </AdminCompactBtn>
           </div>
         </form>
@@ -211,16 +304,26 @@ export function UserGroupCategoryPricesTab({ groupId, onChanged }: Props) {
                   <div className={settingsStyles.settingsEmpty}>
                     <p className={settingsStyles.settingsEmptyTitle}>Правил категорий пока нет</p>
                     <p className={settingsStyles.settingsEmptyHint}>
-                      Выберите конечную категорию и задайте скидку или фиксированную цену.
+                      Выберите категории или нажмите «Все leaf-категории», задайте скидку и сохраните.
                     </p>
-                    <AdminCompactBtn
-                      type="button"
-                      variant="accent"
-                      disabled={saving}
-                      onClick={() => setCategoryPickerOpen(true)}
-                    >
-                      Добавить первое правило
-                    </AdminCompactBtn>
+                    <div className={settingsStyles.menuProductActions}>
+                      <AdminCompactBtn
+                        type="button"
+                        variant="accent"
+                        disabled={saving}
+                        onClick={() => void selectAllLeafCategories()}
+                      >
+                        Все leaf-категории
+                      </AdminCompactBtn>
+                      <AdminCompactBtn
+                        type="button"
+                        variant="outline"
+                        disabled={saving}
+                        onClick={() => setCategoryPickerOpen(true)}
+                      >
+                        Выбрать категории
+                      </AdminCompactBtn>
+                    </div>
                   </div>
                 </td>
               </tr>
@@ -229,9 +332,7 @@ export function UserGroupCategoryPricesTab({ groupId, onChanged }: Props) {
                 <tr key={r.categoryId}>
                   <td>{r.categoryName}</td>
                   <td>{CATEGORY_TYPE_LABELS[r.type] ?? r.type}</td>
-                  <td>
-                    {r.type === 'PERCENT_OFF' ? `${r.value}%` : `${r.value} ₽`}
-                  </td>
+                  <td>{r.type === 'PERCENT_OFF' ? `${r.value}%` : `${r.value} ₽`}</td>
                   <td>
                     <div className={settingsStyles.menuProductActions}>
                       <AdminCompactBtn
@@ -261,15 +362,12 @@ export function UserGroupCategoryPricesTab({ groupId, onChanged }: Props) {
 
       <DiscountCategoryPickerModal
         open={categoryPickerOpen}
-        single
         leafOnly
-        selectedIds={selectedCategoryId ? [selectedCategoryId] : []}
+        selectedIds={selectedCategoryIds}
         onClose={() => setCategoryPickerOpen(false)}
         onApply={(ids, labels) => {
-          const id = ids[0];
-          if (!id) return;
-          setSelectedCategoryId(id);
-          setSelectedCategoryLabel(labels[id] ?? id);
+          setSelectedCategoryIds(ids);
+          setSelectedCategoryLabels(labels);
         }}
       />
       <ConfirmDialog
