@@ -21,7 +21,7 @@ import type {
   AdminGroupVariantPriceRow,
   AdminUserGroup,
 } from '@/lib/adminUserGroupTypes';
-import { computePercentOffPrice } from '@/lib/userGroupPricing';
+import { computePercentOffPrice, fetchRuledProductIds } from '@/lib/userGroupPricing';
 import catalogStyles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
 import settingsStyles from '@/app/(admin)/admin/settings/Settings.module.css';
 
@@ -70,6 +70,7 @@ export function UserGroupProductPricesTab({
 
   const [deleteVariantId, setDeleteVariantId] = useState<string | null>(null);
   const [deleteLabel, setDeleteLabel] = useState('');
+  const [ruledProductIds, setRuledProductIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -103,6 +104,23 @@ export function UserGroupProductPricesTab({
   useEffect(() => {
     void loadList();
   }, [loadList]);
+
+  const refreshRuledProductIds = useCallback(async () => {
+    try {
+      setRuledProductIds(await fetchRuledProductIds(groupId));
+    } catch {
+      // список SKU подгрузится отдельно; пикер без exclude — запасной вариант
+    }
+  }, [groupId]);
+
+  useEffect(() => {
+    void refreshRuledProductIds();
+  }, [refreshRuledProductIds]);
+
+  const excludeProductIds = useMemo(
+    () => [...ruledProductIds].filter((id) => id !== selectedProductId),
+    [ruledProductIds, selectedProductId],
+  );
 
   const loadProduct = useCallback(
     async (productId: string, productName: string) => {
@@ -197,6 +215,7 @@ export function UserGroupProductPricesTab({
           : `Сохранено для ${toSave.length} вариантов`,
       );
       await loadList();
+      await refreshRuledProductIds();
       onChanged();
       if (selectedProductId && selectedProductName) {
         await loadProduct(selectedProductId, selectedProductName);
@@ -237,6 +256,7 @@ export function UserGroupProductPricesTab({
       setDeleteVariantId(null);
       setDeleteLabel('');
       await loadList();
+      await refreshRuledProductIds();
       onChanged();
       if (productDetail?.variants.some((v) => v.id === deleteVariantId)) {
         setExistingByVariant((prev) => {
@@ -498,6 +518,7 @@ export function UserGroupProductPricesTab({
         single
         selectedIds={selectedProductId ? [selectedProductId] : []}
         selectedLabels={selectedProductId ? { [selectedProductId]: selectedProductName } : {}}
+        excludeIds={excludeProductIds}
         onClose={() => setProductPickerOpen(false)}
         onApply={(ids, labels) => {
           const id = ids[0];

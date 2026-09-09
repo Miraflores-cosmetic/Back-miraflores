@@ -28,6 +28,7 @@ export function DiscountCategoryPickerModal({
   onApply,
   single = false,
   leafOnly = false,
+  excludeIds = [],
 }: {
   open: boolean;
   selectedIds: string[];
@@ -37,16 +38,20 @@ export function DiscountCategoryPickerModal({
   single?: boolean;
   /** Только leaf-категории без подкатегорий. */
   leafOnly?: boolean;
+  /** Нельзя выбрать (например, уже есть правило). Редактируемые selectedIds не исключаются снаружи. */
+  excludeIds?: string[];
 }) {
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<AdminCategory[]>([]);
   const [draft, setDraft] = useState<Set<string>>(new Set());
+  const excludeSet = useMemo(() => new Set(excludeIds), [excludeIds]);
 
   useEffect(() => {
     if (!open) return;
-    setDraft(new Set(single ? selectedIds.slice(0, 1) : selectedIds));
+    const allowed = selectedIds.filter((id) => !excludeSet.has(id));
+    setDraft(new Set(single ? allowed.slice(0, 1) : allowed));
     setQ('');
     let cancelled = false;
     (async () => {
@@ -82,7 +87,7 @@ export function DiscountCategoryPickerModal({
     return () => {
       cancelled = true;
     };
-  }, [open, selectedIds, single]);
+  }, [open, selectedIds, single, excludeSet]);
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -90,7 +95,13 @@ export function DiscountCategoryPickerModal({
     return rows.filter((c) => categoryLabel(c).toLowerCase().includes(term));
   }, [rows, q]);
 
+  const selectableFiltered = useMemo(
+    () => filtered.filter((c) => !excludeSet.has(c.id)),
+    [filtered, excludeSet],
+  );
+
   function toggle(id: string) {
+    if (excludeSet.has(id)) return;
     setDraft((prev) => {
       if (single) {
         return prev.has(id) ? new Set() : new Set([id]);
@@ -144,14 +155,14 @@ export function DiscountCategoryPickerModal({
           {error}
         </p>
       ) : null}
-      {!loading && !error && !single && filtered.length > 0 ? (
+      {!loading && !error && !single && selectableFiltered.length > 0 ? (
         <div className={styles.toolbarRow} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <AdminCompactBtn
             type="button"
             variant="outline"
-            onClick={() => setDraft(new Set(filtered.map((c) => c.id)))}
+            onClick={() => setDraft(new Set(selectableFiltered.map((c) => c.id)))}
           >
-            Выбрать все ({filtered.length})
+            Выбрать все ({selectableFiltered.length})
           </AdminCompactBtn>
           <AdminCompactBtn type="button" variant="outline" onClick={() => setDraft(new Set())}>
             Снять выбор
@@ -168,30 +179,40 @@ export function DiscountCategoryPickerModal({
               </tr>
             </thead>
             <tbody>
-              {filtered.map((c) => (
-                <tr key={c.id}>
-                  <td>
-                    {single ? (
-                      <input
-                        type="radio"
-                        name="admin-category-single"
-                        className={styles.adminCheckboxInTable}
-                        checked={draft.has(c.id)}
-                        onChange={() => toggle(c.id)}
-                        aria-label={categoryLabel(c)}
-                      />
-                    ) : (
-                      <AdminCheckbox
-                        className={styles.adminCheckboxInTable}
-                        checked={draft.has(c.id)}
-                        onChange={() => toggle(c.id)}
-                        aria-label={categoryLabel(c)}
-                      />
-                    )}
-                  </td>
-                  <td>{categoryLabel(c)}</td>
-                </tr>
-              ))}
+              {filtered.map((c) => {
+                const excluded = excludeSet.has(c.id);
+                return (
+                  <tr key={c.id}>
+                    <td>
+                      {single ? (
+                        <input
+                          type="radio"
+                          name="admin-category-single"
+                          className={styles.adminCheckboxInTable}
+                          checked={draft.has(c.id)}
+                          disabled={excluded}
+                          onChange={() => toggle(c.id)}
+                          aria-label={categoryLabel(c)}
+                        />
+                      ) : (
+                        <AdminCheckbox
+                          className={styles.adminCheckboxInTable}
+                          checked={draft.has(c.id)}
+                          disabled={excluded}
+                          onChange={() => toggle(c.id)}
+                          aria-label={categoryLabel(c)}
+                        />
+                      )}
+                    </td>
+                    <td>
+                      {categoryLabel(c)}
+                      {excluded ? (
+                        <span className={styles.mutedInline}> · уже есть правило</span>
+                      ) : null}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           {filtered.length === 0 ? <p className={styles.muted}>Ничего не найдено</p> : null}
@@ -209,6 +230,7 @@ export function DiscountProductPickerModal({
   onApply,
   /** Один товар вместо чекбоксов. */
   single = false,
+  excludeIds = [],
 }: {
   open: boolean;
   selectedIds: string[];
@@ -216,6 +238,8 @@ export function DiscountProductPickerModal({
   onClose: () => void;
   onApply: (ids: string[], labels: Record<string, string>) => void;
   single?: boolean;
+  /** Нельзя выбрать (например, уже есть групповая цена). */
+  excludeIds?: string[];
 }) {
   const [q, setQ] = useState('');
   const [qDebounced, setQDebounced] = useState('');
@@ -226,6 +250,7 @@ export function DiscountProductPickerModal({
   const [rows, setRows] = useState<AdminProductListItem[]>([]);
   const [draft, setDraft] = useState<Set<string>>(new Set());
   const [labels, setLabels] = useState<Record<string, string>>({});
+  const excludeSet = useMemo(() => new Set(excludeIds), [excludeIds]);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -237,12 +262,13 @@ export function DiscountProductPickerModal({
 
   useEffect(() => {
     if (!open) return;
-    setDraft(new Set(single ? selectedIds.slice(0, 1) : selectedIds));
+    const allowed = selectedIds.filter((id) => !excludeSet.has(id));
+    setDraft(new Set(single ? allowed.slice(0, 1) : allowed));
     setLabels({ ...selectedLabels });
     setQ('');
     setQDebounced('');
     setPage(1);
-  }, [open, selectedIds, selectedLabels, single]);
+  }, [open, selectedIds, selectedLabels, single, excludeSet]);
 
   useEffect(() => {
     if (!open) return;
@@ -288,6 +314,7 @@ export function DiscountProductPickerModal({
   }, [open, qDebounced, page]);
 
   function toggle(id: string, name: string) {
+    if (excludeSet.has(id)) return;
     setDraft((prev) => {
       if (single) {
         return prev.has(id) ? new Set() : new Set([id]);
@@ -339,31 +366,41 @@ export function DiscountProductPickerModal({
                 </tr>
               </thead>
               <tbody>
-                {rows.map((p) => (
-                  <tr key={p.id}>
-                    <td>
-                      {single ? (
-                        <input
-                          type="radio"
-                          name="admin-product-single"
-                          className={styles.adminCheckboxInTable}
-                          checked={draft.has(p.id)}
-                          onChange={() => toggle(p.id, p.name)}
-                          aria-label={p.name}
-                        />
-                      ) : (
-                        <AdminCheckbox
-                          className={styles.adminCheckboxInTable}
-                          checked={draft.has(p.id)}
-                          onChange={() => toggle(p.id, p.name)}
-                          aria-label={p.name}
-                        />
-                      )}
-                    </td>
-                    <td>{p.name}</td>
-                    <td className={styles.mutedInline}>{p.category?.name ?? '—'}</td>
-                  </tr>
-                ))}
+                {rows.map((p) => {
+                  const excluded = excludeSet.has(p.id);
+                  return (
+                    <tr key={p.id}>
+                      <td>
+                        {single ? (
+                          <input
+                            type="radio"
+                            name="admin-product-single"
+                            className={styles.adminCheckboxInTable}
+                            checked={draft.has(p.id)}
+                            disabled={excluded}
+                            onChange={() => toggle(p.id, p.name)}
+                            aria-label={p.name}
+                          />
+                        ) : (
+                          <AdminCheckbox
+                            className={styles.adminCheckboxInTable}
+                            checked={draft.has(p.id)}
+                            disabled={excluded}
+                            onChange={() => toggle(p.id, p.name)}
+                            aria-label={p.name}
+                          />
+                        )}
+                      </td>
+                      <td>
+                        {p.name}
+                        {excluded ? (
+                          <span className={styles.mutedInline}> · уже есть цена</span>
+                        ) : null}
+                      </td>
+                      <td className={styles.mutedInline}>{p.category?.name ?? '—'}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
             {!loading && rows.length === 0 ? (

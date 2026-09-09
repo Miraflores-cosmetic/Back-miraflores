@@ -1,6 +1,9 @@
 import { adminBackendJson } from '@/lib/adminBackendFetch';
 import type { AdminCategory } from '@/lib/adminCatalogTypes';
-import type { AdminUserGroup } from '@/lib/adminUserGroupTypes';
+import type {
+  AdminGroupVariantPriceListResponse,
+  AdminUserGroup,
+} from '@/lib/adminUserGroupTypes';
 
 export type LeafCategoryOption = { id: string; label: string };
 
@@ -55,4 +58,25 @@ export function computePercentOffPrice(
   const pct = Math.min(100, Math.max(0, percentOff));
   const next = (basePrice * (100 - pct)) / 100;
   return Math.max(0, applyGroupPriceRounding(next, rounding));
+}
+
+const VARIANT_PRICES_PAGE_SIZE = 100;
+
+/** productId товаров, у которых в группе уже есть хотя бы одна SKU-цена. */
+export async function fetchRuledProductIds(groupId: string): Promise<Set<string>> {
+  const ids = new Set<string>();
+  let page = 1;
+  while (true) {
+    const sp = new URLSearchParams({
+      page: String(page),
+      limit: String(VARIANT_PRICES_PAGE_SIZE),
+    });
+    const res = await adminBackendJson<AdminGroupVariantPriceListResponse>(
+      `user-groups/admin/${groupId}/variant-prices?${sp}`,
+    );
+    for (const row of res.items) ids.add(row.productId);
+    if (page * VARIANT_PRICES_PAGE_SIZE >= res.total) break;
+    page++;
+  }
+  return ids;
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DiscountCategoryPickerModal } from '@/app/(admin)/admin/discounts/DiscountScopePickerModal';
 import { AdminCompactBtn } from '@/components/AdminCompactBtn/AdminCompactBtn';
 import { AdminPillChip, AdminPillChipList } from '@/components/AdminPillChip/AdminPillChip';
@@ -114,7 +114,12 @@ export function UserGroupCategoryPricesTab({ groupId, onChanged }: Props) {
     setSaving(true);
     setError(null);
     try {
-      const leaves = await fetchLeafCategories();
+      const ruled = new Set(items.map((r) => r.categoryId));
+      const leaves = (await fetchLeafCategories()).filter((c) => !ruled.has(c.id));
+      if (!leaves.length) {
+        showToast('Все leaf-категории уже имеют правила');
+        return;
+      }
       const labels = Object.fromEntries(leaves.map((c) => [c.id, c.label]));
       setSelectedCategoryIds(leaves.map((c) => c.id));
       setSelectedCategoryLabels(labels);
@@ -173,6 +178,14 @@ export function UserGroupCategoryPricesTab({ groupId, onChanged }: Props) {
   const editingExisting =
     selectedCategoryIds.length === 1 &&
     items.some((r) => r.categoryId === selectedCategoryIds[0]);
+
+  const excludeCategoryIds = useMemo(
+    () =>
+      items
+        .map((r) => r.categoryId)
+        .filter((id) => !selectedCategoryIds.includes(id)),
+    [items, selectedCategoryIds],
+  );
 
   return (
     <>
@@ -364,6 +377,7 @@ export function UserGroupCategoryPricesTab({ groupId, onChanged }: Props) {
         open={categoryPickerOpen}
         leafOnly
         selectedIds={selectedCategoryIds}
+        excludeIds={excludeCategoryIds}
         onClose={() => setCategoryPickerOpen(false)}
         onApply={(ids, labels) => {
           setSelectedCategoryIds(ids);
