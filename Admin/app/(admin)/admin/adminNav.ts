@@ -104,14 +104,7 @@ export const ADMIN_NAV: NavItem[] = [
   },
   { type: 'divider' },
   { type: 'link', href: '/admin/orders', label: 'Заказы', section: 'orders' },
-  {
-    type: 'group',
-    id: 'users',
-    label: 'Пользователи',
-    section: 'users',
-    prefixes: ['/admin/users'],
-    children: [{ href: '/admin/users', label: 'Покупатели', section: 'users' }],
-  },
+  { type: 'link', href: '/admin/users', label: 'Пользователи', section: 'users' },
   { type: 'divider' },
   {
     type: 'group',
