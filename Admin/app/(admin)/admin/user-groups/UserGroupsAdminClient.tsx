@@ -113,8 +113,38 @@ export function UserGroupsAdminClient() {
         </AdminCompactBtn>
       </form>
 
-      <AdminListShell loading={loading} error={error} fetching={fetching}>
-        <AdminSearchBox value={q} onChange={setQ} placeholder="Поиск по названию или slug" />
+      <AdminListShell
+        loading={loading}
+        error={error}
+        onRetry={() => void load()}
+        loadingLabel="Загрузка…"
+        empty="Групп пока нет"
+        isEmpty={!loading && items.length === 0}
+        isFetching={fetching}
+        toolbar={
+          <div className={styles.toolbar}>
+            <div className={styles.searchBoxToolbar}>
+              <AdminSearchBox
+                placeholder="Поиск по названию или slug"
+                ariaLabel="Поиск групп"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+              />
+            </div>
+          </div>
+        }
+        pagination={
+          data ? (
+            <AdminListPagination
+              page={data.page}
+              limit={data.limit}
+              total={data.total}
+              onPageChange={setPage}
+              disabled={fetching}
+            />
+          ) : null
+        }
+      >
         <table className={styles.table}>
           <thead>
             <tr>
@@ -148,14 +178,6 @@ export function UserGroupsAdminClient() {
             ))}
           </tbody>
         </table>
-        {data ? (
-          <AdminListPagination
-            page={data.page}
-            limit={data.limit}
-            total={data.total}
-            onPageChange={setPage}
-          />
-        ) : null}
       </AdminListShell>
     </>
   );
