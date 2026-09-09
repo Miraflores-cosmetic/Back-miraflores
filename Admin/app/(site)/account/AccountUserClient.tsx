@@ -272,6 +272,12 @@ export function AccountUserClient() {
               <span className={styles.profileLabel}>Email</span>
               <span className={styles.profileValue}>{profile?.email}</span>
             </div>
+            {profile?.pricing?.group ? (
+              <div className={styles.profileRow}>
+                <span className={styles.profileLabel}>Группа цен</span>
+                <span className={styles.profileValue}>{profile.pricing.group.name}</span>
+              </div>
+            ) : null}
             <FloatingTextField
               label="Имя"
               value={displayName}

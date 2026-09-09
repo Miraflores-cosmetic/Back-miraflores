@@ -75,6 +75,9 @@ type CartSyncResponse = {
   }>;
   removedKeys: string[];
   removedLines?: Array<{ key: string; reason: 'oos' | 'missing'; name?: string }>;
+  pricing?: {
+    allowPromoCodes?: boolean;
+  };
 };
 
 export type AppliedPromo = {
@@ -98,6 +101,8 @@ type CartContextValue = {
   total: number;
   promo: AppliedPromo | null;
   promoBusy: boolean;
+  /** Групповой флаг: промокоды на checkout (сертификаты — отдельно). */
+  allowPromoCodes: boolean;
   applyPromo: (
     code: string,
     opts?: { shippingRub?: number | null },
@@ -222,11 +227,14 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const [syncing, setSyncing] = useState(false);
   const [promo, setPromo] = useState<AppliedPromo | null>(null);
   const [promoBusy, setPromoBusy] = useState(false);
+  const [allowPromoCodes, setAllowPromoCodes] = useState(true);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const syncOnceRef = useRef(false);
   const itemsRef = useRef(items);
   itemsRef.current = items;
   const promoCodeRef = useRef<{ code: string; kind: 'promo' | 'gift' } | null>(null);
+  const allowPromoCodesRef = useRef(true);
+  allowPromoCodesRef.current = allowPromoCodes;
 
   // До paint — чтобы badge не мигал 0 → N
   useLayoutEffect(() => {
@@ -332,9 +340,18 @@ export function CartProvider({ children }: { children: ReactNode }) {
           }
         }
 
+        if (!allowPromoCodesRef.current) {
+          clearIfSameApplied(true);
+          return {
+            ok: false as const,
+            message: 'Промокод недоступен для вашей группы',
+          };
+        }
+
         // 2) Промокод — только товары.
         const res = await fetch('/api/public/promo/validate', {
           method: 'POST',
+          credentials: 'same-origin',
           headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
           body: JSON.stringify({
             code: trimmed,
@@ -455,6 +472,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
     try {
       const res = await fetch('/api/public/catalog/cart/sync', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
         body: JSON.stringify({
           lines: snapshot.map((l) => ({
@@ -471,6 +489,18 @@ export function CartProvider({ children }: { children: ReactNode }) {
         return { ok: false, removed: [], error: msg };
       }
       const data = (await res.json()) as CartSyncResponse;
+      if (typeof data.pricing?.allowPromoCodes === 'boolean') {
+        setAllowPromoCodes(data.pricing.allowPromoCodes);
+        if (!data.pricing.allowPromoCodes && promoCodeRef.current?.kind === 'promo') {
+          setPromo(null);
+          promoCodeRef.current = null;
+          try {
+            window.localStorage.removeItem(PROMO_STORAGE_KEY);
+          } catch {
+            /* ignore */
+          }
+        }
+      }
       const removed: SyncCartRemovedLine[] = data.removedLines?.length
         ? data.removedLines
         : (data.removedKeys ?? []).map((key) => ({
@@ -697,6 +727,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
           }
         : null,
       promoBusy,
+      allowPromoCodes,
       applyPromo,
       revalidatePromoForShipping,
       clearPromo,
@@ -725,6 +756,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       total,
       promo,
       promoBusy,
+      allowPromoCodes,
       applyPromo,
       revalidatePromoForShipping,
       clearPromo,

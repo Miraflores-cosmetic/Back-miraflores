@@ -602,6 +602,17 @@ export function OrderDetailClient({
                   )}
                 </dd>
               </div>
+              {order.pricingGroupName ? (
+                <div className={styles.detailDlRow}>
+                  <dt>Группа цен</dt>
+                  <dd>
+                    {order.pricingGroupName}
+                    {order.pricingContext ? (
+                      <span className={styles.muted}> ({order.pricingContext})</span>
+                    ) : null}
+                  </dd>
+                </div>
+              ) : null}
               <div className={styles.detailDlRow}>
                 <dt>Телефон</dt>
                 <dd>

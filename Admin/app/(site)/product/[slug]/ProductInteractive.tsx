@@ -5,9 +5,11 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   discountPercent,
+  fetchPublicProductClient,
   formatRub,
   type PublicProduct,
 } from '@/lib/publicCatalog';
+import { useBuyerAuth } from '@/lib/BuyerAuthProvider';
 import { useCart } from '@/lib/cart/CartContext';
 import { sanitizeProductHtml } from '@/lib/sanitizeProductHtml';
 import { PrimaryBtn } from '@/components/PrimaryBtn/PrimaryBtn';
@@ -22,7 +24,16 @@ const ACCORDIONS = [
   { id: 'application', title: 'Способ применения', field: 'applicationHtml' as const },
   { id: 'important', title: 'Важно знать!', field: 'importantNoteHtml' as const },
   { id: 'miraflores', title: 'Комментарий Miraflores', field: 'mirafloresNoteHtml' as const },
-  { id: 'storage', title: 'Хранение', field: 'storageHtml' as const },
+];
+
+const ATTR_META: Array<{
+  label: string;
+  value: (p: PublicProduct) => string | null | undefined;
+}> = [
+  { label: 'Тип продукта', value: (p) => p.productType },
+  { label: 'Для чего', value: (p) => p.purpose },
+  { label: 'Срок годности', value: (p) => p.shelfLife },
+  { label: 'Хранение', value: (p) => p.storageHtml },
 ];
 
 type Props = {
@@ -33,7 +44,7 @@ type Props = {
 };
 
 export function ProductInteractive({
-  product,
+  product: initialProduct,
   categoryBack,
   initialVariantId,
   initialShadeId,
@@ -41,6 +52,21 @@ export function ProductInteractive({
   const cart = useCart();
   const router = useRouter();
   const pathname = usePathname();
+  const { ready: buyerReady, authenticated: buyerAuthed } = useBuyerAuth();
+  const [product, setProduct] = useState(initialProduct);
+
+  useEffect(() => {
+    setProduct(initialProduct);
+  }, [initialProduct]);
+
+  useEffect(() => {
+    if (!buyerReady || !buyerAuthed) return;
+    void (async () => {
+      const fresh = await fetchPublicProductClient(initialProduct.slug);
+      if (fresh) setProduct(fresh);
+    })();
+  }, [buyerReady, buyerAuthed, initialProduct.slug]);
+
   const hasVariants = product.variants.length > 0;
   const [variantId, setVariantId] = useState(
     initialVariantId || product.variants[0]?.id || '',
@@ -297,6 +323,20 @@ export function ProductInteractive({
             Jcos
           </Link>
           <h1 className={styles.productName}>{product.name}</h1>
+          {ATTR_META.some(({ value }) => value(product)?.trim()) ? (
+            <dl className={styles.attrMeta}>
+              {ATTR_META.map(({ label, value }) => {
+                const text = value(product)?.trim();
+                if (!text) return null;
+                return (
+                  <div key={label} className={styles.attrMetaRow}>
+                    <dt>{label}</dt>
+                    <dd>{text}</dd>
+                  </div>
+                );
+              })}
+            </dl>
+          ) : null}
           {product.pageShortDescriptionHtml ? (
             <div
               className={styles.productShortHtml}

@@ -1,10 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useMemo, useTransition } from 'react';
+import { useCallback, useEffect, useMemo, useState, useTransition } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { ProductCard } from '@/components/ProductCard/ProductCard';
+import { useBuyerAuth } from '@/lib/BuyerAuthProvider';
 import {
+  fetchPublicProductsPageClient,
   PUBLIC_CATALOG_PAGE_SIZE,
   toProductCardProps,
   type PublicCatalogTag,
@@ -65,6 +67,10 @@ export function CatalogClient({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [pending, startTransition] = useTransition();
+  const { ready: buyerReady, authenticated: buyerAuthed } = useBuyerAuth();
+  const [items, setItems] = useState(initial.items);
+  const [total, setTotal] = useState(initial.total);
+  const [listPage, setListPage] = useState(initial.page);
 
   const cat = initial.cat;
   const sub = initial.sub;
@@ -93,6 +99,59 @@ export function CatalogClient({
     : [];
 
   const pageSize = initial.limit || PUBLIC_CATALOG_PAGE_SIZE;
+
+  useEffect(() => {
+    setItems(initial.items);
+    setTotal(initial.total);
+    setListPage(initial.page);
+  }, [initial]);
+
+  useEffect(() => {
+    if (!buyerReady || !buyerAuthed || notice) return;
+    const page = Math.max(1, Number(searchParams.get('page')) || initial.page || 1);
+    const sale = (searchParams.get('sale') ?? (initial.sale ? '1' : '')) === '1';
+    const priceMinRaw = searchParams.get('priceMin');
+    const priceMaxRaw = searchParams.get('priceMax');
+    const priceMin = priceMinRaw != null ? Number(priceMinRaw) : initial.priceMin;
+    const priceMax = priceMaxRaw != null ? Number(priceMaxRaw) : initial.priceMax;
+    const tag = searchParams.get('tag') ?? initial.tag;
+    const collection = searchParams.get('collection') ?? initial.collection;
+    const q = searchParams.get('q')?.trim() || initial.q || '';
+    if (q) return;
+
+    void (async () => {
+      const data = await fetchPublicProductsPageClient({
+        page,
+        limit: pageSize,
+        category: initial.sub || initial.cat || undefined,
+        tag: tag || undefined,
+        collection: collection || undefined,
+        sort: 'newest',
+        sale,
+        priceMin: Number.isFinite(priceMin) ? priceMin! : undefined,
+        priceMax: Number.isFinite(priceMax) ? priceMax! : undefined,
+      });
+      if (!data) return;
+      setItems(data.items);
+      setTotal(data.total);
+      setListPage(data.page);
+    })();
+  }, [
+    buyerReady,
+    buyerAuthed,
+    notice,
+    searchParams,
+    initial.cat,
+    initial.sub,
+    initial.tag,
+    initial.collection,
+    initial.sale,
+    initial.priceMin,
+    initial.priceMax,
+    initial.q,
+    initial.page,
+    pageSize,
+  ]);
 
   const patchParams = useCallback(
     (patch: Record<string, string | null>, opts?: { scroll?: boolean }) => {
@@ -209,7 +268,7 @@ export function CatalogClient({
           <p className={styles.count} aria-live="polite">
             {notice
               ? null
-              : `${initial.total.toLocaleString('ru-RU')} ${productsWord(initial.total)}`}
+              : `${total.toLocaleString('ru-RU')} ${productsWord(total)}`}
           </p>
         </div>
 
@@ -255,7 +314,7 @@ export function CatalogClient({
                 Сбросить фильтры
               </Link>
             </div>
-          ) : initial.items.length === 0 ? (
+          ) : items.length === 0 ? (
             <div className={styles.empty} role="status">
               <p className={styles.emptyText}>Ничего не найдено</p>
               <Link
@@ -279,7 +338,7 @@ export function CatalogClient({
               </Link>
             </div>
           ) : (
-            initial.items.map((p) => (
+            items.map((p) => (
               <ProductCard key={p.id} {...toProductCardProps(p)} />
             ))
           )}
@@ -287,15 +346,15 @@ export function CatalogClient({
 
         {!notice ? (
           <CatalogPager
-            page={initial.page}
-            total={initial.total}
+            page={listPage}
+            total={total}
             pageSize={pageSize}
             pending={pending}
             onPrev={() =>
-              patchParams({ page: String(Math.max(1, initial.page - 1)) }, { scroll: true })
+              patchParams({ page: String(Math.max(1, listPage - 1)) }, { scroll: true })
             }
             onNext={() =>
-              patchParams({ page: String(initial.page + 1) }, { scroll: true })
+              patchParams({ page: String(listPage + 1) }, { scroll: true })
             }
           />
         ) : null}

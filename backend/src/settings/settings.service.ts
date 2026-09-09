@@ -1,4 +1,5 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { extractMediaUrlsFromRichHtml } from '../blog/blog-html.util';
 import { sanitizeProductRichHtml } from '../catalog/catalog-html.util';
 import { sanitizeFaqTextForWrite } from './faq-html.util';
@@ -12,6 +13,7 @@ import type { ReplaceFaqItemsDto } from './dto/faq.dto';
 import type { ReplaceGratitudeDto } from './dto/gratitude.dto';
 import type { ReplaceHeroSlidesDto } from './dto/hero.dto';
 import type { ReplaceHomepageSetsDto } from './dto/homepage-sets.dto';
+import type { ReplaceProductAttributeOptionsDto } from './dto/product-attributes.dto';
 import type { ReplaceQuizContentDto } from './dto/quiz-content.dto';
 import type { UpdateCartSettingsDto } from './dto/cart.dto';
 import type { UpdateMenuSettingsDto } from './dto/menu.dto';
@@ -42,6 +44,59 @@ function serializeFaq(row: {
   };
 }
 
+function serializeProductAttributeOption(row: {
+  id: string;
+  kind: string;
+  label: string;
+  sortOrder: number;
+  active: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  usageCount?: number;
+}) {
+  return {
+    id: row.id,
+    kind: row.kind,
+    label: row.label,
+    sortOrder: row.sortOrder,
+    active: row.active,
+    usageCount: row.usageCount ?? 0,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+const PRODUCT_ATTR_KIND_META = {
+  productType: {
+    labelField: 'productType',
+    optionIdField: 'productTypeOptionId',
+  },
+  purpose: {
+    labelField: 'purpose',
+    optionIdField: 'purposeOptionId',
+  },
+  shelfLife: {
+    labelField: 'shelfLife',
+    optionIdField: 'shelfLifeOptionId',
+  },
+  storage: {
+    labelField: 'storageHtml',
+    optionIdField: 'storageOptionId',
+  },
+} as const;
+
+type ProductAttrKindKey = keyof typeof PRODUCT_ATTR_KIND_META;
+
+async function readAttributeCatalogVersion(
+  db: PrismaService | Prisma.TransactionClient,
+): Promise<number> {
+  const row = await db.productAttributeCatalog.findUnique({
+    where: { id: 'default' },
+    select: { version: true },
+  });
+  return row?.version ?? 0;
+}
+
 function serializeHero(row: {
   id: string;
   imageUrl: string;
@@ -66,6 +121,7 @@ const homepageSetProductSelect = {
   id: true,
   slug: true,
   name: true,
+  productType: true,
   shortDescription: true,
   images: {
     take: 8,
@@ -97,6 +153,7 @@ type HomepageSetProductSource = {
   id: string;
   slug: string;
   name: string;
+  productType: string | null;
   shortDescription: string | null;
   images: Array<{ url: string; mediaType?: string }>;
   variants: Array<{
@@ -136,6 +193,7 @@ function toHomepageSetProductCard(p: HomepageSetProductSource) {
   const shade = v?.shades?.[0] ?? null;
   const imageUrls = p.images.map((img) => img.url).filter(Boolean);
   const cover = p.images[0];
+  const productType = p.productType?.trim() || null;
   return {
     id: p.id,
     variantId: v?.id ?? null,
@@ -144,6 +202,7 @@ function toHomepageSetProductCard(p: HomepageSetProductSource) {
     shadeName: shade?.name ?? null,
     slug: p.slug,
     name: p.name,
+    productType,
     shortDescription: p.shortDescription,
     price,
     oldPrice: compareAt != null && compareAt > price ? compareAt : null,
@@ -326,6 +385,217 @@ export class SettingsAdminService {
     });
 
     return { items: rows.map(serializeFaq) };
+  }
+
+  async listProductAttributes() {
+    const rows = await this.prisma.productAttributeOption.findMany({
+      orderBy: [{ kind: 'asc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }],
+    });
+
+    const [byType, byPurpose, byShelf, byStorage, version] = await Promise.all([
+      this.prisma.product.groupBy({
+        by: ['productTypeOptionId'],
+        where: { productTypeOptionId: { not: null } },
+        _count: { _all: true },
+      }),
+      this.prisma.product.groupBy({
+        by: ['purposeOptionId'],
+        where: { purposeOptionId: { not: null } },
+        _count: { _all: true },
+      }),
+      this.prisma.product.groupBy({
+        by: ['shelfLifeOptionId'],
+        where: { shelfLifeOptionId: { not: null } },
+        _count: { _all: true },
+      }),
+      this.prisma.product.groupBy({
+        by: ['storageOptionId'],
+        where: { storageOptionId: { not: null } },
+        _count: { _all: true },
+      }),
+      readAttributeCatalogVersion(this.prisma),
+    ]);
+
+    const usageByOptionId = new Map<string, number>();
+    for (const r of byType) {
+      if (r.productTypeOptionId) usageByOptionId.set(r.productTypeOptionId, r._count._all);
+    }
+    for (const r of byPurpose) {
+      if (r.purposeOptionId) usageByOptionId.set(r.purposeOptionId, r._count._all);
+    }
+    for (const r of byShelf) {
+      if (r.shelfLifeOptionId) usageByOptionId.set(r.shelfLifeOptionId, r._count._all);
+    }
+    for (const r of byStorage) {
+      if (r.storageOptionId) usageByOptionId.set(r.storageOptionId, r._count._all);
+    }
+
+    return {
+      revision: version,
+      items: rows.map((row) =>
+        serializeProductAttributeOption({
+          ...row,
+          usageCount: usageByOptionId.get(row.id) ?? 0,
+        }),
+      ),
+    };
+  }
+
+  /**
+   * Синхронизация опций атрибутов товара: update существующих id, create новых,
+   * delete отсутствующих. Rename каскадом обновляет Product.* по FK; delete блокируется при usage > 0.
+   * Пустой payload без allowEmpty отклоняется (защита от wipe).
+   * expectedRevision обязателен при непустом каталоге — optimistic concurrency (иначе 409).
+   */
+  async replaceProductAttributes(dto: ReplaceProductAttributeOptionsDto) {
+    const cleaned = (dto.items ?? [])
+      .map((it) => ({
+        id: typeof it.id === 'string' && it.id.trim() ? it.id.trim() : undefined,
+        kind: it.kind as ProductAttrKindKey,
+        label: (it.label ?? '').trim(),
+        active: it.active ?? true,
+      }))
+      .filter((it) => it.label && it.kind && it.kind in PRODUCT_ATTR_KIND_META);
+
+    const dupKey = new Set<string>();
+    for (const it of cleaned) {
+      const key = `${it.kind}\0${it.label.toLowerCase()}`;
+      if (dupKey.has(key)) {
+        throw new BadRequestException(
+          `Дубликат значения «${it.label}» в «${it.kind}» — оставьте одно`,
+        );
+      }
+      dupKey.add(key);
+    }
+
+    const existingBefore = await this.prisma.productAttributeOption.findMany({
+      select: { id: true },
+    });
+
+    if (cleaned.length === 0 && existingBefore.length > 0 && !dto.allowEmpty) {
+      throw new BadRequestException(
+        'Пустой список не сохраняется — так можно стереть все опции. ' +
+          'Удалите ненужные по одной или подтвердите очистку (allowEmpty).',
+      );
+    }
+
+    const kindCounters: Record<string, number> = {};
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.productAttributeCatalog.upsert({
+          where: { id: 'default' },
+          create: { id: 'default', version: 0 },
+          update: {},
+        });
+        const current = await tx.productAttributeCatalog.findUniqueOrThrow({
+          where: { id: 'default' },
+          select: { version: true },
+        });
+
+        if (
+          existingBefore.length > 0 &&
+          (dto.expectedRevision === undefined || dto.expectedRevision === null)
+        ) {
+          throw new BadRequestException(
+            'Укажите expectedRevision (версия с последнего GET) — защита от параллельных правок',
+          );
+        }
+        if (
+          dto.expectedRevision !== undefined &&
+          dto.expectedRevision !== null &&
+          dto.expectedRevision !== current.version
+        ) {
+          throw new ConflictException(
+            `Каталог атрибутов уже изменён (revision ${current.version}). Обновите страницу и повторите.`,
+          );
+        }
+
+        const bumped = await tx.productAttributeCatalog.updateMany({
+          where: { id: 'default', version: current.version },
+          data: { version: { increment: 1 } },
+        });
+        if (bumped.count !== 1) {
+          throw new ConflictException(
+            'Каталог атрибутов уже изменён. Обновите страницу и повторите.',
+          );
+        }
+
+        const existing = await tx.productAttributeOption.findMany();
+        const existingById = new Map(existing.map((r) => [r.id, r]));
+        const existingIds = new Set(existing.map((r) => r.id));
+
+        const keepIds = new Set(
+          cleaned
+            .map((it) => it.id)
+            .filter((id): id is string => Boolean(id && existingIds.has(id))),
+        );
+
+        // Rename cascade by FK before deletes
+        for (const it of cleaned) {
+          if (!it.id || !existingById.has(it.id)) continue;
+          const prev = existingById.get(it.id)!;
+          if (prev.label === it.label) continue;
+          const meta = PRODUCT_ATTR_KIND_META[prev.kind as ProductAttrKindKey];
+          if (!meta) continue;
+          await tx.product.updateMany({
+            where: { [meta.optionIdField]: it.id },
+            data: { [meta.labelField]: it.label },
+          });
+        }
+
+        const toDelete = [...existingIds].filter((id) => !keepIds.has(id));
+        if (toDelete.length > 0) {
+          const blocked: string[] = [];
+          for (const id of toDelete) {
+            const prev = existingById.get(id)!;
+            const meta = PRODUCT_ATTR_KIND_META[prev.kind as ProductAttrKindKey];
+            if (!meta) continue;
+            const count = await tx.product.count({
+              where: { [meta.optionIdField]: id },
+            });
+            if (count > 0) {
+              blocked.push(`«${prev.label}» (${count})`);
+            }
+          }
+          if (blocked.length > 0) {
+            throw new BadRequestException(
+              `Нельзя удалить опции, которые стоят на товарах: ${blocked.join(', ')}. ` +
+                `Переименуйте значение или снимите его с товаров.`,
+            );
+          }
+          await tx.productAttributeOption.deleteMany({ where: { id: { in: toDelete } } });
+        }
+
+        for (const it of cleaned) {
+          const sortOrder = kindCounters[it.kind] ?? 0;
+          kindCounters[it.kind] = sortOrder + 1;
+          const data = {
+            kind: it.kind,
+            label: it.label,
+            active: it.active,
+            sortOrder,
+          };
+          if (it.id && existingIds.has(it.id)) {
+            await tx.productAttributeOption.update({ where: { id: it.id }, data });
+          } else {
+            await tx.productAttributeOption.create({ data });
+          }
+        }
+      });
+    } catch (e) {
+      if (
+        e instanceof Prisma.PrismaClientKnownRequestError &&
+        e.code === 'P2002'
+      ) {
+        throw new BadRequestException(
+          'Такое значение уже есть в этом списке — дубликаты не допускаются',
+        );
+      }
+      throw e;
+    }
+
+    return this.listProductAttributes();
   }
 
   async listHero() {
@@ -1089,6 +1359,7 @@ export class SettingsPublicService {
         variantId: card.variantId,
         slug: card.slug,
         name: card.name,
+        productType: card.productType,
         shortDescription: card.shortDescription,
         price: card.price,
         oldPrice: card.oldPrice,

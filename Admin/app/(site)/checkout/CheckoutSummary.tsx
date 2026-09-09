@@ -23,6 +23,7 @@ type Props = {
   promoError?: string;
   promoBusy: boolean;
   hasPromo: boolean;
+  allowPromoCodes?: boolean;
   disabled?: boolean;
   shippingCost?: number | null;
   /** goods + shipping — тот же, что CTA / create. */
@@ -45,6 +46,7 @@ export function CheckoutSummary({
   promoError,
   promoBusy,
   hasPromo,
+  allowPromoCodes = true,
   disabled,
   shippingCost = null,
   payableTotal = null,
@@ -91,6 +93,11 @@ export function CheckoutSummary({
         </ul>
 
         <div className={styles.promoBlock}>
+          {!allowPromoCodes ? (
+            <p className={styles.giftHoldNote} role="note">
+              Промокоды недоступны для вашей группы. Можно применить подарочный сертификат.
+            </p>
+          ) : null}
           <div className={styles.promoRow}>
             <FloatingTextField
               label="Промокод или сертификат"

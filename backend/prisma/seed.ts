@@ -142,6 +142,46 @@ const GIFT_DENOMS = [
   { name: '50000 ₽', faceValue: 50000, validityDays: 365, sortOrder: 5 },
 ] as const;
 
+async function seedUserGroups(db: Db) {
+  await db.userGroup.upsert({
+    where: { slug: 'guests' },
+    create: {
+      id: 'ug_default_guest',
+      name: 'Гости',
+      slug: 'guests',
+      isDefaultGuest: true,
+      assignable: false,
+      allowCatalogDiscounts: true,
+      allowPromoCodes: true,
+    },
+    update: {
+      name: 'Гости',
+      isDefaultGuest: true,
+      assignable: false,
+      active: true,
+    },
+  });
+  await db.userGroup.upsert({
+    where: { slug: 'retail-registered' },
+    create: {
+      id: 'ug_default_registered',
+      name: 'Розница (зарег.)',
+      slug: 'retail-registered',
+      isDefaultRegistered: true,
+      assignable: false,
+      allowCatalogDiscounts: true,
+      allowPromoCodes: true,
+    },
+    update: {
+      name: 'Розница (зарег.)',
+      isDefaultRegistered: true,
+      assignable: false,
+      active: true,
+    },
+  });
+  console.log('[seed] User groups: guests + retail-registered');
+}
+
 async function seedGiftDenominations(db: Db) {
   const existing = await db.giftCertificateDenomination.count();
   if (existing > 0) {
@@ -168,6 +208,7 @@ async function main() {
       await seedDemoBuyer(db);
       await seedCategories(db);
       await seedCatalogTags(db);
+      await seedUserGroups(db);
       await seedGiftDenominations(db);
     },
     { maxWait: 15_000, timeout: 600_000 },

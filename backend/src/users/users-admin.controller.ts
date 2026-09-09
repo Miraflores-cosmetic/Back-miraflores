@@ -1,14 +1,17 @@
 import {
+  Body,
   Controller,
   Delete,
   Get,
   Param,
+  Patch,
   Query,
   UseGuards,
 } from '@nestjs/common';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { parseOptionalPositiveInt } from '../common/parse-positive-int';
+import { UpdateUserGroupAssignmentDto } from '../user-groups/dto/user-groups-admin.dto';
 import { UsersAdminService } from './users-admin.service';
 
 /** Покупатели с аккаунтом — как Win-Win /admin/clients, без партнёров и групп. */
@@ -40,6 +43,11 @@ export class UsersAdminController {
       ordersPage: parseOptionalPositiveInt(ordersPage),
       ordersLimit: parseOptionalPositiveInt(ordersLimit),
     });
+  }
+
+  @Patch(':id/group')
+  updateGroup(@Param('id') id: string, @Body() dto: UpdateUserGroupAssignmentDto) {
+    return this.users.updateUserGroup(id, dto.groupId ?? null);
   }
 
   @Delete(':id')

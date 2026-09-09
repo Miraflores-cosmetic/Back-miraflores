@@ -23,6 +23,40 @@ import type {
   VariantInputDto,
 } from './dto/catalog-admin.dto';
 
+const PRODUCT_ATTR_LINKS = [
+  {
+    kind: 'productType' as const,
+    optionKey: 'productTypeOptionId' as const,
+    labelKey: 'productType' as const,
+  },
+  {
+    kind: 'purpose' as const,
+    optionKey: 'purposeOptionId' as const,
+    labelKey: 'purpose' as const,
+  },
+  {
+    kind: 'shelfLife' as const,
+    optionKey: 'shelfLifeOptionId' as const,
+    labelKey: 'shelfLife' as const,
+  },
+  {
+    kind: 'storage' as const,
+    optionKey: 'storageOptionId' as const,
+    labelKey: 'storageHtml' as const,
+  },
+];
+
+type ProductAttrLinkFields = {
+  productType?: string | null;
+  purpose?: string | null;
+  shelfLife?: string | null;
+  storageHtml?: string | null;
+  productTypeOptionId?: string | null;
+  purposeOptionId?: string | null;
+  shelfLifeOptionId?: string | null;
+  storageOptionId?: string | null;
+};
+
 @Injectable()
 export class CatalogProductsAdminService {
   constructor(
@@ -30,6 +64,58 @@ export class CatalogProductsAdminService {
     private readonly storage: LocalStorageService,
     private readonly categories: CatalogCategoriesAdminService,
   ) {}
+
+  /**
+   * Связывает Product с ProductAttributeOption (FK) и синхронизирует denormalized labels.
+   * Prefer optionId; иначе ищем опцию по label. Orphan label без опции — label есть, FK null.
+   */
+  private async resolveProductAttrLinks(
+    tx: Prisma.TransactionClient,
+    dto: ProductAttrLinkFields,
+    patch: boolean,
+  ): Promise<ProductAttrLinkFields> {
+    const out: ProductAttrLinkFields = {};
+    for (const { kind, optionKey, labelKey } of PRODUCT_ATTR_LINKS) {
+      const hasOption = Object.prototype.hasOwnProperty.call(dto, optionKey);
+      const hasLabel = Object.prototype.hasOwnProperty.call(dto, labelKey);
+      if (patch && !hasOption && !hasLabel) continue;
+
+      if (hasOption) {
+        const rawId = dto[optionKey];
+        if (rawId == null || String(rawId).trim() === '') {
+          out[optionKey] = null;
+          out[labelKey] = null;
+          continue;
+        }
+        const opt = await tx.productAttributeOption.findFirst({
+          where: { id: String(rawId).trim(), kind },
+          select: { id: true, label: true },
+        });
+        if (!opt) {
+          throw new BadRequestException(
+            `Неизвестная опция атрибута «${kind}»`,
+          );
+        }
+        out[optionKey] = opt.id;
+        out[labelKey] = opt.label;
+        continue;
+      }
+
+      const label = trimOrNull(dto[labelKey]);
+      if (!label) {
+        out[optionKey] = null;
+        out[labelKey] = null;
+        continue;
+      }
+      const opt = await tx.productAttributeOption.findFirst({
+        where: { kind, label },
+        select: { id: true },
+      });
+      out[labelKey] = label;
+      out[optionKey] = opt?.id ?? null;
+    }
+    return out;
+  }
 
   // --- Products ---
 
@@ -160,6 +246,7 @@ export class CatalogProductsAdminService {
     );
 
     return this.prisma.$transaction(async (tx) => {
+      const attrs = await this.resolveProductAttrLinks(tx, dto, false);
       const product = await tx.product.create({
         data: {
           name: dto.name.trim(),
@@ -172,10 +259,14 @@ export class CatalogProductsAdminService {
           compositionHtml: sanitizeRichHtmlOrNull(dto.compositionHtml),
           importantNoteHtml: sanitizeRichHtmlOrNull(dto.importantNoteHtml),
           mirafloresNoteHtml: sanitizeRichHtmlOrNull(dto.mirafloresNoteHtml),
-          storageHtml: sanitizeRichHtmlOrNull(dto.storageHtml),
-          productType: trimOrNull(dto.productType),
-          purpose: trimOrNull(dto.purpose),
-          shelfLife: trimOrNull(dto.shelfLife),
+          storageHtml: attrs.storageHtml ?? null,
+          productType: attrs.productType ?? null,
+          purpose: attrs.purpose ?? null,
+          shelfLife: attrs.shelfLife ?? null,
+          productTypeOptionId: attrs.productTypeOptionId ?? null,
+          purposeOptionId: attrs.purposeOptionId ?? null,
+          shelfLifeOptionId: attrs.shelfLifeOptionId ?? null,
+          storageOptionId: attrs.storageOptionId ?? null,
           extraHtml: sanitizeRichHtmlOrNull(dto.extraHtml),
           categoryId: dto.categoryId,
           active: dto.active ?? true,
@@ -243,17 +334,30 @@ export class CatalogProductsAdminService {
       if (dto.mirafloresNoteHtml !== undefined) {
         data.mirafloresNoteHtml = sanitizeRichHtmlOrNull(dto.mirafloresNoteHtml);
       }
-      if (dto.storageHtml !== undefined) {
-        data.storageHtml = sanitizeRichHtmlOrNull(dto.storageHtml);
+      const attrs = await this.resolveProductAttrLinks(tx, dto, true);
+      if (attrs.storageHtml !== undefined) data.storageHtml = attrs.storageHtml;
+      if (attrs.productType !== undefined) data.productType = attrs.productType;
+      if (attrs.purpose !== undefined) data.purpose = attrs.purpose;
+      if (attrs.shelfLife !== undefined) data.shelfLife = attrs.shelfLife;
+      if (attrs.productTypeOptionId !== undefined) {
+        data.productTypeOption = attrs.productTypeOptionId
+          ? { connect: { id: attrs.productTypeOptionId } }
+          : { disconnect: true };
       }
-      if (dto.productType !== undefined) {
-        data.productType = trimOrNull(dto.productType);
+      if (attrs.purposeOptionId !== undefined) {
+        data.purposeOption = attrs.purposeOptionId
+          ? { connect: { id: attrs.purposeOptionId } }
+          : { disconnect: true };
       }
-      if (dto.purpose !== undefined) {
-        data.purpose = trimOrNull(dto.purpose);
+      if (attrs.shelfLifeOptionId !== undefined) {
+        data.shelfLifeOption = attrs.shelfLifeOptionId
+          ? { connect: { id: attrs.shelfLifeOptionId } }
+          : { disconnect: true };
       }
-      if (dto.shelfLife !== undefined) {
-        data.shelfLife = trimOrNull(dto.shelfLife);
+      if (attrs.storageOptionId !== undefined) {
+        data.storageOption = attrs.storageOptionId
+          ? { connect: { id: attrs.storageOptionId } }
+          : { disconnect: true };
       }
       if (dto.extraHtml !== undefined) {
         data.extraHtml = sanitizeRichHtmlOrNull(dto.extraHtml);

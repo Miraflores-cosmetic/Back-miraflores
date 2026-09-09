@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { buyerForwardHeaders } from '@/lib/buyerPublicBff';
 import { getServerApiBase } from '@/lib/serverApiBase';
 
 export const dynamic = 'force-dynamic';
@@ -10,10 +11,9 @@ export async function POST(request: NextRequest) {
     const res = await fetch(`${base}/promo/validate`, {
       method: 'POST',
       cache: 'no-store',
-      headers: {
-        Accept: 'application/json',
+      headers: buyerForwardHeaders({
         'Content-Type': 'application/json',
-      },
+      }),
       body,
     });
     const text = await res.text();

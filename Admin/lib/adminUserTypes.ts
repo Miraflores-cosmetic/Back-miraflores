@@ -38,7 +38,16 @@ export type AdminRetailUserAddress = {
   updatedAt: string;
 };
 
+export type AdminRetailUserGroup = {
+  id: string;
+  name: string;
+  slug: string;
+  assignable: boolean;
+};
+
 export type AdminRetailUserDetail = AdminRetailUser & {
+  groupId: string | null;
+  group: AdminRetailUserGroup | null;
   phone: string | null;
   birthday: string | null;
   marketingConsent: boolean;

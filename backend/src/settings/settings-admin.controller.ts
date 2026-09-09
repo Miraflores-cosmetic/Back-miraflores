@@ -12,6 +12,7 @@ import { ReplaceFaqItemsDto } from './dto/faq.dto';
 import { ReplaceGratitudeDto } from './dto/gratitude.dto';
 import { ReplaceHeroSlidesDto } from './dto/hero.dto';
 import { ReplaceHomepageSetsDto } from './dto/homepage-sets.dto';
+import { ReplaceProductAttributeOptionsDto } from './dto/product-attributes.dto';
 import { ReplaceQuizContentDto } from './dto/quiz-content.dto';
 import { DiscardCartUploadsDto, UpdateCartSettingsDto } from './dto/cart.dto';
 import { UpdateMenuSettingsDto } from './dto/menu.dto';
@@ -31,6 +32,16 @@ export class SettingsAdminController {
   @Put('faq')
   replaceFaq(@Body() dto: ReplaceFaqItemsDto) {
     return this.settings.replaceFaq(dto);
+  }
+
+  @Get('product-attributes')
+  listProductAttributes() {
+    return this.settings.listProductAttributes();
+  }
+
+  @Put('product-attributes')
+  replaceProductAttributes(@Body() dto: ReplaceProductAttributeOptionsDto) {
+    return this.settings.replaceProductAttributes(dto);
   }
 
   @Get('hero')

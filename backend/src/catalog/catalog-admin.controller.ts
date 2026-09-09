@@ -22,6 +22,7 @@ import { CatalogCollectionsAdminService } from './catalog-collections.admin.serv
 import { CatalogProductSetsAdminService } from './catalog-product-sets.admin.service';
 import { CatalogProductsAdminService } from './catalog-products.admin.service';
 import { CatalogTagsAdminService } from './catalog-tags.admin.service';
+import { SettingsAdminService } from '../settings/settings.service';
 import {
   CreateCatalogTagDto,
   CreateCategoryDto,
@@ -49,7 +50,14 @@ export class CatalogAdminController {
     private readonly products: CatalogProductsAdminService,
     private readonly collections: CatalogCollectionsAdminService,
     private readonly productSets: CatalogProductSetsAdminService,
+    private readonly settings: SettingsAdminService,
   ) {}
+
+  /** Read-only словари атрибутов для формы товара (ACL: catalog). */
+  @Get('product-attribute-options')
+  listProductAttributeOptions() {
+    return this.settings.listProductAttributes();
+  }
 
   @Post('upload-rich-media')
   @UseInterceptors(

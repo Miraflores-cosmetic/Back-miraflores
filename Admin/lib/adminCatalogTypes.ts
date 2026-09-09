@@ -74,6 +74,10 @@ export type AdminProduct = {
   productType: string | null;
   purpose: string | null;
   shelfLife: string | null;
+  productTypeOptionId?: string | null;
+  purposeOptionId?: string | null;
+  shelfLifeOptionId?: string | null;
+  storageOptionId?: string | null;
   extraHtml: string | null;
   metaTitle: string | null;
   metaDescription: string | null;

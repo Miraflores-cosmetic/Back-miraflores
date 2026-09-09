@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getServerApiBase } from '@/lib/serverApiBase';
 import {
   BUYER_ACCESS_TOKEN_COOKIE,
+  BUYER_ACCESS_TOKEN_COOKIE_LEGACY,
   BUYER_TOKEN_MAX_AGE_SEC,
   buyerCookieSecure,
 } from './buyerAuth';
@@ -11,20 +12,30 @@ export function setBuyerCookie(
   response: NextResponse,
   token: string,
 ): void {
+  const secure = buyerCookieSecure(request);
+  const base = {
+    httpOnly: true,
+    secure,
+    sameSite: 'lax' as const,
+    path: '/',
+  };
   response.cookies.set({
+    ...base,
     name: BUYER_ACCESS_TOKEN_COOKIE,
     value: token,
-    httpOnly: true,
-    secure: buyerCookieSecure(request),
-    sameSite: 'lax',
-    path: '/',
     maxAge: BUYER_TOKEN_MAX_AGE_SEC,
+  });
+  response.cookies.set({
+    ...base,
+    name: BUYER_ACCESS_TOKEN_COOKIE_LEGACY,
+    value: '',
+    maxAge: 0,
   });
 }
 
 /**
  * Ставит buyer cookie только если JWT принадлежит role=USER.
- * Admin token (тот же JWT secret) в jcos_buyer_token не попадёт.
+ * Admin token (тот же JWT secret) в buyer cookie не попадёт.
  */
 export async function setBuyerCookieIfUser(
   request: Request,

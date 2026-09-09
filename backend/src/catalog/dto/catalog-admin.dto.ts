@@ -325,6 +325,22 @@ export class CreateProductDto {
 
   @IsOptional()
   @IsString()
+  productTypeOptionId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  purposeOptionId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  shelfLifeOptionId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  storageOptionId?: string | null;
+
+  @IsOptional()
+  @IsString()
   extraHtml?: string | null;
 
   @IsOptional()
@@ -446,6 +462,22 @@ export class UpdateProductDto {
   @IsOptional()
   @IsString()
   shelfLife?: string | null;
+
+  @IsOptional()
+  @IsString()
+  productTypeOptionId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  purposeOptionId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  shelfLifeOptionId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  storageOptionId?: string | null;
 
   @IsOptional()
   @IsString()

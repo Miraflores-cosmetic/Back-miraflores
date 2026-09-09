@@ -2,14 +2,13 @@ import { Fragment } from 'react';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { Recommendations } from '@/sections/home/Recommendations/Recommendations';
 import {
   fetchPublicProduct,
   fetchPublicSetSiblings,
   stripHtml,
-  toProductCardProps,
 } from '@/lib/publicCatalog';
 import { ProductInteractive } from './ProductInteractive';
+import { ProductSetSiblings } from './ProductSetSiblings';
 import styles from './ProductPageLayout.module.css';
 
 /**
@@ -186,13 +185,7 @@ export default async function ProductPage({ params, searchParams }: Props) {
         </div>
       </section>
 
-      {setItems.length > 0 ? (
-        <Recommendations
-          id="product-recommendations"
-          title="Наборы"
-          items={setItems.map(toProductCardProps)}
-        />
-      ) : null}
+      <ProductSetSiblings slug={product.slug} initialItems={setItems} />
     </main>
   );
 }

@@ -3,34 +3,44 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { DiscountsPublicService } from '../discounts/discounts-public.service';
+import { applyCampaignToDetailVariants } from '../catalog/catalog-campaign-price.util';
 import { PrismaService } from '../prisma/prisma.service';
+import { CatalogVisibilityService } from '../user-groups/catalog-visibility.service';
+import { CommerceContextService } from '../user-groups/commerce-context.service';
+import { GroupPricingService } from '../user-groups/group-pricing.service';
 
 function availableOf(v: { stock: number; stockReserve: number }) {
   return Math.max(0, v.stock - v.stockReserve);
 }
 
-function cardFromFavorite(row: {
-  variantId: string;
-  variant: {
-    id: string;
-    name: string;
-    price: number;
-    compareAt: number | null;
-    orderMinQty: number;
-    orderMaxQty: number | null;
-    stock: number;
-    stockReserve: number;
-    shades: { id: string; name: string; imageUrl: string | null }[];
-    product: {
+function cardFromFavorite(
+  row: {
+    variantId: string;
+    variant: {
       id: string;
-      slug: string;
       name: string;
-      shortDescription: string | null;
-      active: boolean;
-      images: { url: string; mediaType: string }[];
+      price: number;
+      compareAt: number | null;
+      orderMinQty: number;
+      orderMaxQty: number | null;
+      stock: number;
+      stockReserve: number;
+      shades: { id: string; name: string; imageUrl: string | null }[];
+      product: {
+        id: string;
+        slug: string;
+        name: string;
+        shortDescription: string | null;
+        categoryId: string;
+        active: boolean;
+        images: { url: string; mediaType: string }[];
+      };
     };
-  };
-}) {
+  },
+  resolvedPrice: number,
+  compareAt: number | null,
+) {
   const v = row.variant;
   const p = v.product;
   const available = availableOf(v);
@@ -41,8 +51,7 @@ function cardFromFavorite(row: {
   const shade = v.shades[0] ?? null;
   const imageUrls = p.images.map((i) => i.url).filter(Boolean);
   const cover = p.images[0];
-  const price = v.price;
-  const compareAt = v.compareAt;
+  const price = resolvedPrice;
   const discountPercent =
     compareAt != null && compareAt > price
       ? Math.round(((compareAt - price) / compareAt) * 100)
@@ -94,6 +103,7 @@ const favoriteInclude = {
           slug: true,
           name: true,
           shortDescription: true,
+          categoryId: true,
           active: true,
           excludeFromCatalog: true,
           images: {
@@ -109,7 +119,13 @@ const favoriteInclude = {
 
 @Injectable()
 export class FavoritesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly commerceContext: CommerceContextService,
+    private readonly groupPricing: GroupPricingService,
+    private readonly catalogVisibility: CatalogVisibilityService,
+    private readonly discountsPublic: DiscountsPublicService,
+  ) {}
 
   async listIds(userId: string) {
     const rows = await this.prisma.userFavorite.findMany({
@@ -121,19 +137,59 @@ export class FavoritesService {
   }
 
   async listItems(userId: string) {
+    const ctx = await this.commerceContext.resolveFromUserId(userId);
     const rows = await this.prisma.userFavorite.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
       include: favoriteInclude,
     });
-    const items = rows
-      .filter(
-        (r) =>
-          r.variant.active &&
-          r.variant.product.active &&
-          !r.variant.product.excludeFromCatalog,
-      )
-      .map(cardFromFavorite);
+
+    const eligible = rows.filter(
+      (r) =>
+        r.variant.active &&
+        r.variant.product.active &&
+        !r.variant.product.excludeFromCatalog,
+    );
+    if (!eligible.length) return { items: [] as const };
+
+    const campaigns = ctx.allowCatalogDiscounts
+      ? await this.discountsPublic.loadRunningCampaigns()
+      : [];
+
+    const priceInputs = eligible.map((r) => ({
+      variantId: r.variantId,
+      categoryId: r.variant.product.categoryId,
+      basePrice: r.variant.price,
+    }));
+    const priceMap = await this.groupPricing.resolveVariantPrices(ctx, priceInputs);
+
+    const items = [];
+    for (const row of eligible) {
+      const p = row.variant.product;
+      const visibleIds = await this.catalogVisibility.filterVisibleVariantIds(ctx, {
+        productId: p.id,
+        categoryId: p.categoryId,
+        variantIds: [row.variantId],
+      });
+      if (!visibleIds.includes(row.variantId)) continue;
+
+      const groupPrice = priceMap.get(row.variantId)?.groupPrice ?? row.variant.price;
+      let price = groupPrice;
+      let compareAt = row.variant.compareAt;
+      if (ctx.allowCatalogDiscounts && campaigns.length) {
+        const priced = applyCampaignToDetailVariants(
+          [{ id: row.variantId, price: groupPrice, compareAt: row.variant.compareAt }],
+          p.id,
+          p.categoryId,
+          campaigns,
+        );
+        price = priced[0]?.price ?? groupPrice;
+        compareAt = priced[0]?.compareAt ?? compareAt;
+      }
+
+      items.push(cardFromFavorite(row, price, compareAt));
+    }
+
     return { items };
   }
 

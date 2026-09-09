@@ -97,6 +97,7 @@ export const ADMIN_BACKEND_BFF_PREFIXES: ReadonlyArray<readonly [string, string]
   ['quiz', 'admin'],
   ['assistant', 'admin'],
   ['auth', 'admin'],
+  ['user-groups', 'admin'],
 ] as const;
 
 /** Первые два сегмента BFF-пути (`segments` из `[...segments]`). */
@@ -135,6 +136,7 @@ export function resolveAdminSectionFromApiPath(
   if (p.includes('/settings/admin/staff')) return 'staff';
 
   if (p.includes('/users/admin')) return 'users';
+  if (p.includes('/user-groups/admin')) return 'users';
   if (
     p.includes('/orders/admin/') &&
     (p.endsWith('/mark-paid') || p.endsWith('/refund'))
@@ -211,6 +213,7 @@ export function resolveAdminSectionFromPathname(pathname: string): AdminPathAcce
     return 'catalog';
   }
   if (p.startsWith('/admin/users')) return 'users';
+  if (p.startsWith('/admin/user-groups')) return 'users';
   if (p.startsWith('/admin/blog') || p.startsWith('/admin/pages')) return 'blog';
   if (p.startsWith('/admin/reviews')) return 'reviews';
   if (p.startsWith('/admin/discounts') || p.startsWith('/admin/promo')) return 'discounts';

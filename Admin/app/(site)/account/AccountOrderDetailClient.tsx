@@ -318,6 +318,12 @@ export function AccountOrderDetailClient({ orderId }: Props) {
             </dd>
           </div>
         ) : null}
+        {order.pricingGroup?.name ? (
+          <div className={styles.orderMetaRow}>
+            <dt>Группа цен</dt>
+            <dd>{order.pricingGroup.name}</dd>
+          </div>
+        ) : null}
         <div className={styles.orderMetaRow}>
           <dt>Сумма товаров</dt>
           <dd>{formatRub(order.subtotal)}</dd>

@@ -52,6 +52,7 @@ export function CartDrawer() {
     total,
     promo,
     promoBusy,
+    allowPromoCodes,
     applyPromo,
     clearPromo,
     setQty,
@@ -323,6 +324,11 @@ export function CartDrawer() {
             </ul>
 
             <footer className={styles.footer}>
+              {!allowPromoCodes ? (
+                <p className={styles.promoOk} role="note">
+                  Промокоды недоступны для вашей группы. Сертификат — можно.
+                </p>
+              ) : null}
               <div className={styles.promoRow}>
                 <FloatingTextField
                   label="Промокод или сертификат"

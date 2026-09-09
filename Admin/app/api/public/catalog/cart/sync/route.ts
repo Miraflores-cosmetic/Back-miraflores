@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { buyerForwardHeaders } from '@/lib/buyerPublicBff';
 import { getServerApiBase } from '@/lib/serverApiBase';
 
 export const dynamic = 'force-dynamic';
@@ -12,13 +13,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ items: [], removedKeys: [] }, { status: 400 });
   }
   try {
+    const headers = buyerForwardHeaders({ 'Content-Type': 'application/json' });
     const res = await fetch(`${base}/catalog/cart/sync`, {
       method: 'POST',
       cache: 'no-store',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify(body),
     });
     const text = await res.text();

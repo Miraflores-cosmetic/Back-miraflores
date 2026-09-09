@@ -23,6 +23,7 @@ import { ReviewsModule } from './reviews/reviews.module';
 import { QuizModule } from './quiz/quiz.module';
 import { AssistantModule } from './assistant/assistant.module';
 import { OnecModule } from './onec/onec.module';
+import { UserGroupsModule } from './user-groups/user-groups.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RlsInterceptor } from './rls/rls.interceptor';
 
@@ -62,6 +63,7 @@ import { RlsInterceptor } from './rls/rls.interceptor';
     QuizModule,
     AssistantModule,
     OnecModule,
+    UserGroupsModule,
   ],
   controllers: [HealthController],
   providers: [

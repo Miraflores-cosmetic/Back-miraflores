@@ -14,6 +14,7 @@ export type SettingsHubLink = {
 export const SETTINGS_HUB_LINKS: readonly SettingsHubLink[] = [
   { href: '/admin/settings/seo', label: 'SEO', section: 'settings' },
   { href: '/admin/settings/menu', label: 'Меню', section: 'settings' },
+  { href: '/admin/settings/attributes', label: 'Атрибуты', section: 'settings' },
   { href: '/admin/cart', label: 'Корзина', section: 'settings' },
   { href: '/admin/settings/gratitude', label: 'Программа благодарности', section: 'settings' },
   { href: '/admin/settings/staff', label: 'Сотрудники', section: 'staff' },

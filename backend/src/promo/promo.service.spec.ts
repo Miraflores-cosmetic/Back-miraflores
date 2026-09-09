@@ -63,6 +63,14 @@ describe('computePromoDiscount', () => {
   });
 });
 
+const commerceContext = {
+  resolveFromUserId: vi.fn().mockResolvedValue({
+    allowPromoCodes: true,
+    kind: 'guest',
+    groupId: 'g1',
+  }),
+};
+
 describe('PromoPublicService', () => {
   let service: PromoPublicService;
 
@@ -72,10 +80,29 @@ describe('PromoPublicService', () => {
     promoCodeRedemption.findFirst.mockReset();
     promoCodeRedemption.count.mockResolvedValue(0);
     promoCodeRedemption.findFirst.mockResolvedValue(null);
-    service = new PromoPublicService({
-      promoCode,
-      promoCodeRedemption,
-    } as never);
+    commerceContext.resolveFromUserId.mockResolvedValue({
+      allowPromoCodes: true,
+      kind: 'guest',
+      groupId: 'g1',
+    });
+    service = new PromoPublicService(
+      {
+        promoCode,
+        promoCodeRedemption,
+      } as never,
+      commerceContext as never,
+    );
+  });
+
+  it('блокирует validate если allowPromoCodes=false', async () => {
+    commerceContext.resolveFromUserId.mockResolvedValue({
+      allowPromoCodes: false,
+      kind: 'registered_group',
+      groupId: 'g2',
+    });
+    await expect(service.validate('sale10', 2000)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
   });
 
   it('PERCENT считает скидку от subtotal', async () => {

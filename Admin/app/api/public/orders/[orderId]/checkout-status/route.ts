@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { BUYER_ACCESS_TOKEN_COOKIE } from '@/lib/buyerAuth';
+import { buyerForwardHeaders } from '@/lib/buyerPublicBff';
 import { getServerApiBase } from '@/lib/serverApiBase';
 
 export const dynamic = 'force-dynamic';
@@ -12,17 +11,11 @@ export async function GET(
   const base = getServerApiBase();
   const payToken = request.nextUrl.searchParams.get('payToken')?.trim() || '';
   const qs = payToken ? `?payToken=${encodeURIComponent(payToken)}` : '';
-  const buyerJwt = cookies().get(BUYER_ACCESS_TOKEN_COOKIE)?.value?.trim();
-
-  const headers: Record<string, string> = { Accept: 'application/json' };
-  if (buyerJwt) {
-    headers.Authorization = `Bearer ${buyerJwt}`;
-  }
 
   try {
     const res = await fetch(
       `${base}/orders/${encodeURIComponent(params.orderId)}/checkout-status${qs}`,
-      { cache: 'no-store', headers },
+      { cache: 'no-store', headers: buyerForwardHeaders() },
     );
     const text = await res.text();
     return new NextResponse(text, {

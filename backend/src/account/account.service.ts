@@ -7,6 +7,7 @@ import {
 import { OrderStatus, GiftCertificateSource } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
+import { CommerceContextService } from '../user-groups/commerce-context.service';
 import { MARKETING_CONSENT_VERSION } from '../auth/consent-versions';
 import { firstPasswordError, isPasswordValid } from '../auth/password-policy';
 import {
@@ -88,6 +89,7 @@ export class AccountService {
     private readonly prisma: PrismaService,
     private readonly payTokens: OrderPayTokenService,
     private readonly yookassa: YooKassaService,
+    private readonly commerceContext: CommerceContextService,
   ) {}
 
   async getProfile(userId: string) {
@@ -105,14 +107,24 @@ export class AccountService {
       },
     });
     if (!user) throw new NotFoundException('User not found');
-    const hasGiftCertificates = await this.hasPurchasedGiftCertificates(
-      userId,
-      user.email,
-    );
+    const [hasGiftCertificates, pricing] = await Promise.all([
+      this.hasPurchasedGiftCertificates(userId, user.email),
+      this.commerceContext.resolveFromUserId(userId),
+    ]);
     return {
       ...user,
       birthday: formatBirthdayIso(user.birthday),
       hasGiftCertificates,
+      pricing: {
+        context: pricing.kind,
+        group: {
+          id: pricing.groupId,
+          name: pricing.groupName,
+          slug: pricing.groupSlug,
+        },
+        allowCatalogDiscounts: pricing.allowCatalogDiscounts,
+        allowPromoCodes: pricing.allowPromoCodes,
+      },
     };
   }
 
@@ -437,6 +449,7 @@ export class AccountService {
         product: {
           id: string;
           slug: string;
+          productType: string | null;
           images: Array<{ url: string }>;
         } | null;
       } | null;
@@ -456,6 +469,7 @@ export class AccountService {
       shadeName: i.shade?.name ?? null,
       productId: i.variant?.product?.id ?? null,
       productSlug: i.variant?.product?.slug ?? null,
+      productType: i.variant?.product?.productType ?? null,
       // Первое фото галереи, не swatch оттенка.
       imageUrl:
         i.variant?.galleryLinks?.[0]?.productImage?.url ??
@@ -498,6 +512,7 @@ export class AccountService {
                   select: {
                     id: true,
                     slug: true,
+                    productType: true,
                     images: {
                       take: 1,
                       orderBy: { sortOrder: 'asc' },
@@ -546,6 +561,9 @@ export class AccountService {
         total: true,
         refundedAmount: true,
         promoCode: true,
+        pricingGroupId: true,
+        pricingGroupName: true,
+        pricingContext: true,
         giftCertificateCode: true,
         giftCertificateAmount: true,
         guestId: true,
@@ -584,6 +602,7 @@ export class AccountService {
                   select: {
                     id: true,
                     slug: true,
+                    productType: true,
                     images: {
                       take: 1,
                       orderBy: { sortOrder: 'asc' },
@@ -641,6 +660,13 @@ export class AccountService {
       total: order.total,
       refundedAmount: order.refundedAmount,
       promoCode: order.promoCode,
+      pricingGroup: order.pricingGroupName
+        ? {
+            id: order.pricingGroupId,
+            name: order.pricingGroupName,
+            context: order.pricingContext,
+          }
+        : null,
       giftCertificateCode: order.giftCertificateCode,
       giftCertificateAmount: order.giftCertificateAmount,
       createdAt: order.createdAt,

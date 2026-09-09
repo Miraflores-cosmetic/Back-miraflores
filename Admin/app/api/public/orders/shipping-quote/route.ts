@@ -1,23 +1,17 @@
-import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
-import { BUYER_ACCESS_TOKEN_COOKIE } from '@/lib/buyerAuth';
+import { buyerForwardHeaders } from '@/lib/buyerPublicBff';
 import { getServerApiBase } from '@/lib/serverApiBase';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   const base = getServerApiBase();
-  const buyerToken = cookies().get(BUYER_ACCESS_TOKEN_COOKIE)?.value?.trim();
   try {
     const body = await request.text();
     const res = await fetch(`${base}/orders/shipping-quote`, {
       method: 'POST',
       cache: 'no-store',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        ...(buyerToken ? { Authorization: `Bearer ${buyerToken}` } : {}),
-      },
+      headers: buyerForwardHeaders({ 'Content-Type': 'application/json' }),
       body,
     });
     const text = await res.text();

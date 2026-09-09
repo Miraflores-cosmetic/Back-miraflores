@@ -41,8 +41,13 @@ export class OrdersPublicController {
 
   /** Подписанный расчёт доставки (HMAC). Create order требует этот quote. */
   @Post('shipping-quote')
-  shippingQuote(@Body() dto: ShippingQuoteRequestDto) {
-    return this.orders.createShippingQuote(dto);
+  shippingQuote(
+    @Body() dto: ShippingQuoteRequestDto,
+    @CurrentUser() user?: { sub?: string; role?: string },
+  ) {
+    const userId =
+      user?.role === 'USER' && user.sub ? user.sub : null;
+    return this.orders.createShippingQuote(dto, userId);
   }
 
   /** Статика до :orderId — иначе «yookassa» / «payments» попадут в param. */

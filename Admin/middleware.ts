@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { ADMIN_ACCESS_TOKEN_COOKIE } from '@/lib/adminAuth';
 import { isAdminStaffRole } from '@/lib/adminStaffRole';
-import { BUYER_ACCESS_TOKEN_COOKIE } from '@/lib/buyerAuth';
+import { readBuyerTokenFromRequest } from '@/lib/buyerAuth';
 import { peekJwtPayload } from '@/lib/peekJwtPayload';
 
 /**
@@ -84,7 +84,7 @@ export function middleware(request: NextRequest) {
   }
 
   if (pathname === '/account' || pathname.startsWith('/account/')) {
-    const token = request.cookies.get(BUYER_ACCESS_TOKEN_COOKIE)?.value?.trim();
+    const token = readBuyerTokenFromRequest(request);
     if (!token || !buyerTokenLooksValid(token)) {
       return redirectPublic(request, '/login', { setFrom: pathname });
     }

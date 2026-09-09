@@ -16,11 +16,13 @@ import { OrdersPublicController } from './orders.public.controller';
 import { OrdersPublicService } from './orders.public.service';
 import { YooKassaService } from './yookassa.service';
 import { MailModule } from '../mail/mail.module';
+import { UserGroupsModule } from '../user-groups/user-groups.module';
 
 @Module({
   imports: [
     PrismaModule,
     CatalogModule,
+    UserGroupsModule,
     PromoModule,
     GiftCertificatesModule,
     SettingsModule,

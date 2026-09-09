@@ -20,6 +20,12 @@ export type BuyerProfile = {
   marketingConsent: boolean;
   marketingConsentAt: string | null;
   createdAt: string;
+  pricing?: {
+    context: string;
+    group: { id: string; name: string; slug: string };
+    allowCatalogDiscounts: boolean;
+    allowPromoCodes: boolean;
+  };
 };
 
 export type BuyerOrderItem = {
@@ -59,6 +65,11 @@ export type BuyerOrderDetail = BuyerOrder & {
   subtotal: number;
   discountTotal: number;
   promoCode: string | null;
+  pricingGroup?: {
+    id: string | null;
+    name: string;
+    context: string | null;
+  } | null;
   giftCertificateCode?: string | null;
   giftCertificateAmount?: number;
   payToken: string | null;

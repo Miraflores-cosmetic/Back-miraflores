@@ -2,6 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { DiscountsPublicService } from '../discounts/discounts-public.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { CatalogVisibilityService } from '../user-groups/catalog-visibility.service';
+import { CommerceContextService } from '../user-groups/commerce-context.service';
+import type { CommerceContext } from '../user-groups/commerce-context.types';
+import { GroupPricingService } from '../user-groups/group-pricing.service';
+import type { CampaignIn } from '../discounts/discount-pricing.engine';
 import {
   PUBLIC_HIDDEN_CATEGORY_SLUGS,
   PUBLIC_PRODUCTS_DEFAULT_LIMIT,
@@ -26,6 +31,7 @@ type ProductCardSource = {
   slug: string;
   name: string;
   shortDescription: string | null;
+  productType: string | null;
   categoryId: string;
   images: Array<{ url: string; mediaType?: string }>;
   variants: Array<{
@@ -46,6 +52,7 @@ const productCardSelect = {
   slug: true,
   name: true,
   shortDescription: true,
+  productType: true,
   categoryId: true,
   images: {
     take: 8,
@@ -110,6 +117,7 @@ function toProductCard(p: ProductCardSource) {
     slug: p.slug,
     name: p.name,
     shortDescription: p.shortDescription,
+    productType: p.productType,
     price,
     oldPrice: compareAt != null && compareAt > price ? compareAt : null,
     discountPercent,
@@ -135,9 +143,106 @@ export class CatalogPublicService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly discountsPublic: DiscountsPublicService,
+    private readonly commerceContext: CommerceContextService,
+    private readonly groupPricing: GroupPricingService,
+    private readonly catalogVisibility: CatalogVisibilityService,
   ) {}
 
-  async getProductBySlug(slug: string) {
+  private async resolveBuyerContext(userId?: string | null): Promise<CommerceContext> {
+    return this.commerceContext.resolveFromUserId(userId);
+  }
+
+  private async applyGroupPricesToSources(
+    sources: ProductCardSource[],
+    ctx: CommerceContext,
+  ): Promise<ProductCardSource[]> {
+    if (!sources.length) return sources;
+    const inputs = sources.flatMap((p) =>
+      p.variants.map((v) => ({
+        variantId: v.id,
+        categoryId: p.categoryId,
+        basePrice: v.price,
+      })),
+    );
+    const prices = await this.groupPricing.resolveVariantPrices(ctx, inputs);
+    return sources.map((p) => ({
+      ...p,
+      variants: p.variants.map((v) => {
+        const resolved = prices.get(v.id);
+        return resolved ? { ...v, price: resolved.groupPrice } : v;
+      }),
+    }));
+  }
+
+  private async finalizeProductCards(
+    sources: ProductCardSource[],
+    ctx: CommerceContext,
+    campaigns: CampaignIn[],
+  ) {
+    const visible = await this.catalogVisibility.applyVariantVisibilityToProductSources(
+      ctx,
+      sources,
+    );
+    const priced = await this.applyGroupPricesToSources(visible, ctx);
+    let cards = priced.map((p) => toProductCard(p));
+    if (ctx.allowCatalogDiscounts && campaigns.length) {
+      cards = applyCampaignToCards(cards, campaigns);
+    }
+    return cards.map(stripCategoryId);
+  }
+
+  /** Full pool → visibility + group prices → paginate (correct total when rules hide items). */
+  private async listProductsAfterVisibilityFilter(opts: {
+    where: Prisma.ProductWhereInput;
+    orderBy: Prisma.ProductOrderByWithRelationInput;
+    ctx: CommerceContext;
+    campaigns: CampaignIn[];
+    page: number;
+    limit: number;
+    useCollectionSort: boolean;
+    collectionId: string | null;
+  }) {
+    const { where, orderBy, ctx, campaigns, page, limit, useCollectionSort, collectionId } =
+      opts;
+    const poolTake = PUBLIC_PRODUCTS_IN_MEMORY_MAX + 1;
+    let allRows: ProductCardSource[];
+
+    if (useCollectionSort && collectionId) {
+      const productWhere: Prisma.ProductWhereInput = { ...where };
+      delete productWhere.collectionItems;
+      const itemRows = await this.prisma.collectionItem.findMany({
+        where: { collectionId, product: productWhere },
+        orderBy: { sortOrder: 'asc' },
+        take: poolTake,
+        include: { product: { select: productCardSelect } },
+      });
+      allRows = itemRows.map((it) => it.product).filter(Boolean);
+    } else {
+      allRows = await this.prisma.product.findMany({
+        where,
+        orderBy,
+        take: poolTake,
+        select: productCardSelect,
+      });
+    }
+
+    const poolTruncated = allRows.length > PUBLIC_PRODUCTS_IN_MEMORY_MAX;
+    if (poolTruncated) {
+      allRows = allRows.slice(0, PUBLIC_PRODUCTS_IN_MEMORY_MAX);
+      this.logger.warn(
+        `TODO(scale) listProducts visibility pool truncated at ${PUBLIC_PRODUCTS_IN_MEMORY_MAX}. ` +
+          `Denorm visibility + SQL pagination.`,
+      );
+    }
+
+    const cards = await this.finalizeProductCards(allRows, ctx, campaigns);
+    const total = cards.length;
+    const pageItems = cards.slice((page - 1) * limit, page * limit);
+    return { items: pageItems, total, page, limit, truncated: poolTruncated };
+  }
+
+  async getProductBySlug(slug: string, userId?: string | null) {
+    const ctx = await this.resolveBuyerContext(userId);
     const row = await this.prisma.product.findFirst({
       where: { slug, active: true, excludeFromCatalog: false },
       include: {
@@ -176,6 +281,24 @@ export class CatalogPublicService {
     });
     if (!row) return null;
 
+    const visibleVariantIds = await this.catalogVisibility.filterVisibleVariantIds(ctx, {
+      productId: row.id,
+      categoryId: row.categoryId,
+      variantIds: row.variants.map((v) => v.id),
+    });
+    if (!visibleVariantIds.length) return null;
+    const visibleSet = new Set(visibleVariantIds);
+    const visibleVariants = row.variants.filter((v) => visibleSet.has(v.id));
+
+    const groupPrices = await this.groupPricing.resolveVariantPrices(
+      ctx,
+      visibleVariants.map((v) => ({
+        variantId: v.id,
+        categoryId: row.categoryId,
+        basePrice: v.price,
+      })),
+    );
+
     const productImages = row.images.map((img) => ({
       id: img.id,
       url: img.url,
@@ -183,7 +306,7 @@ export class CatalogPublicService {
       sortOrder: img.sortOrder,
     }));
 
-    const rawVariants = row.variants.map((v) => {
+    const rawVariants = visibleVariants.map((v) => {
       const variantImages = v.galleryLinks.map((link) => ({
         id: link.productImage.id,
         url: link.productImage.url,
@@ -199,7 +322,7 @@ export class CatalogPublicService {
         slug: v.slug,
         volumeMl: v.volumeMl,
         sku: v.sku,
-        price: v.price,
+        price: groupPrices.get(v.id)?.groupPrice ?? v.price,
         compareAt: v.compareAt,
         orderMinQty: v.orderMinQty,
         orderMaxQty: v.orderMaxQty,
@@ -210,13 +333,12 @@ export class CatalogPublicService {
       };
     });
 
-    const campaigns = await this.discountsPublic.loadRunningCampaigns();
-    const variants = applyCampaignToDetailVariants(
-      rawVariants,
-      row.id,
-      row.categoryId,
-      campaigns,
-    );
+    const campaigns = ctx.allowCatalogDiscounts
+      ? await this.discountsPublic.loadRunningCampaigns()
+      : [];
+    const variants = campaigns.length
+      ? applyCampaignToDetailVariants(rawVariants, row.id, row.categoryId, campaigns)
+      : rawVariants;
 
     const prices = catalogSellablePrices(variants);
 
@@ -256,12 +378,24 @@ export class CatalogPublicService {
     };
   }
 
-  async getSetSiblings(slug: string) {
+  async getSetSiblings(slug: string, userId?: string | null) {
+    const ctx = await this.resolveBuyerContext(userId);
     const product = await this.prisma.product.findFirst({
       where: { slug, active: true, excludeFromCatalog: false },
-      select: { id: true },
+      select: {
+        id: true,
+        categoryId: true,
+        variants: { where: { active: true }, select: { id: true } },
+      },
     });
     if (!product) return { items: [] as const };
+
+    const visibleSelf = await this.catalogVisibility.isTargetVisible(ctx, {
+      productId: product.id,
+      categoryId: product.categoryId,
+      variantIds: product.variants.map((v) => v.id),
+    });
+    if (!visibleSelf) return { items: [] as const };
 
     const memberships = await this.prisma.productSetItem.findMany({
       where: { productId: product.id, productSet: { active: true } },
@@ -283,17 +417,18 @@ export class CatalogPublicService {
     });
 
     const seen = new Set<string>();
-    const raw: ProductCard[] = [];
+    const sources: ProductCardSource[] = [];
     for (const row of rows) {
       const p = row.product;
       if (seen.has(p.id)) continue;
       seen.add(p.id);
-      raw.push(toProductCard(p));
+      sources.push(p);
     }
-    const campaigns = await this.discountsPublic.loadRunningCampaigns();
-    return {
-      items: applyCampaignToCards(raw, campaigns).map(stripCategoryId),
-    };
+    const campaigns = ctx.allowCatalogDiscounts
+      ? await this.discountsPublic.loadRunningCampaigns()
+      : [];
+    const items = await this.finalizeProductCards(sources, ctx, campaigns);
+    return { items };
   }
 
   async listProducts(opts?: {
@@ -308,7 +443,9 @@ export class CatalogPublicService {
     saleOnly?: boolean;
     /** Batch by slug (order preserved). Ignores other filters when set. */
     slugs?: string[];
+    userId?: string | null;
   }) {
+    const ctx = await this.resolveBuyerContext(opts?.userId);
     const page = Math.max(1, opts?.page ?? 1);
     const limit = Math.min(
       PUBLIC_PRODUCTS_MAX_LIMIT,
@@ -339,9 +476,7 @@ export class CatalogPublicService {
         const p = bySlug.get(s);
         return p ? [p] : [];
       });
-      const items = applyCampaignToCards(ordered.map(toProductCard), campaigns).map(
-        stripCategoryId,
-      );
+      const items = await this.finalizeProductCards(ordered, ctx, campaigns);
       return { items, total: items.length, page: 1, limit: slugs.length };
     }
 
@@ -416,6 +551,20 @@ export class CatalogPublicService {
       sort === 'popular';
 
     const campaigns = await this.discountsPublic.loadRunningCampaigns();
+    const needsVisibilityPagination = await this.catalogVisibility.hasActiveRules();
+
+    if (!needsInMemory && needsVisibilityPagination) {
+      return this.listProductsAfterVisibilityFilter({
+        where,
+        orderBy,
+        ctx,
+        campaigns,
+        page,
+        limit,
+        useCollectionSort,
+        collectionId,
+      });
+    }
 
     if (useCollectionSort && !needsInMemory) {
       const productWhere: Prisma.ProductWhereInput = { ...where };
@@ -435,9 +584,7 @@ export class CatalogPublicService {
         }),
       ]);
       const rows = itemRows.map((it) => it.product).filter(Boolean);
-      const items = applyCampaignToCards(rows.map(toProductCard), campaigns).map(
-        stripCategoryId,
-      );
+      const items = await this.finalizeProductCards(rows, ctx, campaigns);
       return { items, total, page, limit };
     }
 
@@ -452,9 +599,7 @@ export class CatalogPublicService {
           select: productCardSelect,
         }),
       ]);
-      const items = applyCampaignToCards(rows.map(toProductCard), campaigns).map(
-        stripCategoryId,
-      );
+      const items = await this.finalizeProductCards(rows, ctx, campaigns);
       return { items, total, page, limit };
     }
 
@@ -517,7 +662,7 @@ export class CatalogPublicService {
       );
     }
 
-    let cards = applyCampaignToCards(allRows.map(toProductCard), campaigns);
+    let cards = await this.finalizeProductCards(allRows, ctx, campaigns);
 
     if (opts?.saleOnly) {
       cards = cards.filter((p) => p.oldPrice != null && p.oldPrice > p.price);
@@ -535,9 +680,7 @@ export class CatalogPublicService {
     }
 
     const total = cards.length;
-    const pageItems = cards
-      .slice((page - 1) * limit, page * limit)
-      .map(stripCategoryId);
+    const pageItems = cards.slice((page - 1) * limit, page * limit);
     return { items: pageItems, total, page, limit, truncated: poolTruncated };
   }
 
@@ -545,8 +688,11 @@ export class CatalogPublicService {
    * По умолчанию — метаданные (чипы каталога).
    * `includeProducts: true` — полные карточки (витрина Admin home).
    */
-  async listCollections(opts?: { includeProducts?: boolean }) {
+  async listCollections(opts?: { includeProducts?: boolean; userId?: string | null }) {
     const includeProducts = opts?.includeProducts === true;
+    const ctx = includeProducts
+      ? await this.resolveBuyerContext(opts?.userId)
+      : null;
 
     if (!includeProducts) {
       const rows = await this.prisma.collection.findMany({
@@ -589,31 +735,31 @@ export class CatalogPublicService {
         },
       },
     });
-    const campaigns = await this.discountsPublic.loadRunningCampaigns();
+    const campaigns =
+      ctx?.allowCatalogDiscounts ? await this.discountsPublic.loadRunningCampaigns() : [];
     return {
-      items: rows.map((c) => {
-        const products = applyCampaignToCards(
-          c.items
-            .map((it) => it.product)
-            .filter((p) => Boolean(p))
-            .map(toProductCard),
-          campaigns,
-        ).map(stripCategoryId);
-        const productPreviewUrl =
-          c.productPreviewUrl?.trim() ||
-          products.find((p) => p.imageUrl)?.imageUrl ||
-          null;
-        return {
-          id: c.id,
-          slug: c.slug,
-          name: c.name,
-          shortDescription: c.shortDescription,
-          coverImageUrl: c.coverImageUrl,
-          featuredLayout: c.featuredLayout,
-          productPreviewUrl,
-          products,
-        };
-      }),
+      items: await Promise.all(
+        rows.map(async (c) => {
+          const sources = c.items.map((it) => it.product).filter(Boolean);
+          const products = ctx
+            ? await this.finalizeProductCards(sources, ctx, campaigns)
+            : [];
+          const productPreviewUrl =
+            c.productPreviewUrl?.trim() ||
+            products.find((p) => p.imageUrl)?.imageUrl ||
+            null;
+          return {
+            id: c.id,
+            slug: c.slug,
+            name: c.name,
+            shortDescription: c.shortDescription,
+            coverImageUrl: c.coverImageUrl,
+            featuredLayout: c.featuredLayout,
+            productPreviewUrl,
+            products,
+          };
+        }),
+      ),
     };
   }
 
@@ -736,7 +882,9 @@ export class CatalogPublicService {
    */
   async syncCartLines(
     lines: Array<{ variantId: string; shadeId?: string | null; qty: number }>,
+    userId?: string | null,
   ) {
+    const ctx = await this.resolveBuyerContext(userId);
     const merged = new Map<string, number>();
     for (const line of lines) {
       if (!line?.variantId || !Number.isFinite(line.qty) || line.qty <= 0) continue;
@@ -758,6 +906,13 @@ export class CatalogPublicService {
         listSubtotal: 0,
         subtotal: 0,
         campaignDiscountTotal: 0,
+        pricing: {
+          groupId: ctx.groupId,
+          groupName: ctx.groupName,
+          context: ctx.kind,
+          allowCatalogDiscounts: ctx.allowCatalogDiscounts,
+          allowPromoCodes: ctx.allowPromoCodes,
+        },
       };
     }
 
@@ -770,10 +925,13 @@ export class CatalogPublicService {
       shadeName: string | null;
       slug: string;
       name: string;
+      productType: string | null;
       variantName: string;
       sku: string;
       imageUrl: string | null;
-      /** Selling price — вход в движок кампаний. */
+      /** Base catalog price before group rules. */
+      basePrice: number;
+      /** Selling price — вход в движок кампаний (after group). */
       listPrice: number;
       /** Marketing compareAt, если выше selling. */
       compareAt: number | null;
@@ -845,9 +1003,11 @@ export class CatalogPublicService {
           shadeName: null,
           slug: 'gift-certificates',
           name: `Подарочный сертификат «${denom.name}»`,
+          productType: 'Подарочные сертификаты',
           variantName: validityLabel,
           sku: giftPurchaseSkuForDenom(denom.id),
           imageUrl: denom.images[0]?.url ?? null,
+          basePrice: denom.faceValue,
           listPrice: denom.faceValue,
           compareAt: null,
           minQty,
@@ -882,6 +1042,7 @@ export class CatalogPublicService {
                 categoryId: true,
                 slug: true,
                 name: true,
+                productType: true,
                 images: {
                   take: 1,
                   orderBy: { sortOrder: 'asc' },
@@ -898,6 +1059,14 @@ export class CatalogPublicService {
         })
       : [];
     const byId = new Map(variants.map((v) => [v.id, v]));
+    const groupPriceMap = await this.groupPricing.resolveVariantPrices(
+      ctx,
+      [...byId.values()].map((v) => ({
+        variantId: v.id,
+        categoryId: v.product.categoryId,
+        basePrice: v.price,
+      })),
+    );
 
     for (const line of catalogLines) {
       const key = line.variantId;
@@ -905,6 +1074,17 @@ export class CatalogPublicService {
       if (!v) {
         removedKeys.push(key);
         removedLines.push({ key, reason: 'missing' });
+        continue;
+      }
+
+      const itemVisible = await this.catalogVisibility.isTargetVisible(ctx, {
+        productId: v.product.id,
+        categoryId: v.product.categoryId,
+        variantIds: [v.id],
+      });
+      if (!itemVisible) {
+        removedKeys.push(key);
+        removedLines.push({ key, reason: 'missing', name: v.product.name });
         continue;
       }
 
@@ -929,8 +1109,9 @@ export class CatalogPublicService {
         v.product.images[0]?.url ||
         null;
 
-      // Движок кампаний считает от selling price; compareAt — только для display list.
-      const sellingPrice = v.price;
+      const resolved = groupPriceMap.get(v.id);
+      const basePrice = resolved?.basePrice ?? v.price;
+      const sellingPrice = resolved?.groupPrice ?? v.price;
 
       rawItems.push({
         key,
@@ -941,9 +1122,11 @@ export class CatalogPublicService {
         shadeName: null,
         slug: v.product.slug,
         name: v.product.name,
+        productType: v.product.productType,
         variantName: v.name,
         sku: v.sku,
         imageUrl,
+        basePrice,
         listPrice: sellingPrice,
         compareAt:
           v.compareAt != null && v.compareAt > sellingPrice ? v.compareAt : null,
@@ -956,7 +1139,7 @@ export class CatalogPublicService {
     const catalogRaw = rawItems.filter((r) => !r.isGiftDenom);
     const giftRaw = rawItems.filter((r) => r.isGiftDenom);
 
-    const priced = catalogRaw.length
+    const priced = catalogRaw.length && ctx.allowCatalogDiscounts
       ? await this.discountsPublic.priceLines(
           catalogRaw.map((r) => ({
             key: r.key,
@@ -967,15 +1150,15 @@ export class CatalogPublicService {
           })),
         )
       : {
-          lines: [] as Array<{
-            key: string;
-            price: number;
-            lineDiscount: number;
-            discountId: string | null;
-            discountName: string | null;
-          }>,
-          listSubtotal: 0,
-          subtotal: 0,
+          lines: catalogRaw.map((r) => ({
+            key: r.key,
+            price: r.listPrice,
+            lineDiscount: 0,
+            discountId: null,
+            discountName: null,
+          })),
+          listSubtotal: catalogRaw.reduce((s, r) => s + r.listPrice * r.qty, 0),
+          subtotal: catalogRaw.reduce((s, r) => s + r.listPrice * r.qty, 0),
           campaignDiscountTotal: 0,
         };
     const byKey = new Map(priced.lines.map((l) => [l.key, l]));
@@ -992,9 +1175,12 @@ export class CatalogPublicService {
         shadeName: r.shadeName,
         slug: r.slug,
         name: r.name,
+        productType: r.productType,
         variantName: r.variantName,
         sku: r.sku,
         imageUrl: r.imageUrl,
+        baseUnitPrice: r.basePrice,
+        groupUnitPrice: r.listPrice,
         listPrice: displayList > salePrice ? displayList : salePrice,
         price: salePrice,
         lineDiscount: p?.lineDiscount ?? 0,
@@ -1013,6 +1199,7 @@ export class CatalogPublicService {
       shadeName: r.shadeName,
       slug: r.slug,
       name: r.name,
+      productType: r.productType,
       variantName: r.variantName,
       sku: r.sku,
       imageUrl: r.imageUrl,
@@ -1037,6 +1224,13 @@ export class CatalogPublicService {
       listSubtotal: priced.listSubtotal + giftSubtotal,
       subtotal: priced.subtotal + giftSubtotal,
       campaignDiscountTotal: priced.campaignDiscountTotal,
+      pricing: {
+        groupId: ctx.groupId,
+        groupName: ctx.groupName,
+        context: ctx.kind,
+        allowCatalogDiscounts: ctx.allowCatalogDiscounts,
+        allowPromoCodes: ctx.allowPromoCodes,
+      },
     };
   }
 

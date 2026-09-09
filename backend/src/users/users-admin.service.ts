@@ -8,6 +8,7 @@ import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 import { QUIZ_FUNNEL_STEPS } from '../quiz/quiz-events.constants';
 import { PrismaService } from '../prisma/prisma.service';
+import { UserGroupsAdminService } from '../user-groups/user-groups-admin.service';
 
 const LIST_MAX = 100;
 const LIST_DEFAULT = 20;
@@ -33,7 +34,10 @@ type QuizFunnelStepView = {
 
 @Injectable()
 export class UsersAdminService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly userGroups: UserGroupsAdminService,
+  ) {}
 
   async listRetailUsers(opts: { q?: string; page?: number; limit?: number } = {}) {
     const page = Math.max(1, opts.page ?? 1);
@@ -97,6 +101,10 @@ export class UsersAdminService {
         isActive: true,
         createdAt: true,
         updatedAt: true,
+        groupId: true,
+        group: {
+          select: { id: true, name: true, slug: true, assignable: true },
+        },
         _count: { select: { orders: true } },
         addresses: {
           orderBy: [{ isDefault: 'desc' }, { updatedAt: 'desc' }],
@@ -164,6 +172,8 @@ export class UsersAdminService {
       createdAt: u.createdAt,
       updatedAt: u.updatedAt,
       orderCount: u._count.orders,
+      group: u.group,
+      groupId: u.groupId,
       addresses: u.addresses,
       orders,
       ordersTotal,
@@ -171,6 +181,10 @@ export class UsersAdminService {
       ordersLimit,
       quiz: this.buildQuizAdminView(quizResultRow, quizEvents),
     };
+  }
+
+  async updateUserGroup(userId: string, groupId: string | null) {
+    return this.userGroups.updateUserGroup(userId, groupId);
   }
 
   /**

@@ -9,6 +9,6 @@ import { SettingsAdminService, SettingsPublicService } from './settings.service'
   imports: [PrismaModule, StorageModule],
   controllers: [SettingsAdminController, SettingsPublicController],
   providers: [SettingsAdminService, SettingsPublicService],
-  exports: [SettingsPublicService],
+  exports: [SettingsPublicService, SettingsAdminService],
 })
 export class SettingsModule {}

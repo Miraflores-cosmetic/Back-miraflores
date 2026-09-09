@@ -150,6 +150,7 @@ export function CheckoutClient() {
     total,
     promo,
     promoBusy,
+    allowPromoCodes,
     applyPromo,
     revalidatePromoForShipping,
     clearPromo,
@@ -939,6 +940,7 @@ export function CheckoutClient() {
         promoError={promoError}
         promoBusy={promoBusy}
         hasPromo={Boolean(promo)}
+        allowPromoCodes={allowPromoCodes}
         disabled={showWidget}
         onPromoInput={(v) => {
           setPromoInput(v);

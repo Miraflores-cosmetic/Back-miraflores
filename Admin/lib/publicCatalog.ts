@@ -90,7 +90,10 @@ export type PublicCollectionCard = {
   products?: PublicProductCard[];
 };
 
-/** ISR window for public catalog fetches (seconds). On-demand: POST /api/admin/revalidate-catalog. */
+/**
+ * ISR window for guest catalog SSR (seconds). On-demand: POST /api/admin/revalidate-catalog.
+ * Logged-in buyers: client refetch via /api/public/catalog/* (BFF forwards buyer JWT).
+ */
 const PUBLIC_CATALOG_REVALIDATE = 120;
 const PUBLIC_CATALOG_FETCH_TAGS = ['catalog'] as const;
 
@@ -163,9 +166,7 @@ export type PublicProductsPage = {
   limit: number;
 };
 
-export async function fetchPublicProductsPage(
-  opts: FetchPublicProductsOpts = {},
-): Promise<PublicProductsPage | null> {
+export function buildPublicProductsQueryString(opts: FetchPublicProductsOpts = {}): string {
   const params = new URLSearchParams();
   if (opts.page != null) params.set('page', String(opts.page));
   if (opts.limit != null) params.set('limit', String(opts.limit));
@@ -177,8 +178,52 @@ export async function fetchPublicProductsPage(
   if (opts.priceMax != null) params.set('priceMax', String(opts.priceMax));
   if (opts.sale) params.set('sale', '1');
   if (opts.slugs?.length) params.set('slugs', opts.slugs.join(','));
-  const qs = params.toString();
+  return params.toString();
+}
+
+export async function fetchPublicProductsPage(
+  opts: FetchPublicProductsOpts = {},
+): Promise<PublicProductsPage | null> {
+  const qs = buildPublicProductsQueryString(opts);
   return publicGet<PublicProductsPage>(`catalog/products${qs ? `?${qs}` : ''}`);
+}
+
+/**
+ * Buyer-aware catalog (BFF → Nest with Authorization).
+ * ISR shell may show guest prices; call after useBuyerAuth().authenticated.
+ */
+export async function fetchPublicProductsPageClient(
+  opts: FetchPublicProductsOpts = {},
+): Promise<PublicProductsPage | null> {
+  const qs = buildPublicProductsQueryString(opts);
+  try {
+    const res = await fetch(`/api/public/catalog/products${qs ? `?${qs}` : ''}`, {
+      credentials: 'same-origin',
+      cache: 'no-store',
+      headers: { Accept: 'application/json' },
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as PublicProductsPage;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchPublicProductClient(slug: string): Promise<PublicProduct | null> {
+  const s = slug.trim();
+  if (!s) return null;
+  try {
+    const res = await fetch(`/api/public/catalog/products/${encodeURIComponent(s)}`, {
+      credentials: 'same-origin',
+      cache: 'no-store',
+      headers: { Accept: 'application/json' },
+    });
+    if (res.status === 404) return null;
+    if (!res.ok) return null;
+    return (await res.json()) as PublicProduct;
+  } catch {
+    return null;
+  }
 }
 
 export type PublicSearchHit = {
@@ -257,6 +302,41 @@ export async function fetchPublicSetSiblings(slug: string): Promise<PublicSetSib
     `catalog/products/${encodeURIComponent(slug)}/set-siblings`,
   );
   return data?.items ?? [];
+}
+
+/** Buyer-aware set siblings (BFF → Nest with Authorization). */
+export async function fetchPublicSetSiblingsClient(
+  slug: string,
+): Promise<PublicSetSibling[]> {
+  const s = slug.trim();
+  if (!s) return [];
+  try {
+    const res = await fetch(
+      `/api/public/catalog/products/${encodeURIComponent(s)}/set-siblings`,
+      { credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json' } },
+    );
+    if (!res.ok) return [];
+    const data = (await res.json()) as { items?: PublicSetSibling[] };
+    return data.items ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/** Buyer-aware featured collections with product cards. */
+export async function fetchPublicCollectionsClient(): Promise<PublicCollectionCard[]> {
+  try {
+    const res = await fetch('/api/public/catalog/collections?includeProducts=1', {
+      credentials: 'same-origin',
+      cache: 'no-store',
+      headers: { Accept: 'application/json' },
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as { items?: PublicCollectionCard[] };
+    return data.items ?? [];
+  } catch {
+    return [];
+  }
 }
 
 export function formatRub(value: number): string {

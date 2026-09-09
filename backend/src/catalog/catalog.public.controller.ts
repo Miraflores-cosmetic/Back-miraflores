@@ -1,5 +1,17 @@
-import { Body, Controller, Get, Header, NotFoundException, Param, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Header,
+  NotFoundException,
+  Param,
+  Post,
+  Query,
+  Req,
+} from '@nestjs/common';
+import { UserRole } from '@prisma/client';
 import { Public } from '../common/decorators/public.decorator';
+import type { JwtPayload } from '../common/decorators/current-user.decorator';
 import {
   parseOptionalNonNegInt,
   parseOptionalPositiveInt,
@@ -12,8 +24,15 @@ import { SyncCartDto } from './dto/cart-sync.dto';
 export class CatalogPublicController {
   constructor(private readonly catalogPublic: CatalogPublicService) {}
 
+  private buyerUserId(req: { user?: JwtPayload }): string | undefined {
+    const u = req.user;
+    if (u?.role === UserRole.USER && u.sub?.trim()) return u.sub.trim();
+    return undefined;
+  }
+
   @Get('products')
   listProducts(
+    @Req() req: { user?: JwtPayload },
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('category') category?: string,
@@ -41,23 +60,27 @@ export class CatalogPublicController {
       priceMax: parseOptionalNonNegInt(priceMax),
       saleOnly: sale === '1' || sale === 'true',
       slugs: slugList?.length ? slugList : undefined,
+      userId: this.buyerUserId(req),
     });
   }
 
   /** Guest cart: refresh price/stock, drop dead variants. */
   @Post('cart/sync')
-  syncCart(@Body() dto: SyncCartDto) {
-    return this.catalogPublic.syncCartLines(dto.lines ?? []);
+  syncCart(@Body() dto: SyncCartDto, @Req() req: { user?: JwtPayload }) {
+    return this.catalogPublic.syncCartLines(dto.lines ?? [], this.buyerUserId(req));
   }
 
   @Get('products/:slug/set-siblings')
-  setSiblings(@Param('slug') slug: string) {
-    return this.catalogPublic.getSetSiblings(slug);
+  setSiblings(@Param('slug') slug: string, @Req() req: { user?: JwtPayload }) {
+    return this.catalogPublic.getSetSiblings(slug, this.buyerUserId(req));
   }
 
   @Get('products/:slug')
-  async product(@Param('slug') slug: string) {
-    const product = await this.catalogPublic.getProductBySlug(slug);
+  async product(@Param('slug') slug: string, @Req() req: { user?: JwtPayload }) {
+    const product = await this.catalogPublic.getProductBySlug(
+      slug,
+      this.buyerUserId(req),
+    );
     if (!product) throw new NotFoundException('Product not found');
     return product;
   }
@@ -80,10 +103,14 @@ export class CatalogPublicController {
   }
 
   @Get('collections')
-  listCollections(@Query('includeProducts') includeProducts?: string) {
+  listCollections(
+    @Req() req: { user?: JwtPayload },
+    @Query('includeProducts') includeProducts?: string,
+  ) {
     return this.catalogPublic.listCollections({
       includeProducts:
         includeProducts === '1' || includeProducts === 'true',
+      userId: this.buyerUserId(req),
     });
   }
 

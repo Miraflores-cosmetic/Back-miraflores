@@ -22,12 +22,48 @@ import type {
   AdminVariant,
 } from '@/lib/adminCatalogTypes';
 import { adminBackendListAllPages } from '@/lib/adminListAll';
+import {
+  plainProductAttrValue,
+  type ProductAttributeKind,
+  type ProductAttributeOptionApi,
+} from '@/lib/productAttributes';
 import { revalidateCatalogStorefront } from '@/lib/revalidateCatalogStorefront';
 import styles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
 import { ProductGalleryEditor, type GalleryImage } from './ProductGalleryEditor';
 import pn from './productNew.module.css';
 
 type PickRow = { id: string; name: string };
+
+function ProductAttrSelect({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: { id: string; label: string }[];
+  onChange: (next: string) => void;
+}) {
+  const opts = options.slice();
+  if (value && !opts.some((o) => o.id === value)) {
+    opts.unshift({ id: value, label: value });
+  }
+  return (
+    <AdminSelect
+      label={label}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      <option value="">—</option>
+      {opts.map((o) => (
+        <option key={o.id} value={o.id}>
+          {o.label}
+        </option>
+      ))}
+    </AdminSelect>
+  );
+}
 
 function categoryOptionLabel(c: AdminCategory): string {
   if (c.parent?.name) return `${c.parent.name} → ${c.name}`;
@@ -102,10 +138,10 @@ export function ProductFormClient({ productId }: { productId?: string }) {
   const [compositionHtml, setCompositionHtml] = useState('');
   const [importantNoteHtml, setImportantNoteHtml] = useState('');
   const [mirafloresNoteHtml, setMirafloresNoteHtml] = useState('');
-  const [storageHtml, setStorageHtml] = useState('');
-  const [productType, setProductType] = useState('');
-  const [purpose, setPurpose] = useState('');
-  const [shelfLife, setShelfLife] = useState('');
+  const [storageOptionId, setStorageOptionId] = useState('');
+  const [productTypeOptionId, setProductTypeOptionId] = useState('');
+  const [purposeOptionId, setPurposeOptionId] = useState('');
+  const [shelfLifeOptionId, setShelfLifeOptionId] = useState('');
   const [metaTitle, setMetaTitle] = useState('');
   const [metaDescription, setMetaDescription] = useState('');
   const [ogImageUrl, setOgImageUrl] = useState('');
@@ -127,6 +163,15 @@ export function ProductFormClient({ productId }: { productId?: string }) {
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
   const [pendingDeleteProduct, setPendingDeleteProduct] = useState(false);
   const [productBusy, setProductBusy] = useState(false);
+  const [attrOptions, setAttrOptions] = useState<
+    Record<ProductAttributeKind, { id: string; label: string }[]>
+  >({
+    productType: [],
+    purpose: [],
+    shelfLife: [],
+    storage: [],
+  });
+  const [attrsHint, setAttrsHint] = useState<string | null>(null);
 
   function markDirty() {
     setDirty(true);
@@ -139,11 +184,22 @@ export function ProductFormClient({ productId }: { productId?: string }) {
       setError(null);
       setLoadFailed(false);
       try {
-        const [cats, tags, cols, sets, p] = await Promise.all([
+        const [cats, tags, cols, sets, attrsResult, p] = await Promise.all([
           adminBackendJson<AdminCategory[]>('catalog/admin/categories'),
           adminBackendJson<AdminCatalogTag[]>('catalog/admin/catalog-tags'),
           adminBackendListAllPages<PickRow>('catalog/admin/collections'),
           adminBackendListAllPages<PickRow>('catalog/admin/product-sets'),
+          adminBackendJson<{ items: ProductAttributeOptionApi[] }>(
+            'catalog/admin/product-attribute-options',
+          )
+            .then((data) => ({ ok: true as const, data }))
+            .catch((e: unknown) => ({
+              ok: false as const,
+              error:
+                e instanceof AdminBackendRequestError
+                  ? e.message
+                  : 'Не удалось загрузить списки атрибутов',
+            })),
           productId
             ? adminBackendJson<AdminProduct>(`catalog/admin/products/${productId}`)
             : Promise.resolve(null),
@@ -153,6 +209,29 @@ export function ProductFormClient({ productId }: { productId?: string }) {
         setCatalogTags(tags);
         setCollections(cols.map((c) => ({ id: c.id, name: c.name })));
         setProductSets(sets.map((s) => ({ id: s.id, name: s.name })));
+        const nextAttrs: Record<ProductAttributeKind, { id: string; label: string }[]> = {
+          productType: [],
+          purpose: [],
+          shelfLife: [],
+          storage: [],
+        };
+        if (attrsResult.ok) {
+          for (const it of attrsResult.data.items ?? []) {
+            if (!it.active) continue;
+            nextAttrs[it.kind]?.push({ id: it.id, label: it.label });
+          }
+          const total = Object.values(nextAttrs).reduce((n, a) => n + a.length, 0);
+          setAttrsHint(
+            total === 0
+              ? 'Списки атрибутов пусты — заполните в Настройки → Атрибуты (нужен доступ к настройкам).'
+              : null,
+          );
+        } else {
+          setAttrsHint(
+            `${attrsResult.error}. Списки выпадающих полей недоступны — обратитесь к суперадмину или откройте Настройки → Атрибуты.`,
+          );
+        }
+        setAttrOptions(nextAttrs);
         if (!isEdit && cats[0]) setCategoryId(cats[0].id);
 
         if (p) {
@@ -167,10 +246,20 @@ export function ProductFormClient({ productId }: { productId?: string }) {
           setCompositionHtml(p.compositionHtml ?? '');
           setImportantNoteHtml(p.importantNoteHtml ?? '');
           setMirafloresNoteHtml(p.mirafloresNoteHtml ?? '');
-          setStorageHtml(p.storageHtml ?? '');
-          setProductType(p.productType ?? '');
-          setPurpose(p.purpose ?? '');
-          setShelfLife(p.shelfLife ?? '');
+          const resolveOpt = (
+            kind: ProductAttributeKind,
+            optionId: string | null | undefined,
+            label: string | null | undefined,
+          ) => {
+            if (optionId && nextAttrs[kind].some((o) => o.id === optionId)) return optionId;
+            const plain = plainProductAttrValue(label);
+            if (!plain) return '';
+            return nextAttrs[kind].find((o) => o.label === plain)?.id ?? '';
+          };
+          setStorageOptionId(resolveOpt('storage', p.storageOptionId, p.storageHtml));
+          setProductTypeOptionId(resolveOpt('productType', p.productTypeOptionId, p.productType));
+          setPurposeOptionId(resolveOpt('purpose', p.purposeOptionId, p.purpose));
+          setShelfLifeOptionId(resolveOpt('shelfLife', p.shelfLifeOptionId, p.shelfLife));
           setMetaTitle(p.metaTitle ?? '');
           setMetaDescription(p.metaDescription ?? '');
           setOgImageUrl(p.ogImageUrl ?? '');
@@ -235,10 +324,10 @@ export function ProductFormClient({ productId }: { productId?: string }) {
       compositionHtml: compositionHtml.trim() || null,
       importantNoteHtml: importantNoteHtml.trim() || null,
       mirafloresNoteHtml: mirafloresNoteHtml.trim() || null,
-      storageHtml: storageHtml.trim() || null,
-      productType: productType.trim() || null,
-      purpose: purpose.trim() || null,
-      shelfLife: shelfLife.trim() || null,
+      storageOptionId: storageOptionId.trim() || null,
+      productTypeOptionId: productTypeOptionId.trim() || null,
+      purposeOptionId: purposeOptionId.trim() || null,
+      shelfLifeOptionId: shelfLifeOptionId.trim() || null,
       metaTitle: metaTitle.trim() || null,
       metaDescription: metaDescription.trim() || null,
       ogImageUrl: ogImageUrl.trim() || null,
@@ -576,37 +665,45 @@ export function ProductFormClient({ productId }: { productId?: string }) {
                 setMirafloresNoteHtml(v);
               }}
             />
-            <AdminTextField
+            {attrsHint ? (
+              <p className={styles.error} role="status">
+                {attrsHint}
+              </p>
+            ) : null}
+            <ProductAttrSelect
               label="Тип продукта"
-              value={productType}
-              onChange={(e) => {
-                markDirty();
-                setProductType(e.target.value);
-              }}
-            />
-            <AdminTextField
-              label="Для чего"
-              value={purpose}
-              onChange={(e) => {
-                markDirty();
-                setPurpose(e.target.value);
-              }}
-            />
-            <AdminTextField
-              label="Срок годности"
-              value={shelfLife}
-              onChange={(e) => {
-                markDirty();
-                setShelfLife(e.target.value);
-              }}
-            />
-            <AdminRichField
-              label="Хранение"
-              value={storageHtml}
-              compact
+              value={productTypeOptionId}
+              options={attrOptions.productType}
               onChange={(v) => {
                 markDirty();
-                setStorageHtml(v);
+                setProductTypeOptionId(v);
+              }}
+            />
+            <ProductAttrSelect
+              label="Для чего"
+              value={purposeOptionId}
+              options={attrOptions.purpose}
+              onChange={(v) => {
+                markDirty();
+                setPurposeOptionId(v);
+              }}
+            />
+            <ProductAttrSelect
+              label="Срок годности"
+              value={shelfLifeOptionId}
+              options={attrOptions.shelfLife}
+              onChange={(v) => {
+                markDirty();
+                setShelfLifeOptionId(v);
+              }}
+            />
+            <ProductAttrSelect
+              label="Хранение"
+              value={storageOptionId}
+              options={attrOptions.storage}
+              onChange={(v) => {
+                markDirty();
+                setStorageOptionId(v);
               }}
             />
           </AdminAccordion>

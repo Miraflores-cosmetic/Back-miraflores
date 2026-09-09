@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
-import { BUYER_ACCESS_TOKEN_COOKIE } from '@/lib/buyerAuth';
+import { readBuyerTokenFromCookies } from '@/lib/buyerAuth';
 import { readNestError } from '@/lib/nestBff';
 import { getServerApiBase } from '@/lib/serverApiBase';
 
@@ -8,7 +8,7 @@ export async function buyerNestFetch(
   path: string,
   init?: RequestInit,
 ): Promise<Response | NextResponse> {
-  const token = cookies().get(BUYER_ACCESS_TOKEN_COOKIE)?.value?.trim();
+  const token = readBuyerTokenFromCookies(cookies());
   if (!token) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }

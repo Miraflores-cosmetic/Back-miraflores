@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { CommerceContextService } from '../user-groups/commerce-context.service';
 import { ADMIN_LIST_MAX_LIMIT } from '../catalog/catalog.constants';
 import type { CreatePromoCodeDto, PromoType, UpdatePromoCodeDto } from './dto/promo.dto';
 import { PROMO_TYPES } from './dto/promo.dto';
@@ -262,13 +263,25 @@ export class PromoAdminService {
 
 @Injectable()
 export class PromoPublicService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly commerceContext: CommerceContextService,
+  ) {}
 
   /**
    * Preview для drawer: доверяет client subtotal (UX).
    * Лимиты maxUses / oneShot проверяются мягко (если переданы email/guestId).
    */
-  async validate(codeRaw: string, subtotal: number, identity: PromoIdentity = {}) {
+  async validate(
+    codeRaw: string,
+    subtotal: number,
+    identity: PromoIdentity = {},
+    buyerUserId?: string | null,
+  ) {
+    const ctx = await this.commerceContext.resolveFromUserId(buyerUserId);
+    if (!ctx.allowPromoCodes) {
+      throw new BadRequestException('Промокод недоступен для вашей группы');
+    }
     return this.applyAgainstSubtotal(codeRaw, subtotal, identity, { enforceIdentity: false });
   }
 

@@ -13,6 +13,32 @@ enum UserRole {
   USER
 }
 
+enum GroupCategoryPriceType {
+  PERCENT_OFF
+  FIXED_OFF
+  FIXED_PRICE
+}
+
+enum CatalogVisibilityMode {
+  HIDE_FROM_GUESTS
+  HIDE_FROM_REGISTERED
+  HIDE_FROM_GROUP
+  SHOW_ONLY_REGISTERED
+  SHOW_ONLY_GROUP
+}
+
+enum CatalogVisibilityTarget {
+  PRODUCT
+  CATEGORY
+  VARIANT
+}
+
+enum PriceRounding {
+  FLOOR
+  CEIL
+  NEAREST
+}
+
 enum OrderStatus {
   NEW
   AWAITING_PAYMENT
@@ -65,8 +91,86 @@ model User {
   moderatedReviews ProductReview[] @relation("ReviewModerator")
   favorites        UserFavorite[]
   quizResult       UserQuizResult?
+  /// Кастомная группа покупателя; null → default registered group
+  groupId          String?
+  group            UserGroup? @relation(fields: [groupId], references: [id], onDelete: Restrict)
 
   @@index([staffDeletedAt])
+  @@index([groupId])
+}
+
+/// Группа покупателей (цены, видимость, промо)
+model UserGroup {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  active    Boolean  @default(true)
+  /// Системная: контекст гостя (ровно одна)
+  isDefaultGuest      Boolean @default(false)
+  /// Системная: зарег. без явного groupId (ровно одна)
+  isDefaultRegistered Boolean @default(false)
+  /// false для isDefaultGuest — пользователей не назначают
+  assignable          Boolean @default(true)
+  allowCatalogDiscounts Boolean @default(false)
+  allowPromoCodes       Boolean @default(true)
+  priceRounding         PriceRounding @default(NEAREST)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users           User[]
+  variantPrices   GroupVariantPrice[]
+  categoryPrices  GroupCategoryPrice[]
+  visibilityRules CatalogGroupVisibility[]
+
+  @@index([active])
+}
+
+/// Цена группы для SKU (приоритет выше категории)
+model GroupVariantPrice {
+  id        String         @id @default(cuid())
+  groupId   String
+  group     UserGroup      @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  variantId String
+  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  price     Int
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@unique([groupId, variantId])
+  @@index([variantId])
+}
+
+/// Правило цены на категорию
+model GroupCategoryPrice {
+  id         String                 @id @default(cuid())
+  groupId    String
+  group      UserGroup              @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  categoryId String
+  category   Category               @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  type       GroupCategoryPriceType
+  /// PERCENT_OFF: 1–100; FIXED_OFF / FIXED_PRICE: ₽
+  value      Int
+  createdAt  DateTime               @default(now())
+  updatedAt  DateTime               @updatedAt
+
+  @@unique([groupId, categoryId])
+  @@index([categoryId])
+}
+
+/// Видимость каталога по аудитории / группе
+model CatalogGroupVisibility {
+  id         String                  @id @default(cuid())
+  mode       CatalogVisibilityMode
+  groupId    String?
+  group      UserGroup?              @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  targetType CatalogVisibilityTarget
+  targetId   String
+  createdAt  DateTime                @default(now())
+  updatedAt  DateTime                @updatedAt
+
+  @@index([targetType, targetId])
+  @@index([groupId])
+  @@index([mode])
 }
 
 /// OTP при регистрации по email (до создания User)
@@ -158,6 +262,7 @@ model Category {
   children       Category[] @relation("CategoryTree")
   products       Product[]
   discountLinks  DiscountCategory[]
+  groupPrices    GroupCategoryPrice[]
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
@@ -184,14 +289,23 @@ model Product {
   importantNoteHtml  String?          @db.Text
   /// Комментарий Miraflores
   mirafloresNoteHtml String?          @db.Text
-  /// Хранение
+  /// Хранение — plain label из атрибутов (не rich HTML); синхронизируется с storageOption
   storageHtml        String?          @db.Text
-  /// Тип продукта
+  /// Тип продукта (denormalized label; источник — productTypeOption)
   productType        String?
   /// Для чего
   purpose            String?
   /// Срок годности
   shelfLife          String?
+  /// FK → ProductAttributeOption (источник истины для списков)
+  productTypeOptionId String?
+  productTypeOption   ProductAttributeOption? @relation("ProductTypeAttr", fields: [productTypeOptionId], references: [id], onDelete: SetNull)
+  purposeOptionId     String?
+  purposeOption       ProductAttributeOption? @relation("ProductPurposeAttr", fields: [purposeOptionId], references: [id], onDelete: SetNull)
+  shelfLifeOptionId   String?
+  shelfLifeOption     ProductAttributeOption? @relation("ProductShelfLifeAttr", fields: [shelfLifeOptionId], references: [id], onDelete: SetNull)
+  storageOptionId     String?
+  storageOption       ProductAttributeOption? @relation("ProductStorageAttr", fields: [storageOptionId], references: [id], onDelete: SetNull)
   /// Legacy «Дополнительно» (не используем в новых формах)
   extraHtml          String?          @db.Text
   categoryId         String
@@ -220,6 +334,11 @@ model Product {
   menuSettings       MenuSettings[]
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
+
+  @@index([productTypeOptionId])
+  @@index([purposeOptionId])
+  @@index([shelfLifeOptionId])
+  @@index([storageOptionId])
 }
 
 /// Отзыв о товаре (модерация → isPublished)
@@ -348,6 +467,7 @@ model ProductVariant {
   orderItems           OrderItem[]
   favoritedBy          UserFavorite[]
   gratitudeGiftRules   GratitudeGiftRule[]
+  groupPrices          GroupVariantPrice[]
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
@@ -632,6 +752,11 @@ model Order {
   adminViewedAt   DateTime?
   /// Когда заказ успешно принят 1С (обмен type=sale, mode=success)
   onecExportedAt  DateTime?
+  /// Snapshot группы ценообразования
+  pricingGroupId   String?
+  pricingGroupName String?
+  /// guest | registered_default | registered_group
+  pricingContext   String?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
@@ -654,6 +779,10 @@ model OrderItem {
   qty       Int
   unitPrice Int
   lineTotal Int
+  /// ProductVariant.price до групповых правил
+  baseUnitPrice  Int?
+  /// Цена после группы, до Discount/Promo
+  groupUnitPrice Int?
   /// Бесплатная линия программы благодарности (серверный аттач)
   isGratitudeGift Boolean @default(false)
 }
@@ -749,6 +878,40 @@ model FaqItem {
   updatedAt DateTime @updatedAt
 
   @@index([active, sortOrder])
+}
+
+/// Вид атрибута товара (выпадающие списки в карточке продукта)
+enum ProductAttributeKind {
+  productType
+  purpose
+  shelfLife
+  storage
+}
+
+/// Значение выпадающего списка атрибута (Настройки → Атрибуты)
+model ProductAttributeOption {
+  id        String               @id @default(cuid())
+  kind      ProductAttributeKind
+  label     String
+  sortOrder Int                  @default(0)
+  active    Boolean              @default(true)
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+
+  productsAsType      Product[] @relation("ProductTypeAttr")
+  productsAsPurpose   Product[] @relation("ProductPurposeAttr")
+  productsAsShelfLife Product[] @relation("ProductShelfLifeAttr")
+  productsAsStorage   Product[] @relation("ProductStorageAttr")
+
+  @@unique([kind, label])
+  @@index([kind, active, sortOrder])
+}
+
+/// Версия каталога опций атрибутов (optimistic concurrency для replace)
+model ProductAttributeCatalog {
+  id        String   @id @default("default")
+  version   Int      @default(0)
+  updatedAt DateTime @updatedAt
 }
 
 /// Слайд hero на главной (настройки сайта)

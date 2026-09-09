@@ -58,6 +58,8 @@ type SyncedCartItem = {
   sku: string;
   price: number;
   qty: number;
+  baseUnitPrice?: number;
+  groupUnitPrice?: number;
   isGratitudeGift?: boolean;
 };
 
@@ -227,14 +229,14 @@ export class OrdersPublicService {
    * Подписанный расчёт доставки: Nest фиксирует cost (free-PVZ или clientEstimate)
    * в HMAC-токене. Create order принимает только этот quote.
    */
-  async createShippingQuote(dto: ShippingQuoteRequestDto) {
+  async createShippingQuote(dto: ShippingQuoteRequestDto, userId?: string | null) {
     const city = dto.shippingAddress?.city?.trim() || '';
     const address = dto.shippingAddress?.address?.trim() || '';
     if (!city || !address) {
       throw new BadRequestException('Укажите город и адрес доставки');
     }
 
-    const synced = await this.catalogPublic.syncCartLines(dto.lines ?? []);
+    const synced = await this.catalogPublic.syncCartLines(dto.lines ?? [], userId ?? null);
     const items = synced.items;
     if (!items.length) {
       throw new BadRequestException('Корзина пуста или позиции недоступны');
@@ -368,7 +370,7 @@ export class OrdersPublicService {
       return this.serializeCreated(existing);
     }
 
-    const synced = await this.catalogPublic.syncCartLines(dto.lines ?? []);
+    const synced = await this.catalogPublic.syncCartLines(dto.lines ?? [], userId ?? null);
     const items = synced.items;
     if (!items.length) {
       throw new BadRequestException('Корзина пуста или позиции недоступны');
@@ -401,6 +403,9 @@ export class OrdersPublicService {
     }
 
     if (promoRaw) {
+      if (synced.pricing && !synced.pricing.allowPromoCodes) {
+        throw new BadRequestException('Промокод недоступен для вашей группы');
+      }
       // Precheck вне tx (быстрый UX-reject); лимиты повторно под FOR UPDATE ниже.
       promoApply = await this.promoPublic.applyForCheckout(promoRaw, subtotal, {
         email,
@@ -548,6 +553,9 @@ export class OrdersPublicService {
                 : null,
               guestId,
               userId: userId ?? null,
+              pricingGroupId: synced.pricing?.groupId ?? null,
+              pricingGroupName: synced.pricing?.groupName ?? null,
+              pricingContext: synced.pricing?.context ?? null,
               promoCode,
               discountTotal,
               giftCertificateCode,
@@ -638,6 +646,8 @@ export class OrdersPublicService {
                     qty: l.qty,
                     unitPrice: l.price,
                     lineTotal: l.price * l.qty,
+                    baseUnitPrice: l.baseUnitPrice ?? null,
+                    groupUnitPrice: l.groupUnitPrice ?? null,
                     isGratitudeGift: Boolean(l.isGratitudeGift),
                   };
                 }),

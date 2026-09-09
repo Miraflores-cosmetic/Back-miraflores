@@ -16,6 +16,7 @@ import type {
   AdminRetailUserDetail,
   AdminRetailUserQuiz,
 } from '@/lib/adminUserTypes';
+import type { AdminUserGroup, AdminUserGroupListResponse } from '@/lib/adminUserGroupTypes';
 import { orderStatusLabel } from '@/lib/orderStatusLabels';
 import styles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
 
@@ -95,6 +96,8 @@ export function UserDetailClient({ userId }: { userId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [user, setUser] = useState<AdminRetailUserDetail | null>(null);
+  const [assignableGroups, setAssignableGroups] = useState<AdminUserGroup[]>([]);
+  const [groupSaving, setGroupSaving] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -119,6 +122,36 @@ export function UserDetailClient({ userId }: { userId: string }) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await adminBackendJson<AdminUserGroupListResponse>(
+          'user-groups/admin?limit=100&active=1',
+        );
+        setAssignableGroups(res.items.filter((g) => g.assignable));
+      } catch {
+        setAssignableGroups([]);
+      }
+    })();
+  }, []);
+
+  async function onGroupChange(nextGroupId: string) {
+    setGroupSaving(true);
+    try {
+      await adminBackendJson(`users/admin/${userId}/group`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          groupId: nextGroupId === '' ? null : nextGroupId,
+        }),
+      });
+      await load();
+    } catch (e) {
+      setError(e instanceof AdminBackendRequestError ? e.message : 'Не удалось сменить группу');
+    } finally {
+      setGroupSaving(false);
+    }
+  }
 
   async function onDelete() {
     const ok = await adminConfirmDelete({
@@ -188,6 +221,24 @@ export function UserDetailClient({ userId }: { userId: string }) {
             <div className={styles.detailDlRow}>
               <dt>Email</dt>
               <dd>{user.email}</dd>
+            </div>
+            <div className={styles.detailDlRow}>
+              <dt>Группа</dt>
+              <dd>
+                <select
+                  className={styles.input}
+                  disabled={groupSaving}
+                  value={user.groupId ?? ''}
+                  onChange={(e) => void onGroupChange(e.target.value)}
+                >
+                  <option value="">Розница (зарег.) — по умолчанию</option>
+                  {assignableGroups.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
+                  ))}
+                </select>
+              </dd>
             </div>
             <div className={styles.detailDlRow}>
               <dt>Имя</dt>

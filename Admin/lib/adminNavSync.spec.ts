@@ -56,6 +56,8 @@ const ADMIN_API_PATH_SAMPLES = [
   '/api/v1/settings/admin/staff-profile',
   '/api/v1/settings/admin/staff',
   '/api/v1/settings/admin/faq',
+  '/api/v1/settings/admin/product-attributes',
+  '/api/v1/catalog/admin/product-attribute-options',
   '/api/v1/quiz/admin/overview',
   '/api/v1/assistant/admin/chat',
   '/api/v1/catalog/admin/products',

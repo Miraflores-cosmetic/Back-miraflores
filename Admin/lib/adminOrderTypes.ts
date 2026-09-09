@@ -123,6 +123,9 @@ export type AdminOrderDetail = {
   balanceDue?: number;
   refundSuggested?: number;
   promoCode: string | null;
+  pricingGroupId?: string | null;
+  pricingGroupName?: string | null;
+  pricingContext?: string | null;
   guestId: string | null;
   userId: string | null;
   user: {
