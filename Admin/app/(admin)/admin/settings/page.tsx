@@ -32,6 +32,9 @@ export default async function AdminSettingsPage() {
               className={`${styles.kpi} ${styles.kpiClickable}`}
             >
               <p className={styles.kpiValue}>{item.label}</p>
+              {item.aclBadge ? (
+                <span className={styles.kpiBadge}>доступ: {item.aclBadge}</span>
+              ) : null}
             </Link>
           ))}
         </div>

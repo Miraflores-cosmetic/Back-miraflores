@@ -1,5 +1,5 @@
-import { UserGroupsAdminClient } from './UserGroupsAdminClient';
+import { redirect } from 'next/navigation';
 
-export default function AdminUserGroupsPage() {
-  return <UserGroupsAdminClient />;
+export default function LegacyUserGroupsRedirectPage() {
+  redirect('/admin/settings/user-groups');
 }

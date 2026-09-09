@@ -25,11 +25,17 @@ export function DiscountCategoryPickerModal({
   selectedIds,
   onClose,
   onApply,
+  single = false,
+  leafOnly = false,
 }: {
   open: boolean;
   selectedIds: string[];
   onClose: () => void;
   onApply: (ids: string[], labels: Record<string, string>) => void;
+  /** Один выбор (radio) вместо чекбоксов. */
+  single?: boolean;
+  /** Только leaf-категории без подкатегорий. */
+  leafOnly?: boolean;
 }) {
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(false);
@@ -39,7 +45,7 @@ export function DiscountCategoryPickerModal({
 
   useEffect(() => {
     if (!open) return;
-    setDraft(new Set(selectedIds));
+    setDraft(new Set(single ? selectedIds.slice(0, 1) : selectedIds));
     setQ('');
     let cancelled = false;
     (async () => {
@@ -48,8 +54,15 @@ export function DiscountCategoryPickerModal({
       try {
         const cats = await adminBackendJson<AdminCategory[]>('catalog/admin/categories');
         if (cancelled) return;
+        let list = cats;
+        if (leafOnly) {
+          const parentIds = new Set(
+            cats.map((c) => c.parentId).filter((id): id is string => Boolean(id)),
+          );
+          list = cats.filter((c) => !parentIds.has(c.id));
+        }
         setRows(
-          cats.slice().sort((a, b) => categoryLabel(a).localeCompare(categoryLabel(b), 'ru')),
+          list.slice().sort((a, b) => categoryLabel(a).localeCompare(categoryLabel(b), 'ru')),
         );
       } catch (e) {
         if (!cancelled) {
@@ -68,7 +81,7 @@ export function DiscountCategoryPickerModal({
     return () => {
       cancelled = true;
     };
-  }, [open, selectedIds]);
+  }, [open, selectedIds, single]);
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -78,6 +91,9 @@ export function DiscountCategoryPickerModal({
 
   function toggle(id: string) {
     setDraft((prev) => {
+      if (single) {
+        return prev.has(id) ? new Set() : new Set([id]);
+      }
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -94,15 +110,27 @@ export function DiscountCategoryPickerModal({
     onClose();
   }
 
+  const title =
+    leafOnly && single ? 'Категория (leaf)' : leafOnly ? 'Категории (leaf)' : 'Категории';
+  const hint = leafOnly
+    ? 'Только конечные категории без подкатегорий.'
+    : DISCOUNT_CATEGORY_NO_DESCENDANTS_HINT;
+
   return (
     <AdminModal
       open={open}
-      title="Категории"
+      title={title}
       wide
       onClose={onClose}
-      footer={<AdminModalActions onCancel={onClose} onConfirm={apply} />}
+      footer={
+        <AdminModalActions
+          onCancel={onClose}
+          onConfirm={apply}
+          confirmDisabled={single && draft.size === 0}
+        />
+      }
     >
-      <p className={styles.muted}>{DISCOUNT_CATEGORY_NO_DESCENDANTS_HINT}</p>
+      <p className={styles.muted}>{hint}</p>
       <AdminSearchBox
         placeholder="Поиск категории"
         ariaLabel="Поиск категории"
@@ -128,12 +156,23 @@ export function DiscountCategoryPickerModal({
               {filtered.map((c) => (
                 <tr key={c.id}>
                   <td>
-                    <AdminCheckbox
-                      className={styles.adminCheckboxInTable}
-                      checked={draft.has(c.id)}
-                      onChange={() => toggle(c.id)}
-                      aria-label={categoryLabel(c)}
-                    />
+                    {single ? (
+                      <input
+                        type="radio"
+                        name="admin-category-single"
+                        className={styles.adminCheckboxInTable}
+                        checked={draft.has(c.id)}
+                        onChange={() => toggle(c.id)}
+                        aria-label={categoryLabel(c)}
+                      />
+                    ) : (
+                      <AdminCheckbox
+                        className={styles.adminCheckboxInTable}
+                        checked={draft.has(c.id)}
+                        onChange={() => toggle(c.id)}
+                        aria-label={categoryLabel(c)}
+                      />
+                    )}
                   </td>
                   <td>{categoryLabel(c)}</td>
                 </tr>

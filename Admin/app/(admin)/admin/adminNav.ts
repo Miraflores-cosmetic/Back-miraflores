@@ -104,8 +104,17 @@ export const ADMIN_NAV: NavItem[] = [
   },
   { type: 'divider' },
   { type: 'link', href: '/admin/orders', label: 'Заказы', section: 'orders' },
-  { type: 'link', href: '/admin/users', label: 'Пользователи', section: 'users' },
-  { type: 'link', href: '/admin/user-groups', label: 'Группы', section: 'users' },
+  {
+    type: 'group',
+    id: 'users',
+    label: 'Пользователи',
+    section: 'users',
+    prefixes: ['/admin/users', '/admin/settings/user-groups'],
+    children: [
+      { href: '/admin/users', label: 'Покупатели', section: 'users' },
+      { href: '/admin/settings/user-groups', label: 'Группы', section: 'users' },
+    ],
+  },
   { type: 'divider' },
   {
     type: 'group',
@@ -117,6 +126,7 @@ export const ADMIN_NAV: NavItem[] = [
       '/admin/settings/staff/me',
       '/admin/settings/home',
       '/admin/settings/menu',
+      '/admin/settings/user-groups',
     ],
     children: [
       { href: '/admin/settings/seo', label: 'SEO', section: 'settings' },

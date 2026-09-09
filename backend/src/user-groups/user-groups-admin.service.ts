@@ -331,6 +331,7 @@ export class UserGroupsAdminService {
         basePrice: r.variant.price,
         sku: r.variant.sku,
         variantName: r.variant.name,
+        productId: r.variant.product.id,
         productName: r.variant.product.name,
         productSlug: r.variant.product.slug,
       })),

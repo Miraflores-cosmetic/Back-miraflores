@@ -203,6 +203,7 @@ export function resolveAdminSectionFromPathname(pathname: string): AdminPathAcce
   if (p.startsWith('/admin/cart') || p.startsWith('/admin/delivery')) return 'settings';
   /** Hub «Настройки» — только суперадмин; deep links (`/admin/settings/seo`, FAQ…) — grant `settings`. */
   if (p === '/admin/settings') return 'staff';
+  if (p.startsWith('/admin/settings/user-groups')) return 'users';
   if (p.startsWith('/admin/settings/')) return 'settings';
   if (
     p.startsWith('/admin/catalog') ||

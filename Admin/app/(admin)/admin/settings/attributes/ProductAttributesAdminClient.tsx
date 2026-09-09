@@ -1,9 +1,25 @@
 'use client';
 
+import {
+  DndContext,
+  type DragEndEvent,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AdminCheckbox } from '@/components/admin/AdminCheckbox/AdminCheckbox';
-import { AdminCompactBtn } from '@/components/AdminCompactBtn/AdminCompactBtn';
+import { AdminCompactBtn, AdminCompactBtnLink } from '@/components/AdminCompactBtn/AdminCompactBtn';
 import { AdminSettingsListErrors } from '@/components/admin/AdminSettingsListErrors/AdminSettingsListErrors';
+import { AdminTabs } from '@/components/AdminTabs/AdminTabs';
 import { AdminTextField } from '@/components/AdminTextField/AdminTextField';
 import { ConfirmDialog } from '@/components/ConfirmDialog/ConfirmDialog';
 import { useToast } from '@/components/Toast/ToastProvider';
@@ -19,6 +35,7 @@ import {
 } from '@/lib/productAttributes';
 import { useAdminSettingsListShell } from '@/lib/useAdminSettingsListShell';
 import catalogStyles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
+import pn from '@/app/(admin)/admin/catalog/products/productNew.module.css';
 import styles from '@/app/(admin)/admin/settings/Settings.module.css';
 
 type Draft = {
@@ -43,6 +60,103 @@ function mapApiItems(items: ProductAttributeOptionApi[]): Draft[] {
     active: it.active,
     usageCount: it.usageCount ?? 0,
   }));
+}
+
+function TrashIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M10 11v6M14 11v6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function SortableAttrRow({
+  item,
+  disabled,
+  onChange,
+  onRemove,
+}: {
+  item: Draft;
+  disabled: boolean;
+  onChange: (patch: Partial<Draft>) => void;
+  onRemove: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: item.key,
+    disabled,
+  });
+
+  return (
+    <li
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+      }}
+      className={`${styles.faqCard} ${isDragging ? styles.faqCardDragging : ''}`}
+    >
+      <div className={styles.faqCardHead}>
+        <button
+          type="button"
+          className={styles.dragBtn}
+          {...attributes}
+          {...listeners}
+          aria-label="Перетащить"
+          disabled={disabled}
+        >
+          ⋮⋮
+        </button>
+        <label className={styles.activeLabel}>
+          <AdminCheckbox
+            checked={item.active}
+            onChange={(e) => onChange({ active: e.target.checked })}
+            disabled={disabled}
+          />
+          Активен
+        </label>
+        <AdminCompactBtn
+          type="button"
+          variant="outline"
+          className={catalogStyles.iconDangerBtn}
+          onClick={onRemove}
+          disabled={disabled || item.usageCount > 0}
+          aria-label="Удалить"
+          title={
+            item.usageCount > 0
+              ? `Используется на ${item.usageCount} товар(ах) — сначала снимите с товаров`
+              : 'Удалить'
+          }
+        >
+          <TrashIcon />
+        </AdminCompactBtn>
+      </div>
+      <AdminTextField
+        label="Значение"
+        value={item.label}
+        onChange={(e) => onChange({ label: e.target.value })}
+        disabled={disabled}
+        maxLength={500}
+      />
+      {item.usageCount > 0 ? (
+        <p className={catalogStyles.muted}>
+          На товарах: {item.usageCount}. Чтобы удалить — снимите значение с товаров. Переименование
+          обновит эти товары.
+        </p>
+      ) : null}
+    </li>
+  );
 }
 
 export function ProductAttributesAdminClient() {
@@ -70,6 +184,8 @@ export function ProductAttributesAdminClient() {
   const [confirmEmptyWipe, setConfirmEmptyWipe] = useState(false);
   const loadedCountRef = useRef(0);
 
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+
   const load = useCallback(async () => {
     beginLoad();
     try {
@@ -95,6 +211,7 @@ export function ProductAttributesAdminClient() {
   }, [load]);
 
   const tabItems = useMemo(() => items.filter((it) => it.kind === tab), [items, tab]);
+  const tabIds = useMemo(() => tabItems.map((it) => it.key), [tabItems]);
 
   async function persist(allowEmpty = false) {
     beginSave();
@@ -169,56 +286,76 @@ export function ProductAttributesAdminClient() {
   const canEdit = loadedOk && !loading;
   const canSave = canEdit && dirty && !saving;
 
-  function patchTabItem(indexInTab: number, patch: Partial<Draft>) {
-    const target = tabItems[indexInTab];
-    if (!target) return;
+  function patchItem(key: string, patch: Partial<Draft>) {
     markDirty();
-    setItems((prev) =>
-      prev.map((row) => (row.key === target.key ? { ...row, ...patch } : row)),
-    );
+    setItems((prev) => prev.map((row) => (row.key === key ? { ...row, ...patch } : row)));
   }
 
-  function removeTabItem(indexInTab: number) {
-    const target = tabItems[indexInTab];
+  function removeItem(key: string) {
+    const target = items.find((row) => row.key === key);
     if (!target) return;
     if (target.usageCount > 0) {
       showToast(
-        `«${target.label}» стоит на ${target.usageCount} товар(ах) — переименуйте или снимите с товаров, затем удалите`,
+        `«${target.label}» стоит на ${target.usageCount} товар(ах) — сначала снимите с товаров`,
       );
       return;
     }
     markDirty();
-    setItems((prev) => prev.filter((row) => row.key !== target.key));
+    setItems((prev) => prev.filter((row) => row.key !== key));
   }
 
-  function moveTabItem(indexInTab: number, dir: -1 | 1) {
-    const next = indexInTab + dir;
-    if (next < 0 || next >= tabItems.length) return;
-    const a = tabItems[indexInTab]!;
-    const b = tabItems[next]!;
+  function addValue() {
+    markDirty();
+    setItems((prev) => [
+      ...prev,
+      { key: newKey(), kind: tab, label: '', active: true, usageCount: 0 },
+    ]);
+  }
+
+  function onDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = tabIds.indexOf(String(active.id));
+    const newIndex = tabIds.indexOf(String(over.id));
+    if (oldIndex < 0 || newIndex < 0) return;
     markDirty();
     setItems((prev) => {
-      const ia = prev.findIndex((r) => r.key === a.key);
-      const ib = prev.findIndex((r) => r.key === b.key);
-      if (ia < 0 || ib < 0) return prev;
-      const copy = [...prev];
-      const tmp = copy[ia]!;
-      copy[ia] = copy[ib]!;
-      copy[ib] = tmp;
-      return copy;
+      const kindItems = prev.filter((row) => row.kind === tab);
+      const reordered = arrayMove(kindItems, oldIndex, newIndex);
+      let qi = 0;
+      return prev.map((row) => (row.kind === tab ? reordered[qi++]! : row));
     });
   }
 
   return (
-    <div>
-      <div className={styles.hubHeader}>
-        <h1 className={`${catalogStyles.title} ${styles.hubHeaderTitle}`}>Атрибуты</h1>
+    <form
+      onSubmit={(e) => void onSave(e)}
+      className={`${catalogStyles.form} ${catalogStyles.formWide}`}
+    >
+      <div className={pn.stickyToolbar}>
+        <div className={pn.stickyToolbarMain}>
+          <div className={pn.stickyToolbarNav}>
+            <AdminCompactBtnLink href="/admin/settings" variant="outline">
+              ← Настройки
+            </AdminCompactBtnLink>
+            {dirty ? <span className={pn.dirtyHintInline}>Несохранённые изменения</span> : null}
+          </div>
+          <h1 className={pn.stickyToolbarTitle}>Атрибуты</h1>
+        </div>
+        <div className={pn.stickyToolbarActions}>
+          <AdminCompactBtn
+            type="button"
+            variant="outline"
+            disabled={!canEdit || saving}
+            onClick={addValue}
+          >
+            Добавить значение
+          </AdminCompactBtn>
+          <AdminCompactBtn type="submit" variant="accent" disabled={!canSave}>
+            {saving ? 'Сохранение…' : 'Сохранить'}
+          </AdminCompactBtn>
+        </div>
       </div>
-      <p className={catalogStyles.lead}>
-        Значения выпадающих списков в карточке товара: тип продукта, для чего, срок годности,
-        хранение (plain-текст, не rich HTML). Переименование обновляет товары; удаление опции на
-        товарах запрещено. Дубликаты в одном списке не допускаются.
-      </p>
 
       <AdminSettingsListErrors
         loadError={loadError}
@@ -235,113 +372,37 @@ export function ProductAttributesAdminClient() {
           Не удалось загрузить атрибуты. Нажмите «Повторить» — сохранение отключено.
         </p>
       ) : (
-        <form
-          onSubmit={(e) => void onSave(e)}
-          className={`${catalogStyles.form} ${catalogStyles.formWide}`}
-        >
-          {dirty ? <p className={catalogStyles.lead}>Несохранённые изменения</p> : null}
+        <>
+          <AdminTabs
+            ariaLabel="Вид атрибута"
+            activeId={tab}
+            onChange={setTab}
+            items={PRODUCT_ATTRIBUTE_KINDS.map((kind) => ({
+              id: kind,
+              label: PRODUCT_ATTRIBUTE_KIND_LABELS[kind],
+            }))}
+          />
 
-          <div className={styles.tabs} role="tablist" aria-label="Вид атрибута">
-            {PRODUCT_ATTRIBUTE_KINDS.map((kind) => (
-              <button
-                key={kind}
-                type="button"
-                role="tab"
-                aria-selected={tab === kind}
-                className={`${styles.tab} ${tab === kind ? styles.tabActive : ''}`}
-                onClick={() => setTab(kind)}
-              >
-                {PRODUCT_ATTRIBUTE_KIND_LABELS[kind]}
-              </button>
-            ))}
-          </div>
-
-          <ul className={styles.faqList}>
-            {tabItems.map((item, index) => (
-              <li key={item.key} className={styles.faqCard}>
-                <div className={styles.faqCardHead}>
-                  <label className={styles.activeLabel}>
-                    <AdminCheckbox
-                      checked={item.active}
-                      onChange={(e) => patchTabItem(index, { active: e.target.checked })}
-                      disabled={saving}
-                    />
-                    Активен
-                  </label>
-                  <AdminCompactBtn
-                    type="button"
-                    variant="outline"
-                    disabled={saving || index === 0}
-                    onClick={() => moveTabItem(index, -1)}
-                    aria-label="Выше"
-                  >
-                    ↑
-                  </AdminCompactBtn>
-                  <AdminCompactBtn
-                    type="button"
-                    variant="outline"
-                    disabled={saving || index >= tabItems.length - 1}
-                    onClick={() => moveTabItem(index, 1)}
-                    aria-label="Ниже"
-                  >
-                    ↓
-                  </AdminCompactBtn>
-                  <AdminCompactBtn
-                    type="button"
-                    variant="danger"
-                    onClick={() => removeTabItem(index)}
-                    disabled={saving || item.usageCount > 0}
-                    aria-label="Удалить"
-                    title={
-                      item.usageCount > 0
-                        ? `Используется на ${item.usageCount} товар(ах)`
-                        : 'Удалить'
-                    }
-                  >
-                    Удалить
-                  </AdminCompactBtn>
-                </div>
-                <AdminTextField
-                  label="Значение"
-                  value={item.label}
-                  onChange={(e) => patchTabItem(index, { label: e.target.value })}
-                  disabled={saving}
-                  maxLength={500}
-                />
-                {item.usageCount > 0 ? (
-                  <p className={catalogStyles.muted}>
-                    На товарах: {item.usageCount}. Переименование обновит эти товары; удаление
-                    заблокировано.
-                  </p>
-                ) : null}
-              </li>
-            ))}
-          </ul>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+            <SortableContext items={tabIds} strategy={verticalListSortingStrategy}>
+              <ul className={styles.faqList}>
+                {tabItems.map((item) => (
+                  <SortableAttrRow
+                    key={item.key}
+                    item={item}
+                    disabled={saving}
+                    onChange={(patch) => patchItem(item.key, patch)}
+                    onRemove={() => removeItem(item.key)}
+                  />
+                ))}
+              </ul>
+            </SortableContext>
+          </DndContext>
 
           {tabItems.length === 0 ? (
             <p className={catalogStyles.lead}>Значений пока нет</p>
           ) : null}
-
-          <div className={catalogStyles.formActions}>
-            <AdminCompactBtn
-              type="button"
-              variant="outline"
-              disabled={saving}
-              onClick={() => {
-                markDirty();
-                setItems((prev) => [
-                  ...prev,
-                  { key: newKey(), kind: tab, label: '', active: true, usageCount: 0 },
-                ]);
-              }}
-            >
-              Добавить значение
-            </AdminCompactBtn>
-            <AdminCompactBtn type="submit" disabled={!canSave}>
-              {saving ? 'Сохранение…' : 'Сохранить'}
-            </AdminCompactBtn>
-          </div>
-        </form>
+        </>
       )}
 
       <ConfirmDialog
@@ -356,6 +417,6 @@ export function ProductAttributesAdminClient() {
           void persist(true);
         }}
       />
-    </div>
+    </form>
   );
 }

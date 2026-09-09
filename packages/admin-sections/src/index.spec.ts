@@ -83,6 +83,7 @@ describe('resolveAdminSectionFromPathname', () => {
       ['/admin/collections', 'catalog'],
       ['/admin/product-sets', 'catalog'],
       ['/admin/users', 'users'],
+      ['/admin/settings/user-groups', 'users'],
       ['/admin/user-groups', 'users'],
       ['/admin/blog', 'blog'],
       ['/admin/pages', 'blog'],

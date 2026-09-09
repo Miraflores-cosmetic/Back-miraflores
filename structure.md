@@ -71,8 +71,9 @@ Miraflores 3.0/
 │   └── .env.example
 ├── Admin/                    ← Next admin + BFF
 │   ├── app/(admin)/admin/    ← UI разделов
-│   │   ├── user-groups/      ← группы, цены, visibility, участники (pickers)
-│   │   └── settings/attributes/  ← списки атрибутов товара
+│   │   └── settings/
+│   │       ├── user-groups/  ← группы, цены, visibility, участники (pickers)
+│   │       └── attributes/   ← списки атрибутов товара
 │   ├── app/(site)/product/   ← служебный PDP (meta: type/purpose/shelfLife/storage)
 │   ├── app/api/              ← cdek, yandex, yookassa, …
 │   └── .env.example
@@ -123,7 +124,7 @@ Miraflores 3.0/
 - Форма товара: select по `*OptionId`; на Product хранятся FK + denormalized labels для витрины  
 - BFF: СДЭК, Яндекс Доставка/карты, webhook ЮKassa  
 - ACL: разделы из `@miraflores/admin-sections` (`orders`, `catalog`, `users`, `blog`, …); hub `/admin/settings` — только super-admin (`staff`)  
-- **Группы** (`/admin/user-groups`) — секция `users`; pickers каталога в форме группы требуют grant `catalog` у модератора
+- **Группы** (`/admin/settings/user-groups`) — ACL `users`; nav: **канон — Пользователи → Группы** (в sidebar «Настройки» пункта нет; `excludePaths` не подсвечивает Settings на карточке группы); hub «Настройки» — карточка только у **super-admin** (badge «доступ: Пользователи»); legacy `/admin/user-groups/*` → redirect; pickers каталога требуют grant `catalog`
 
 ### Front (Vite)
 
@@ -250,10 +251,13 @@ Site-only (не синхронизируются с 1С). Один `User.groupId
 
 | Слой | Поведение |
 |------|-----------|
-| **Admin write** | Только **leaf**-категории (без дочерних): `assertLeafCategory()` в service + leaf picker в `UserGroupPickers` |
+| **Admin write (category prices)** | Только **leaf**-категории: `assertLeafCategory()` + `DiscountCategoryPickerModal` (`leafOnly`) |
+| **Admin write (visibility CATEGORY)** | Любая категория (`DiscountCategoryPickerModal` без `leafOnly`) — можно скрыть родительскую ветку |
 | **Pricing engine read** | `category-tree.util` / `findNearestCategoryRule()` — **walk ancestors**, nearest rule wins |
 
-Parent rule **нельзя** задать в UI: правило на «Уход → Крем» действует на leaf-товары в «Крем», но не на соседние leaf в той же ветке, если rule только на другом leaf. Для ветки целиком — правило на каждый нужный leaf или SKU override.
+На вкладках **SKU** и **Категории** в Admin — hint `USER_GROUP_PRICE_STACK_HINT`: SKU override → nearest category rule → base + rounding группы.
+
+Category prices: parent rule **нельзя** задать в UI цен категорий — только leaf; для ветки целиком — правило на каждый leaf или SKU override. Visibility на parent category — отдельно, через вкладку «Видимость».
 
 ### Visibility
 
@@ -274,22 +278,43 @@ Category rules матчат **ancestors** продукта. **VARIANT** rules �
 | `GET\|POST\|PATCH\|DELETE /user-groups/admin/:id/visibility` | **`users`** | visibility **конкретной группы** (UI: вкладка «Видимость») |
 | `GET\|POST\|PATCH\|DELETE /catalog/admin/visibility` | **`catalog`** | **глобальный** реестр visibility (фильтры mode/target/groupId); отдельного UI пока нет |
 
-**ACL split (hardened):** `resolveAdminSectionFromApiPath` — `/user-groups/admin` → `users`, `/catalog/admin/*` → `catalog`. Модератор с `users` правит visibility в карточке группы; с `catalog` — глобальный API (без привязки к одной группе). Nav: `/admin/user-groups` → `users` (`packages/admin-sections`).
+**ACL split (hardened):** `resolveAdminSectionFromApiPath` — `/user-groups/admin` → `users`, `/catalog/admin/*` → `catalog`. Модератор с `users` правит visibility в карточке группы; с `catalog` — глобальный API (без привязки к одной группе). Nav: `/admin/settings/user-groups` → `users` (`packages/admin-sections`).
 
 Members: `GET/POST /user-groups/admin/:id/members`, `DELETE …/members/:userId`.
 
 ### Admin UI
 
-| Путь | Вкладки / UX |
-|------|----------------|
-| `/admin/user-groups` | список, создание |
-| `/admin/user-groups/[id]` | Общее · **Участники** · Цены SKU · Категории · Видимость |
-| `UserGroupPickers.tsx` | variant / leaf category / product / user pickers (не raw UUID) |
-| `UserGroupMembersTab.tsx` | список участников, поиск, add/remove |
-| `/admin/users/[id]` | dropdown группы (как раньше) |
+| Путь | UX |
+|------|-----|
+| `/admin/settings/user-groups` | список: поиск, фильтр **active** (все/активные/выкл.), колонки counts (участники, SKU, категории, visibility); create в **modal** (auto-slug из названия via `Admin/lib/slugify.ts`); после create → `/[id]` (вкладка «Общее») |
+| `/admin/settings/user-groups/[id]?tab=` | deep-link вкладок; `resolveUserGroupTab()` — `?tab=members` на системной группе → fallback **general** |
+| `/admin/user-groups/*` | legacy redirect → settings path |
 
-Visibility в UI: CRUD через `user-groups/admin/:id/visibility`; таблица с `targetLabel`.  
-Назначение группы покупателю — вкладка «Участники» или карточка пользователя.
+**Карточка группы** — тонкий `UserGroupDetailClient` (shell + tabs + `refreshGroupMeta` для счётчиков):
+
+| Вкладка | Компонент | Заметки |
+|---------|-----------|---------|
+| Общее | `UserGroupGeneralTab` | профиль, flags, delete (каскад SKU/category/visibility); системные — без delete |
+| Участники | `UserGroupMembersTab` | только `assignable`; paginated; `ConfirmDialog` на remove |
+| Цены SKU | `UserGroupSkuPricesTab` | paginated (25); edit/delete; ссылка на товар; `VariantPickerModal` |
+| Категории | `UserGroupCategoryPricesTab` | leaf-only; список без paginate (soft limit ~50 + hint); `ConfirmDialog` |
+| Видимость | `UserGroupVisibilityTab` | self-load rules; product/category/variant pickers |
+
+**Pickers (reuse catalog/discounts, не raw UUID):**
+
+| Задача | Модалка |
+|--------|---------|
+| Product (visibility) | `DiscountProductPickerModal` (`single`) |
+| Category prices | `DiscountCategoryPickerModal` (`single` + `leafOnly`) |
+| Category visibility | `DiscountCategoryPickerModal` (`single`) |
+| Variant (SKU price / visibility) | `VariantPickerModal` (gratitude/orders) |
+| Member | `UserGroupMemberPickerModal` |
+
+**IA / breadcrumbs:** `UserGroupPageNav` — users-only: «← Пользователи»; super-admin: «← Настройки» + «← Группы» на detail. Pill-бейджи типа: `UserGroupKindBadge` (Гости / Розница / Кастомная). Розница/гости: «Авто · все зарег. без группы» / «Авто · все гости» (не пугающий 0 участников).
+
+Instant-save чекбоксы и destructive — **toast** + **`ConfirmDialog`** (единый паттерн, не `window.confirm`).
+
+`/admin/users/[id]` — dropdown группы (как раньше). Назначение — вкладка «Участники» или карточка пользователя.
 
 ### Storefront / BFF (Admin `app/(site)` + `app/api/public`)
 
@@ -338,13 +363,13 @@ On-demand: `POST /api/admin/revalidate-catalog`.
 | ID | Область | Сейчас | Цель |
 |----|---------|--------|------|
 | **F1** | Избранное | `add` / `replace` — только `requireActiveVariant` (active + не excludeFromCatalog); **visibility не проверяется**. `listIds` — все variantId. **Фильтр visibility только в `listItems`**. | На add/replace — `filterVisibleVariantIds` для контекста покупателя; опционально чистить «невидимые» при listIds или lazy purge |
-| **A1** | Admin ACL + UX | Visibility группы — вкладка в `/admin/user-groups/[id]` (`users` ACL). Глобальный `catalog/admin/visibility` — API есть, **UI нет**. Pickers в `UserGroupPickers` — локальные для groups. | Общий **VisibilityRulesEditor** + pickers; global UI под `catalog` ACL; group tab — thin wrapper (`groupId` preset). Единый UX для `users` vs `catalog` модераторов |
+| **A1** | Admin ACL + UX | Visibility группы — ✅ вкладка `/admin/settings/user-groups/[id]` (`users` ACL). Pickers — ✅ reuse `Discount*PickerModal` + `VariantPickerModal`. Глобальный `catalog/admin/visibility` — API есть, **UI нет**. | Общий **VisibilityRulesEditor** + global UI под `catalog` ACL; group tab — thin wrapper (`groupId` preset). Category prices list — paginate при >~50 |
 | **O1** | Admin заказ | `OrderItem.baseUnitPrice` / `groupUnitPrice` пишутся на create (`orders.public.service`); **admin serializer не отдаёт** → UI только `unitPrice` (финал после кампаний). `pricingGroupName` на заказе — ✅ | Строки заказа в admin: base / group / charged; tooltip «групповая скидка»; опционально buyer order detail |
 | **G1** | Cart sync + gratitude | Catalog lines: `baseUnitPrice` + `groupUnitPrice` в `cart/sync`. **Gift denom** — только `price`/`listPrice`, без snapshot-полей. **Gratitude** attach на create — `price: 0`, без base/group snapshot; `getApplicableGift` — subtotal + OOS, **без commerce ctx / visibility** | Gift lines — те же snapshot-поля где уместно; gratitude — catalog value snapshot + политика: skip если variant hidden для buyer ctx; preview `applicable-gift` с JWT |
 
 **F1** files: `backend/src/account/favorites.service.ts` (`add`, `replace` vs `listItems`).
 
-**A1** files: `UserGroupDetailClient.tsx` (visibility tab), `UserGroupPickers.tsx`, `packages/admin-sections` (ACL matrix), future `/admin/catalog/visibility`.
+**A1** files: `UserGroupVisibilityTab.tsx`, `UserGroupCategoryPricesTab.tsx`, `DiscountScopePickerModal.tsx` (`single`/`leafOnly`), `packages/admin-sections` (ACL matrix), future `/admin/catalog/visibility`.
 
 **O1** files: `orders-admin.service.ts` (items map), `Admin/lib/adminOrderTypes.ts`, `OrderDetailClient.tsx`.
 
@@ -381,10 +406,17 @@ backend/src/promo/promo.public.controller.ts    ← validate + allowPromoCodes
 backend/src/account/favorites.service.ts        ← commerce pipeline
 backend/src/orders/orders.public.service.ts     ← pricing snapshot on create
 
-Admin/app/(admin)/admin/user-groups/
-Admin/lib/adminUserGroupTypes.ts
+Admin/app/(admin)/admin/settings/user-groups/
+  UserGroupsAdminClient.tsx UserGroupDetailClient.tsx
+  UserGroupGeneralTab.tsx UserGroupMembersTab.tsx UserGroupSkuPricesTab.tsx
+  UserGroupCategoryPricesTab.tsx UserGroupVisibilityTab.tsx
+  UserGroupKindBadge.tsx UserGroupPageNav.tsx UserGroupMemberPickerModal.tsx
+Admin/lib/adminUserGroupTypes.ts userGroupDetailTabs.ts userGroupAdminUi.ts slugify.ts
 Admin/lib/buyerPublicBff.ts
-packages/admin-sections/src/index.ts            ← user-groups → users
+Admin/app/(admin)/admin/discounts/DiscountScopePickerModal.tsx  ← shared category/product pickers
+packages/admin-sections/src/index.ts            ← user-groups → users; settings excludePaths
+Admin/app/(admin)/admin/adminNav.ts             ← Users group canonical; Settings exclude user-groups
+Admin/lib/settingsHub.ts                        ← hub card super-admin only
 ```
 
 ---

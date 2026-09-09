@@ -1,0 +1,272 @@
+'use client';
+
+import { useCallback, useEffect, useState } from 'react';
+import { DiscountCategoryPickerModal } from '@/app/(admin)/admin/discounts/DiscountScopePickerModal';
+import { AdminCompactBtn } from '@/components/AdminCompactBtn/AdminCompactBtn';
+import { AdminTextField } from '@/components/AdminTextField/AdminTextField';
+import { ConfirmDialog } from '@/components/ConfirmDialog/ConfirmDialog';
+import { useToast } from '@/components/Toast/ToastProvider';
+import {
+  AdminBackendRequestError,
+  adminBackendJson,
+} from '@/lib/adminBackendFetch';
+import { USER_GROUP_PRICE_STACK_HINT } from '@/lib/userGroupAdminUi';
+import type { AdminGroupCategoryPriceRow } from '@/lib/adminUserGroupTypes';
+import catalogStyles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
+import settingsStyles from '@/app/(admin)/admin/settings/Settings.module.css';
+
+/** Пагинация списка — отложена; до этого порога показываем всё на одной странице. */
+const CATEGORY_LIST_SOFT_LIMIT = 50;
+
+const CATEGORY_TYPE_LABELS: Record<string, string> = {
+  PERCENT_OFF: '−%',
+  FIXED_OFF: '−₽',
+  FIXED_PRICE: 'Фикс ₽',
+};
+
+type Props = {
+  groupId: string;
+  onChanged?: () => void;
+};
+
+export function UserGroupCategoryPricesTab({ groupId, onChanged }: Props) {
+  const { showToast } = useToast();
+  const [items, setItems] = useState<AdminGroupCategoryPriceRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+  const [selectedCategoryLabel, setSelectedCategoryLabel] = useState('');
+  const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
+  const [catType, setCatType] = useState<'PERCENT_OFF' | 'FIXED_OFF' | 'FIXED_PRICE'>('PERCENT_OFF');
+  const [catValue, setCatValue] = useState('10');
+  const [deleteRow, setDeleteRow] = useState<AdminGroupCategoryPriceRow | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await adminBackendJson<{ items: AdminGroupCategoryPriceRow[] }>(
+        `user-groups/admin/${groupId}/category-prices`,
+      );
+      setItems(res.items);
+    } catch (e) {
+      setError(e instanceof AdminBackendRequestError ? e.message : 'Не удалось загрузить');
+    } finally {
+      setLoading(false);
+    }
+  }, [groupId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function upsertCategoryPrice(e: React.FormEvent) {
+    e.preventDefault();
+    const value = Number(catValue);
+    if (!selectedCategoryId || !Number.isFinite(value)) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await adminBackendJson(`user-groups/admin/${groupId}/category-prices/${selectedCategoryId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ type: catType, value: Math.floor(value) }),
+      });
+      setSelectedCategoryId(null);
+      setSelectedCategoryLabel('');
+      showToast('Правило категории сохранено');
+      await load();
+      onChanged?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось сохранить правило');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function startEditCategory(row: AdminGroupCategoryPriceRow) {
+    setSelectedCategoryId(row.categoryId);
+    setSelectedCategoryLabel(row.categoryName);
+    setCatType(row.type);
+    setCatValue(String(row.value));
+  }
+
+  async function confirmDeleteCategory() {
+    if (!deleteRow) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await adminBackendJson(
+        `user-groups/admin/${groupId}/category-prices/${deleteRow.categoryId}`,
+        { method: 'DELETE' },
+      );
+      showToast('Правило категории удалено');
+      setDeleteRow(null);
+      await load();
+      onChanged?.();
+    } catch (err) {
+      setError(err instanceof AdminBackendRequestError ? err.message : 'Не удалось удалить');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      {error ? (
+        <p className={catalogStyles.error} role="alert">
+          {error}
+        </p>
+      ) : null}
+      <p className={catalogStyles.muted} style={{ margin: '0 0 12px' }}>
+        {USER_GROUP_PRICE_STACK_HINT}
+      </p>
+      <section className={settingsStyles.faqCard}>
+        <p className={catalogStyles.muted} style={{ margin: 0 }}>
+          Только leaf-категории. На витрине правило наследуется вниз по дереву; при расчёте ищется
+          ближайшее правило вверх от leaf.
+        </p>
+        <form className={settingsStyles.menuFormStack} onSubmit={(e) => void upsertCategoryPrice(e)}>
+          <AdminCompactBtn type="button" variant="outline" onClick={() => setCategoryPickerOpen(true)}>
+            {selectedCategoryLabel || 'Выбрать категорию'}
+          </AdminCompactBtn>
+          <label className={catalogStyles.label}>
+            Тип правила
+            <select
+              className={catalogStyles.select}
+              value={catType}
+              onChange={(e) => setCatType(e.target.value as typeof catType)}
+            >
+              <option value="PERCENT_OFF">−%</option>
+              <option value="FIXED_OFF">−₽</option>
+              <option value="FIXED_PRICE">Фикс ₽</option>
+            </select>
+          </label>
+          <AdminTextField
+            label="Значение"
+            value={catValue}
+            onChange={(e) => setCatValue(e.target.value)}
+            disabled={saving}
+            inputMode="numeric"
+          />
+          <div className={settingsStyles.menuProductActions}>
+            <AdminCompactBtn type="submit" variant="accent" disabled={saving || !selectedCategoryId}>
+              {selectedCategoryId && items.some((r) => r.categoryId === selectedCategoryId)
+                ? 'Обновить'
+                : 'Сохранить'}
+            </AdminCompactBtn>
+            {selectedCategoryId ? (
+              <AdminCompactBtn
+                type="button"
+                variant="outline"
+                disabled={saving}
+                onClick={() => {
+                  setSelectedCategoryId(null);
+                  setSelectedCategoryLabel('');
+                }}
+              >
+                Сбросить форму
+              </AdminCompactBtn>
+            ) : null}
+          </div>
+        </form>
+      </section>
+      {items.length > CATEGORY_LIST_SOFT_LIMIT ? (
+        <p className={catalogStyles.muted}>
+          {items.length} правил — список без пагинации (пока комфортно до ~{CATEGORY_LIST_SOFT_LIMIT}).
+        </p>
+      ) : null}
+      {loading ? <p className={catalogStyles.muted}>Загрузка…</p> : null}
+      <div className={catalogStyles.tableWrap}>
+        <table className={catalogStyles.table}>
+          <thead>
+            <tr>
+              <th>Категория</th>
+              <th>Тип</th>
+              <th>Значение</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {!loading && items.length === 0 ? (
+              <tr>
+                <td colSpan={4}>
+                  <div className={settingsStyles.settingsEmpty}>
+                    <p className={settingsStyles.settingsEmptyTitle}>Правил категорий пока нет</p>
+                    <p className={settingsStyles.settingsEmptyHint}>
+                      Выберите leaf-категорию выше и задайте скидку или фиксированную цену.
+                    </p>
+                    <AdminCompactBtn
+                      type="button"
+                      variant="accent"
+                      disabled={saving}
+                      onClick={() => setCategoryPickerOpen(true)}
+                    >
+                      Добавить первое правило
+                    </AdminCompactBtn>
+                  </div>
+                </td>
+              </tr>
+            ) : (
+              items.map((r) => (
+                <tr key={r.categoryId}>
+                  <td>{r.categoryName}</td>
+                  <td>{CATEGORY_TYPE_LABELS[r.type] ?? r.type}</td>
+                  <td>{r.value}</td>
+                  <td>
+                    <div className={settingsStyles.menuProductActions}>
+                      <AdminCompactBtn
+                        type="button"
+                        variant="outline"
+                        disabled={saving}
+                        onClick={() => startEditCategory(r)}
+                      >
+                        Изменить
+                      </AdminCompactBtn>
+                      <AdminCompactBtn
+                        type="button"
+                        variant="outline"
+                        disabled={saving}
+                        onClick={() => setDeleteRow(r)}
+                      >
+                        Удалить
+                      </AdminCompactBtn>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+      <DiscountCategoryPickerModal
+        open={categoryPickerOpen}
+        single
+        leafOnly
+        selectedIds={selectedCategoryId ? [selectedCategoryId] : []}
+        onClose={() => setCategoryPickerOpen(false)}
+        onApply={(ids, labels) => {
+          const id = ids[0];
+          if (!id) return;
+          setSelectedCategoryId(id);
+          setSelectedCategoryLabel(labels[id] ?? id);
+        }}
+      />
+      <ConfirmDialog
+        open={deleteRow != null}
+        title="Удалить правило категории?"
+        message={
+          deleteRow
+            ? `Сбросить ценовое правило для «${deleteRow.categoryName}»? На витрине снова будет база или SKU-цена.`
+            : ''
+        }
+        confirmLabel="Удалить"
+        cancelLabel="Отмена"
+        danger
+        onCancel={() => setDeleteRow(null)}
+        onConfirm={() => void confirmDeleteCategory()}
+      />
+    </>
+  );
+}

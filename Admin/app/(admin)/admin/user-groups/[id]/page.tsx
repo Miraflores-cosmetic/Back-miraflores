@@ -1,10 +1,10 @@
-import { UserGroupDetailClient } from './UserGroupDetailClient';
+import { redirect } from 'next/navigation';
 
-export default async function AdminUserGroupDetailPage({
+export default async function LegacyUserGroupDetailRedirectPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  return <UserGroupDetailClient groupId={id} />;
+  redirect(`/admin/settings/user-groups/${id}`);
 }

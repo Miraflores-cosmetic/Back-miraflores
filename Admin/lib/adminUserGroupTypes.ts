@@ -34,8 +34,16 @@ export type AdminGroupVariantPriceRow = {
   basePrice: number;
   sku: string;
   variantName: string;
+  productId: string;
   productName: string;
   productSlug: string;
+};
+
+export type AdminGroupVariantPriceListResponse = {
+  items: AdminGroupVariantPriceRow[];
+  total: number;
+  page: number;
+  limit: number;
 };
 
 export type AdminGroupCategoryPriceRow = {
