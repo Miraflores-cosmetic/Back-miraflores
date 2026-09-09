@@ -1,23 +1,13 @@
-/** Виды атрибутов товара — совпадают с Prisma ProductAttributeKind. */
-export const PRODUCT_ATTRIBUTE_KINDS = [
-  'productType',
-  'purpose',
-  'shelfLife',
-  'storage',
-] as const;
-
-export type ProductAttributeKind = (typeof PRODUCT_ATTRIBUTE_KINDS)[number];
-
-export const PRODUCT_ATTRIBUTE_KIND_LABELS: Record<ProductAttributeKind, string> = {
-  productType: 'Тип продукта',
-  purpose: 'Для чего',
-  shelfLife: 'Срок годности',
-  storage: 'Хранение',
-};
+export {
+  PRODUCT_ATTRIBUTE_KINDS,
+  PRODUCT_ATTRIBUTE_KIND_LABELS,
+  isProductAttributeKind,
+  type ProductAttributeKind,
+} from '@miraflores/admin-types';
 
 export type ProductAttributeOptionApi = {
   id: string;
-  kind: ProductAttributeKind;
+  kind: import('@miraflores/admin-types').ProductAttributeKind;
   label: string;
   sortOrder: number;
   active: boolean;

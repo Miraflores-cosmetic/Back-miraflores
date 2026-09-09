@@ -880,7 +880,8 @@ model FaqItem {
   @@index([active, sortOrder])
 }
 
-/// Вид атрибута товара (выпадающие списки в карточке продукта)
+/// Вид атрибута товара (выпадающие списки в карточке продукта).
+/// Значения должны совпадать с PRODUCT_ATTRIBUTE_KINDS в @miraflores/admin-types.
 enum ProductAttributeKind {
   productType
   purpose

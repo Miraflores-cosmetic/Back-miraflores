@@ -15,13 +15,15 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AdminCheckbox } from '@/components/admin/AdminCheckbox/AdminCheckbox';
 import { AdminCompactBtn, AdminCompactBtnLink } from '@/components/AdminCompactBtn/AdminCompactBtn';
 import { AdminSettingsListErrors } from '@/components/admin/AdminSettingsListErrors/AdminSettingsListErrors';
-import { AdminTabs } from '@/components/AdminTabs/AdminTabs';
+import { AdminTabs, AdminTabsLead } from '@/components/AdminTabs/AdminTabs';
 import { AdminTextField } from '@/components/AdminTextField/AdminTextField';
 import { ConfirmDialog } from '@/components/ConfirmDialog/ConfirmDialog';
+import { AdminSearchBox } from '@/components/SearchBox/SearchBox';
 import { useToast } from '@/components/Toast/ToastProvider';
 import {
   AdminBackendRequestError,
@@ -37,6 +39,13 @@ import { useAdminSettingsListShell } from '@/lib/useAdminSettingsListShell';
 import catalogStyles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
 import pn from '@/app/(admin)/admin/catalog/products/productNew.module.css';
 import styles from '@/app/(admin)/admin/settings/Settings.module.css';
+
+const TAB_SHORT: Record<ProductAttributeKind, string> = {
+  productType: 'Тип',
+  purpose: 'Для чего',
+  shelfLife: 'Срок',
+  storage: 'Хранение',
+};
 
 type Draft = {
   key: string;
@@ -62,6 +71,13 @@ function mapApiItems(items: ProductAttributeOptionApi[]): Draft[] {
   }));
 }
 
+function parseAttrTab(raw: string | null): ProductAttributeKind {
+  if (raw && (PRODUCT_ATTRIBUTE_KINDS as readonly string[]).includes(raw)) {
+    return raw as ProductAttributeKind;
+  }
+  return 'productType';
+}
+
 function TrashIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -85,17 +101,19 @@ function TrashIcon() {
 function SortableAttrRow({
   item,
   disabled,
+  dragDisabled,
   onChange,
   onRemove,
 }: {
   item: Draft;
   disabled: boolean;
+  dragDisabled: boolean;
   onChange: (patch: Partial<Draft>) => void;
   onRemove: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: item.key,
-    disabled,
+    disabled: disabled || dragDisabled,
   });
 
   return (
@@ -114,18 +132,28 @@ function SortableAttrRow({
           {...attributes}
           {...listeners}
           aria-label="Перетащить"
-          disabled={disabled}
+          disabled={disabled || dragDisabled}
+          title={
+            dragDisabled
+              ? 'Сбросьте поиск и фильтр «только неактивные», чтобы менять порядок'
+              : 'Перетащить'
+          }
         >
           ⋮⋮
         </button>
-        <label className={styles.activeLabel}>
-          <AdminCheckbox
-            checked={item.active}
-            onChange={(e) => onChange({ active: e.target.checked })}
-            disabled={disabled}
-          />
-          Активен
-        </label>
+        <div className={styles.attrActiveBlock}>
+          <label className={styles.activeLabel}>
+            <AdminCheckbox
+              checked={item.active}
+              onChange={(e) => onChange({ active: e.target.checked })}
+              disabled={disabled}
+            />
+            Активен
+          </label>
+          <p className={styles.attrActiveHint}>
+            Скрывает из формы товара; товары с этим значением сохраняют его, пока не пересохранят.
+          </p>
+        </div>
         <AdminCompactBtn
           type="button"
           variant="outline"
@@ -136,7 +164,9 @@ function SortableAttrRow({
           title={
             item.usageCount > 0
               ? `Используется на ${item.usageCount} товар(ах) — сначала снимите с товаров`
-              : 'Удалить'
+              : item.id
+                ? 'Удалить (после Сохранить)'
+                : 'Удалить'
           }
         >
           <TrashIcon />
@@ -151,8 +181,9 @@ function SortableAttrRow({
       />
       {item.usageCount > 0 ? (
         <p className={catalogStyles.muted}>
-          На товарах: {item.usageCount}. Чтобы удалить — снимите значение с товаров. Переименование
-          обновит эти товары.
+          {item.usageCount}{' '}
+          {item.usageCount === 1 ? 'товар' : item.usageCount < 5 ? 'товара' : 'товаров'}. Чтобы
+          удалить — снимите значение с товаров. Переименование обновит label на этих товарах.
         </p>
       ) : null}
     </li>
@@ -161,6 +192,9 @@ function SortableAttrRow({
 
 export function ProductAttributesAdminClient() {
   const { showToast } = useToast();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const {
     loading,
     loadedOk,
@@ -180,8 +214,13 @@ export function ProductAttributesAdminClient() {
   } = useAdminSettingsListShell();
   const [items, setItems] = useState<Draft[]>([]);
   const [revision, setRevision] = useState(0);
-  const [tab, setTab] = useState<ProductAttributeKind>('productType');
+  const [tab, setTab] = useState<ProductAttributeKind>(() =>
+    parseAttrTab(searchParams.get('tab')),
+  );
+  const [query, setQuery] = useState('');
+  const [onlyInactive, setOnlyInactive] = useState(false);
   const [confirmEmptyWipe, setConfirmEmptyWipe] = useState(false);
+  const [pendingRemove, setPendingRemove] = useState<Draft | null>(null);
   const loadedCountRef = useRef(0);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
@@ -210,8 +249,43 @@ export function ProductAttributesAdminClient() {
     void load();
   }, [load]);
 
-  const tabItems = useMemo(() => items.filter((it) => it.kind === tab), [items, tab]);
-  const tabIds = useMemo(() => tabItems.map((it) => it.key), [tabItems]);
+  useEffect(() => {
+    const fromUrl = parseAttrTab(searchParams.get('tab'));
+    setTab((prev) => (prev === fromUrl ? prev : fromUrl));
+  }, [searchParams]);
+
+  function setTabInUrl(next: ProductAttributeKind) {
+    setTab(next);
+    const sp = new URLSearchParams(searchParams.toString());
+    if (next === 'productType') sp.delete('tab');
+    else sp.set('tab', next);
+    const qs = sp.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }
+
+  const counts = useMemo(() => {
+    const out: Record<ProductAttributeKind, number> = {
+      productType: 0,
+      purpose: 0,
+      shelfLife: 0,
+      storage: 0,
+    };
+    for (const it of items) out[it.kind] += 1;
+    return out;
+  }, [items]);
+
+  const kindRows = useMemo(() => items.filter((it) => it.kind === tab), [items, tab]);
+
+  const visibleRows = useMemo(() => {
+    let rows = kindRows;
+    if (onlyInactive) rows = rows.filter((it) => !it.active);
+    const q = query.trim().toLowerCase();
+    if (q) rows = rows.filter((it) => it.label.toLowerCase().includes(q));
+    return rows;
+  }, [kindRows, onlyInactive, query]);
+
+  const visibleIds = useMemo(() => visibleRows.map((it) => it.key), [visibleRows]);
+  const dragEnabled = !onlyInactive && !query.trim();
 
   async function persist(allowEmpty = false) {
     beginSave();
@@ -291,7 +365,7 @@ export function ProductAttributesAdminClient() {
     setItems((prev) => prev.map((row) => (row.key === key ? { ...row, ...patch } : row)));
   }
 
-  function removeItem(key: string) {
+  function requestRemove(key: string) {
     const target = items.find((row) => row.key === key);
     if (!target) return;
     if (target.usageCount > 0) {
@@ -300,12 +374,26 @@ export function ProductAttributesAdminClient() {
       );
       return;
     }
+    if (target.id) {
+      setPendingRemove(target);
+      return;
+    }
+    markDirty();
+    setItems((prev) => prev.filter((row) => row.key !== key));
+  }
+
+  function confirmRemove() {
+    if (!pendingRemove) return;
+    const key = pendingRemove.key;
+    setPendingRemove(null);
     markDirty();
     setItems((prev) => prev.filter((row) => row.key !== key));
   }
 
   function addValue() {
     markDirty();
+    setOnlyInactive(false);
+    setQuery('');
     setItems((prev) => [
       ...prev,
       { key: newKey(), kind: tab, label: '', active: true, usageCount: 0 },
@@ -313,19 +401,24 @@ export function ProductAttributesAdminClient() {
   }
 
   function onDragEnd(event: DragEndEvent) {
+    if (!dragEnabled) return;
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    const oldIndex = tabIds.indexOf(String(active.id));
-    const newIndex = tabIds.indexOf(String(over.id));
+    const kindItems = items.filter((row) => row.kind === tab);
+    const oldIndex = kindItems.findIndex((row) => row.key === String(active.id));
+    const newIndex = kindItems.findIndex((row) => row.key === String(over.id));
     if (oldIndex < 0 || newIndex < 0) return;
     markDirty();
     setItems((prev) => {
-      const kindItems = prev.filter((row) => row.kind === tab);
-      const reordered = arrayMove(kindItems, oldIndex, newIndex);
+      const current = prev.filter((row) => row.kind === tab);
+      const reordered = arrayMove(current, oldIndex, newIndex);
       let qi = 0;
       return prev.map((row) => (row.kind === tab ? reordered[qi++]! : row));
     });
   }
+
+  const emptyKind = kindRows.length === 0;
+  const emptyFiltered = !emptyKind && visibleRows.length === 0;
 
   return (
     <form
@@ -357,6 +450,12 @@ export function ProductAttributesAdminClient() {
         </div>
       </div>
 
+      <AdminTabsLead>
+        Порядок в списке = порядок в select товара. Переименование каскадом обновляет label на
+        товарах. Удалить можно только неиспользуемые (0 товаров). «Сохранить» пушит все четыре
+        вкладки одним запросом.
+      </AdminTabsLead>
+
       <AdminSettingsListErrors
         loadError={loadError}
         actionError={actionError}
@@ -375,33 +474,84 @@ export function ProductAttributesAdminClient() {
         <>
           <AdminTabs
             ariaLabel="Вид атрибута"
+            variant="underline"
+            compact
             activeId={tab}
-            onChange={setTab}
+            onChange={setTabInUrl}
             items={PRODUCT_ATTRIBUTE_KINDS.map((kind) => ({
               id: kind,
-              label: PRODUCT_ATTRIBUTE_KIND_LABELS[kind],
+              label: `${TAB_SHORT[kind]} (${counts[kind]})`,
+              'aria-label': `${PRODUCT_ATTRIBUTE_KIND_LABELS[kind]} (${counts[kind]})`,
             }))}
           />
 
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
-            <SortableContext items={tabIds} strategy={verticalListSortingStrategy}>
-              <ul className={styles.faqList}>
-                {tabItems.map((item) => (
-                  <SortableAttrRow
-                    key={item.key}
-                    item={item}
-                    disabled={saving}
-                    onChange={(patch) => patchItem(item.key, patch)}
-                    onRemove={() => removeItem(item.key)}
-                  />
-                ))}
-              </ul>
-            </SortableContext>
-          </DndContext>
+          <div className={styles.attrListToolbar}>
+            <div className={styles.attrListSearch}>
+              <AdminSearchBox
+                placeholder="Поиск по значению"
+                ariaLabel="Поиск значений атрибута"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </div>
+            <label className={styles.attrFilterLabel}>
+              <AdminCheckbox
+                checked={onlyInactive}
+                onChange={(e) => setOnlyInactive(e.target.checked)}
+                disabled={saving}
+              />
+              Только неактивные
+            </label>
+          </div>
 
-          {tabItems.length === 0 ? (
-            <p className={catalogStyles.lead}>Значений пока нет</p>
-          ) : null}
+          {emptyKind ? (
+            <div className={styles.settingsEmpty}>
+              <p className={styles.settingsEmptyTitle}>
+                Значений «{PRODUCT_ATTRIBUTE_KIND_LABELS[tab]}» пока нет
+              </p>
+              <p className={styles.settingsEmptyHint}>
+                Добавьте пункты для выпадающего списка в карточке товара. Порядок можно менять
+                перетаскиванием.
+              </p>
+              <AdminCompactBtn type="button" variant="accent" disabled={saving} onClick={addValue}>
+                Добавить первое значение
+              </AdminCompactBtn>
+            </div>
+          ) : emptyFiltered ? (
+            <div className={styles.settingsEmpty}>
+              <p className={styles.settingsEmptyTitle}>Ничего не найдено</p>
+              <p className={styles.settingsEmptyHint}>
+                Сбросьте поиск или фильтр «только неактивные».
+              </p>
+              <AdminCompactBtn
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setQuery('');
+                  setOnlyInactive(false);
+                }}
+              >
+                Сбросить фильтры
+              </AdminCompactBtn>
+            </div>
+          ) : (
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+              <SortableContext items={visibleIds} strategy={verticalListSortingStrategy}>
+                <ul className={styles.faqList}>
+                  {visibleRows.map((item) => (
+                    <SortableAttrRow
+                      key={item.key}
+                      item={item}
+                      disabled={saving}
+                      dragDisabled={!dragEnabled}
+                      onChange={(patch) => patchItem(item.key, patch)}
+                      onRemove={() => requestRemove(item.key)}
+                    />
+                  ))}
+                </ul>
+              </SortableContext>
+            </DndContext>
+          )}
         </>
       )}
 
@@ -416,6 +566,20 @@ export function ProductAttributesAdminClient() {
           setConfirmEmptyWipe(false);
           void persist(true);
         }}
+      />
+
+      <ConfirmDialog
+        open={pendingRemove != null}
+        title="Удалить значение?"
+        message={
+          pendingRemove
+            ? `«${pendingRemove.label || 'без названия'}» исчезнет из словаря после «Сохранить». Продолжить?`
+            : ''
+        }
+        confirmLabel="Удалить из черновика"
+        danger
+        onCancel={() => setPendingRemove(null)}
+        onConfirm={confirmRemove}
       />
     </form>
   );

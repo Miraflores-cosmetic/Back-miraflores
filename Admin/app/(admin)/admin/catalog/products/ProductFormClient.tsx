@@ -37,17 +37,21 @@ type PickRow = { id: string; name: string };
 function ProductAttrSelect({
   label,
   value,
+  valueLabel,
   options,
   onChange,
 }: {
   label: string;
   value: string;
+  /** Подпись текущего значения, если его нет в options (inactive / orphan). */
+  valueLabel?: string;
   options: { id: string; label: string }[];
   onChange: (next: string) => void;
 }) {
   const opts = options.slice();
   if (value && !opts.some((o) => o.id === value)) {
-    opts.unshift({ id: value, label: value });
+    const text = valueLabel?.trim() || value;
+    opts.unshift({ id: value, label: text });
   }
   return (
     <AdminSelect
@@ -231,7 +235,6 @@ export function ProductFormClient({ productId }: { productId?: string }) {
             `${attrsResult.error}. Списки выпадающих полей недоступны — обратитесь к суперадмину или откройте Настройки → Атрибуты.`,
           );
         }
-        setAttrOptions(nextAttrs);
         if (!isEdit && cats[0]) setCategoryId(cats[0].id);
 
         if (p) {
@@ -246,20 +249,37 @@ export function ProductFormClient({ productId }: { productId?: string }) {
           setCompositionHtml(p.compositionHtml ?? '');
           setImportantNoteHtml(p.importantNoteHtml ?? '');
           setMirafloresNoteHtml(p.mirafloresNoteHtml ?? '');
-          const resolveOpt = (
+          /** Всегда сохраняем текущий optionId в select, даже если опция inactive. */
+          const ensureCurrent = (
             kind: ProductAttributeKind,
             optionId: string | null | undefined,
             label: string | null | undefined,
           ) => {
-            if (optionId && nextAttrs[kind].some((o) => o.id === optionId)) return optionId;
             const plain = plainProductAttrValue(label);
+            if (optionId) {
+              if (!nextAttrs[kind].some((o) => o.id === optionId)) {
+                const fromApi = attrsResult.ok
+                  ? attrsResult.data.items?.find((it) => it.id === optionId)
+                  : undefined;
+                nextAttrs[kind].unshift({
+                  id: optionId,
+                  label: fromApi?.label || plain || optionId,
+                });
+              }
+              return optionId;
+            }
             if (!plain) return '';
             return nextAttrs[kind].find((o) => o.label === plain)?.id ?? '';
           };
-          setStorageOptionId(resolveOpt('storage', p.storageOptionId, p.storageHtml));
-          setProductTypeOptionId(resolveOpt('productType', p.productTypeOptionId, p.productType));
-          setPurposeOptionId(resolveOpt('purpose', p.purposeOptionId, p.purpose));
-          setShelfLifeOptionId(resolveOpt('shelfLife', p.shelfLifeOptionId, p.shelfLife));
+          setStorageOptionId(ensureCurrent('storage', p.storageOptionId, p.storageHtml));
+          setProductTypeOptionId(
+            ensureCurrent('productType', p.productTypeOptionId, p.productType),
+          );
+          setPurposeOptionId(ensureCurrent('purpose', p.purposeOptionId, p.purpose));
+          setShelfLifeOptionId(
+            ensureCurrent('shelfLife', p.shelfLifeOptionId, p.shelfLife),
+          );
+          setAttrOptions(nextAttrs);
           setMetaTitle(p.metaTitle ?? '');
           setMetaDescription(p.metaDescription ?? '');
           setOgImageUrl(p.ogImageUrl ?? '');
@@ -272,6 +292,8 @@ export function ProductFormClient({ productId }: { productId?: string }) {
           setCatalogTagIds(new Set(p.catalogTagIds ?? []));
           setCollectionIds(new Set(p.collectionIds ?? []));
           setProductSetIds(new Set(p.productSetIds ?? []));
+        } else {
+          setAttrOptions(nextAttrs);
         }
         setDirty(false);
       } catch (e) {

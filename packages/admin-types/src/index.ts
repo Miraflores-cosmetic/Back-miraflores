@@ -45,3 +45,10 @@ export const MODERATOR_CREATE_PRESET_CONTENT: readonly ModeratorAssignableSectio
   'blog',
   'reviews',
 ];
+
+export {
+  PRODUCT_ATTRIBUTE_KINDS,
+  PRODUCT_ATTRIBUTE_KIND_LABELS,
+  isProductAttributeKind,
+  type ProductAttributeKind,
+} from './productAttributes';

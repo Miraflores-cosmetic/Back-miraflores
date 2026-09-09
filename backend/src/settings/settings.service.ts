@@ -1,5 +1,8 @@
 import { BadRequestException, ConflictException, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import {
+  type ProductAttributeKind,
+} from '@miraflores/admin-types';
 import { extractMediaUrlsFromRichHtml } from '../blog/blog-html.util';
 import { sanitizeProductRichHtml } from '../catalog/catalog-html.util';
 import { sanitizeFaqTextForWrite } from './faq-html.util';
@@ -66,7 +69,11 @@ function serializeProductAttributeOption(row: {
   };
 }
 
-const PRODUCT_ATTR_KIND_META = {
+/** Kind → Product denorm label field + FK. Keys = PRODUCT_ATTRIBUTE_KINDS. */
+const PRODUCT_ATTR_KIND_META: Record<
+  ProductAttributeKind,
+  { labelField: string; optionIdField: string }
+> = {
   productType: {
     labelField: 'productType',
     optionIdField: 'productTypeOptionId',
@@ -83,9 +90,7 @@ const PRODUCT_ATTR_KIND_META = {
     labelField: 'storageHtml',
     optionIdField: 'storageOptionId',
   },
-} as const;
-
-type ProductAttrKindKey = keyof typeof PRODUCT_ATTR_KIND_META;
+};
 
 async function readAttributeCatalogVersion(
   db: PrismaService | Prisma.TransactionClient,
@@ -451,11 +456,11 @@ export class SettingsAdminService {
     const cleaned = (dto.items ?? [])
       .map((it) => ({
         id: typeof it.id === 'string' && it.id.trim() ? it.id.trim() : undefined,
-        kind: it.kind as ProductAttrKindKey,
+        kind: it.kind as ProductAttributeKind,
         label: (it.label ?? '').trim(),
         active: it.active ?? true,
       }))
-      .filter((it) => it.label && it.kind && it.kind in PRODUCT_ATTR_KIND_META);
+      .filter((it) => it.label && it.kind in PRODUCT_ATTR_KIND_META);
 
     const dupKey = new Set<string>();
     for (const it of cleaned) {
@@ -525,6 +530,16 @@ export class SettingsAdminService {
         const existingById = new Map(existing.map((r) => [r.id, r]));
         const existingIds = new Set(existing.map((r) => r.id));
 
+        const staleIds = cleaned
+          .map((it) => it.id)
+          .filter((id): id is string => Boolean(id) && !existingIds.has(id!));
+        if (staleIds.length > 0) {
+          throw new BadRequestException(
+            `Неизвестные id опций (${staleIds.length}): обновите страницу и повторите. ` +
+              `Новые значения добавляйте без id.`,
+          );
+        }
+
         const keepIds = new Set(
           cleaned
             .map((it) => it.id)
@@ -536,7 +551,7 @@ export class SettingsAdminService {
           if (!it.id || !existingById.has(it.id)) continue;
           const prev = existingById.get(it.id)!;
           if (prev.label === it.label) continue;
-          const meta = PRODUCT_ATTR_KIND_META[prev.kind as ProductAttrKindKey];
+          const meta = PRODUCT_ATTR_KIND_META[prev.kind as ProductAttributeKind];
           if (!meta) continue;
           await tx.product.updateMany({
             where: { [meta.optionIdField]: it.id },
@@ -549,7 +564,7 @@ export class SettingsAdminService {
           const blocked: string[] = [];
           for (const id of toDelete) {
             const prev = existingById.get(id)!;
-            const meta = PRODUCT_ATTR_KIND_META[prev.kind as ProductAttrKindKey];
+            const meta = PRODUCT_ATTR_KIND_META[prev.kind as ProductAttributeKind];
             if (!meta) continue;
             const count = await tx.product.count({
               where: { [meta.optionIdField]: id },
@@ -576,7 +591,7 @@ export class SettingsAdminService {
             active: it.active,
             sortOrder,
           };
-          if (it.id && existingIds.has(it.id)) {
+          if (it.id) {
             await tx.productAttributeOption.update({ where: { id: it.id }, data });
           } else {
             await tx.productAttributeOption.create({ data });

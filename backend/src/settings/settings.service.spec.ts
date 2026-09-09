@@ -549,6 +549,25 @@ describe('SettingsAdminService.replaceProductAttributes', () => {
     expect(tx.productAttributeOption.deleteMany).not.toHaveBeenCalled();
   });
 
+  it('отклоняет неизвестный id (не создаёт новую опцию)', async () => {
+    prisma.productAttributeOption.findMany.mockResolvedValueOnce([{ id: 'a' }]);
+    const tx = makeAttrTx({
+      existing: [makeAttrRow({ id: 'a', label: 'Крем' })],
+    });
+    prisma.$transaction.mockImplementation(async (fn: (t: typeof tx) => unknown) => fn(tx));
+
+    await expect(
+      svc.replaceProductAttributes({
+        expectedRevision: 0,
+        items: [
+          { id: 'a', kind: 'productType', label: 'Крем' },
+          { id: 'stale-id', kind: 'productType', label: 'Новое' },
+        ],
+      }),
+    ).rejects.toThrow(/Неизвестные id/);
+    expect(tx.productAttributeOption.create).not.toHaveBeenCalled();
+  });
+
   it('rename каскадом обновляет Product.productType по FK', async () => {
     const prev = makeAttrRow({ id: 'a', label: 'Крем' });
     const tx = makeAttrTx({ existing: [prev] });

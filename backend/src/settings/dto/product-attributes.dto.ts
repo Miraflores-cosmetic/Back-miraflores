@@ -2,7 +2,7 @@ import { Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
-  IsEnum,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -11,21 +11,18 @@ import {
   MinLength,
   ValidateNested,
 } from 'class-validator';
-
-export enum ProductAttributeKindDto {
-  productType = 'productType',
-  purpose = 'purpose',
-  shelfLife = 'shelfLife',
-  storage = 'storage',
-}
+import {
+  PRODUCT_ATTRIBUTE_KINDS,
+  type ProductAttributeKind,
+} from '@miraflores/admin-types';
 
 export class UpsertProductAttributeOptionDto {
   @IsOptional()
   @IsString()
   id?: string;
 
-  @IsEnum(ProductAttributeKindDto)
-  kind!: ProductAttributeKindDto;
+  @IsIn([...PRODUCT_ATTRIBUTE_KINDS])
+  kind!: ProductAttributeKind;
 
   @IsString()
   @MinLength(1)

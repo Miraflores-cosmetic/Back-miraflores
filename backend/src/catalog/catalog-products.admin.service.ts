@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import type { ProductAttributeKind } from '@miraflores/admin-types';
 import { PrismaService } from '../prisma/prisma.service';
 import { LocalStorageService } from '../storage/local-storage.service';
 import { ADMIN_LIST_DEFAULT_LIMIT, ADMIN_LIST_MAX_LIMIT } from './catalog.constants';
@@ -23,26 +24,34 @@ import type {
   VariantInputDto,
 } from './dto/catalog-admin.dto';
 
-const PRODUCT_ATTR_LINKS = [
+const PRODUCT_ATTR_LINKS: Array<{
+  kind: ProductAttributeKind;
+  optionKey:
+    | 'productTypeOptionId'
+    | 'purposeOptionId'
+    | 'shelfLifeOptionId'
+    | 'storageOptionId';
+  labelKey: 'productType' | 'purpose' | 'shelfLife' | 'storageHtml';
+}> = [
   {
-    kind: 'productType' as const,
-    optionKey: 'productTypeOptionId' as const,
-    labelKey: 'productType' as const,
+    kind: 'productType',
+    optionKey: 'productTypeOptionId',
+    labelKey: 'productType',
   },
   {
-    kind: 'purpose' as const,
-    optionKey: 'purposeOptionId' as const,
-    labelKey: 'purpose' as const,
+    kind: 'purpose',
+    optionKey: 'purposeOptionId',
+    labelKey: 'purpose',
   },
   {
-    kind: 'shelfLife' as const,
-    optionKey: 'shelfLifeOptionId' as const,
-    labelKey: 'shelfLife' as const,
+    kind: 'shelfLife',
+    optionKey: 'shelfLifeOptionId',
+    labelKey: 'shelfLife',
   },
   {
-    kind: 'storage' as const,
-    optionKey: 'storageOptionId' as const,
-    labelKey: 'storageHtml' as const,
+    kind: 'storage',
+    optionKey: 'storageOptionId',
+    labelKey: 'storageHtml',
   },
 ];
 
