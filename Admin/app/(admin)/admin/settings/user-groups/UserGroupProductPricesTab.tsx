@@ -29,6 +29,46 @@ const PAGE_SIZE = 25;
 
 type ProductPriceMode = 'percent' | 'fixed';
 
+function TrashIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M10 11v6M14 11v6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function EditIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M12 20h9"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function variantRowKey(v: AdminVariant) {
   return v.sku ? `${v.name} (${v.sku})` : v.name;
 }
@@ -476,26 +516,32 @@ export function UserGroupProductPricesTab({
                   </td>
                   <td>{r.basePrice} ₽</td>
                   <td>{r.price} ₽</td>
-                  <td>
-                    <div className={settingsStyles.menuProductActions}>
+                  <td className={catalogStyles.tableCellActions}>
+                    <div className={catalogStyles.actionGroup}>
                       <AdminCompactBtn
                         type="button"
                         variant="outline"
+                        className={catalogStyles.iconBtn}
                         disabled={listSaving}
                         onClick={() => startEditFromList(r)}
+                        aria-label={`Изменить «${r.productName}»`}
+                        title="Изменить"
                       >
-                        Изменить
+                        <EditIcon />
                       </AdminCompactBtn>
                       <AdminCompactBtn
                         type="button"
-                        variant="outline"
+                        variant="danger"
+                        className={catalogStyles.iconDangerBtn}
                         disabled={listSaving}
                         onClick={() => {
                           setDeleteVariantId(r.variantId);
                           setDeleteLabel(`${r.productName} · ${r.sku}`);
                         }}
+                        aria-label={`Удалить «${r.productName}»`}
+                        title="Удалить"
                       >
-                        Удалить
+                        <TrashIcon />
                       </AdminCompactBtn>
                     </div>
                   </td>

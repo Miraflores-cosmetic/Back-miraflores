@@ -136,7 +136,7 @@ export function UserGroupGeneralTab({
             </select>
           </label>
           <p className={catalogStyles.muted} style={{ margin: 0 }}>
-            Для −% и −₽ от базовой цены (не для фиксированных SKU-цен и не для фикс ₽ категории).
+            Для −% и −₽ от базовой цены (не для фиксированных SKU-цен).
           </p>
           <div>
             <AdminCompactBtn type="submit" variant="accent" disabled={saving}>

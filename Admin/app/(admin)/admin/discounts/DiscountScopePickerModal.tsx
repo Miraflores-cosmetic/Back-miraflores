@@ -36,9 +36,9 @@ export function DiscountCategoryPickerModal({
   onApply: (ids: string[], labels: Record<string, string>) => void;
   /** Один выбор (radio) вместо чекбоксов. */
   single?: boolean;
-  /** Только leaf-категории без подкатегорий. */
+  /** Только конечные категории (без подкатегорий). */
   leafOnly?: boolean;
-  /** Нельзя выбрать (например, уже есть правило). Редактируемые selectedIds не исключаются снаружи. */
+  /** Скрыть из списка (например, уже есть правило). Редактируемые selectedIds не исключаются снаружи. */
   excludeIds?: string[];
 }) {
   const [q, setQ] = useState('');
@@ -91,14 +91,14 @@ export function DiscountCategoryPickerModal({
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
-    if (!term) return rows;
-    return rows.filter((c) => categoryLabel(c).toLowerCase().includes(term));
-  }, [rows, q]);
+    const base = term
+      ? rows.filter((c) => categoryLabel(c).toLowerCase().includes(term))
+      : rows;
+    // Уже занятые правилом — не показываем в списке (не disabled-строки).
+    return base.filter((c) => !excludeSet.has(c.id));
+  }, [rows, q, excludeSet]);
 
-  const selectableFiltered = useMemo(
-    () => filtered.filter((c) => !excludeSet.has(c.id)),
-    [filtered, excludeSet],
-  );
+  const selectableFiltered = filtered;
 
   function toggle(id: string) {
     if (excludeSet.has(id)) return;
@@ -122,10 +122,13 @@ export function DiscountCategoryPickerModal({
     onClose();
   }
 
-  const title =
-    leafOnly && single ? 'Категория (leaf)' : leafOnly ? 'Категории (leaf)' : 'Категории';
+  const title = leafOnly
+    ? single
+      ? 'Конечная категория'
+      : 'Конечные категории'
+    : 'Категории';
   const hint = leafOnly
-    ? 'Только конечные категории без подкатегорий.'
+    ? 'Только категории без подкатегорий (конечные в дереве каталога).'
     : DISCOUNT_CATEGORY_NO_DESCENDANTS_HINT;
 
   return (
@@ -179,43 +182,41 @@ export function DiscountCategoryPickerModal({
               </tr>
             </thead>
             <tbody>
-              {filtered.map((c) => {
-                const excluded = excludeSet.has(c.id);
-                return (
-                  <tr key={c.id}>
-                    <td>
-                      {single ? (
-                        <input
-                          type="radio"
-                          name="admin-category-single"
-                          className={styles.adminCheckboxInTable}
-                          checked={draft.has(c.id)}
-                          disabled={excluded}
-                          onChange={() => toggle(c.id)}
-                          aria-label={categoryLabel(c)}
-                        />
-                      ) : (
-                        <AdminCheckbox
-                          className={styles.adminCheckboxInTable}
-                          checked={draft.has(c.id)}
-                          disabled={excluded}
-                          onChange={() => toggle(c.id)}
-                          aria-label={categoryLabel(c)}
-                        />
-                      )}
-                    </td>
-                    <td>
-                      {categoryLabel(c)}
-                      {excluded ? (
-                        <span className={styles.mutedInline}> · уже есть правило</span>
-                      ) : null}
-                    </td>
-                  </tr>
-                );
-              })}
+              {filtered.map((c) => (
+                <tr key={c.id}>
+                  <td>
+                    {single ? (
+                      <input
+                        type="radio"
+                        name="admin-category-single"
+                        className={styles.adminCheckboxInTable}
+                        checked={draft.has(c.id)}
+                        onChange={() => toggle(c.id)}
+                        aria-label={categoryLabel(c)}
+                      />
+                    ) : (
+                      <AdminCheckbox
+                        className={styles.adminCheckboxInTable}
+                        checked={draft.has(c.id)}
+                        onChange={() => toggle(c.id)}
+                        aria-label={categoryLabel(c)}
+                      />
+                    )}
+                  </td>
+                  <td>{categoryLabel(c)}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
-          {filtered.length === 0 ? <p className={styles.muted}>Ничего не найдено</p> : null}
+          {filtered.length === 0 ? (
+            <p className={styles.muted}>
+              {q.trim()
+                ? 'Ничего не найдено'
+                : excludeSet.size > 0 && rows.length > 0
+                  ? 'Свободных категорий нет — у всех уже есть правила'
+                  : 'Ничего не найдено'}
+            </p>
+          ) : null}
         </div>
       ) : null}
     </AdminModal>
@@ -313,6 +314,11 @@ export function DiscountProductPickerModal({
     };
   }, [open, qDebounced, page]);
 
+  const visibleRows = useMemo(
+    () => rows.filter((p) => !excludeSet.has(p.id)),
+    [rows, excludeSet],
+  );
+
   function toggle(id: string, name: string) {
     if (excludeSet.has(id)) return;
     setDraft((prev) => {
@@ -366,45 +372,41 @@ export function DiscountProductPickerModal({
                 </tr>
               </thead>
               <tbody>
-                {rows.map((p) => {
-                  const excluded = excludeSet.has(p.id);
-                  return (
-                    <tr key={p.id}>
-                      <td>
-                        {single ? (
-                          <input
-                            type="radio"
-                            name="admin-product-single"
-                            className={styles.adminCheckboxInTable}
-                            checked={draft.has(p.id)}
-                            disabled={excluded}
-                            onChange={() => toggle(p.id, p.name)}
-                            aria-label={p.name}
-                          />
-                        ) : (
-                          <AdminCheckbox
-                            className={styles.adminCheckboxInTable}
-                            checked={draft.has(p.id)}
-                            disabled={excluded}
-                            onChange={() => toggle(p.id, p.name)}
-                            aria-label={p.name}
-                          />
-                        )}
-                      </td>
-                      <td>
-                        {p.name}
-                        {excluded ? (
-                          <span className={styles.mutedInline}> · уже есть цена</span>
-                        ) : null}
-                      </td>
-                      <td className={styles.mutedInline}>{p.category?.name ?? '—'}</td>
-                    </tr>
-                  );
-                })}
+                {visibleRows.map((p) => (
+                  <tr key={p.id}>
+                    <td>
+                      {single ? (
+                        <input
+                          type="radio"
+                          name="admin-product-single"
+                          className={styles.adminCheckboxInTable}
+                          checked={draft.has(p.id)}
+                          onChange={() => toggle(p.id, p.name)}
+                          aria-label={p.name}
+                        />
+                      ) : (
+                        <AdminCheckbox
+                          className={styles.adminCheckboxInTable}
+                          checked={draft.has(p.id)}
+                          onChange={() => toggle(p.id, p.name)}
+                          aria-label={p.name}
+                        />
+                      )}
+                    </td>
+                    <td>{p.name}</td>
+                    <td className={styles.mutedInline}>{p.category?.name ?? '—'}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
-            {!loading && rows.length === 0 ? (
-              <p className={styles.muted}>Ничего не найдено</p>
+            {!loading && visibleRows.length === 0 ? (
+              <p className={styles.muted}>
+                {qDebounced.trim()
+                  ? 'Ничего не найдено'
+                  : excludeSet.size > 0 && rows.length > 0
+                    ? 'Свободных товаров нет — у всех на странице уже есть цены'
+                    : 'Ничего не найдено'}
+              </p>
             ) : null}
           </div>
           <AdminListPagination

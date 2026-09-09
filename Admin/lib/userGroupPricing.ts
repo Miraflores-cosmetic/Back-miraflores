@@ -12,7 +12,7 @@ function categoryLabel(c: AdminCategory): string {
   return c.name;
 }
 
-/** Leaf-категории для правил групповых цен (без подкатегорий). */
+/** Конечные категории для правил групповых цен (без подкатегорий). */
 export async function fetchLeafCategories(): Promise<LeafCategoryOption[]> {
   const cats = await adminBackendJson<AdminCategory[]>('catalog/admin/categories');
   const parentIds = new Set(

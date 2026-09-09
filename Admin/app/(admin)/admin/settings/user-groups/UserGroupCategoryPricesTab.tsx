@@ -20,13 +20,53 @@ import settingsStyles from '@/app/(admin)/admin/settings/Settings.module.css';
 /** Пагинация списка — отложена; до этого порога показываем всё на одной странице. */
 const CATEGORY_LIST_SOFT_LIMIT = 50;
 
+function TrashIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M10 11v6M14 11v6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function EditIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M12 20h9"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 const CATEGORY_TYPE_LABELS: Record<string, string> = {
   PERCENT_OFF: '−%',
   FIXED_OFF: '−₽',
   FIXED_PRICE: 'Фикс ₽',
 };
 
-type CatType = 'PERCENT_OFF' | 'FIXED_OFF' | 'FIXED_PRICE';
+type CatType = 'PERCENT_OFF' | 'FIXED_OFF';
 
 type Props = {
   groupId: string;
@@ -117,13 +157,13 @@ export function UserGroupCategoryPricesTab({ groupId, onChanged }: Props) {
       const ruled = new Set(items.map((r) => r.categoryId));
       const leaves = (await fetchLeafCategories()).filter((c) => !ruled.has(c.id));
       if (!leaves.length) {
-        showToast('Все leaf-категории уже имеют правила');
+        showToast('Все конечные категории уже имеют правила');
         return;
       }
       const labels = Object.fromEntries(leaves.map((c) => [c.id, c.label]));
       setSelectedCategoryIds(leaves.map((c) => c.id));
       setSelectedCategoryLabels(labels);
-      showToast(`Выбрано ${leaves.length} leaf-категорий`);
+      showToast(`Выбрано ${leaves.length} конечных категорий`);
     } catch (e) {
       setError(e instanceof AdminBackendRequestError ? e.message : 'Не удалось загрузить категории');
     } finally {
@@ -134,8 +174,14 @@ export function UserGroupCategoryPricesTab({ groupId, onChanged }: Props) {
   function startEditCategory(row: AdminGroupCategoryPriceRow) {
     setSelectedCategoryIds([row.categoryId]);
     setSelectedCategoryLabels({ [row.categoryId]: row.categoryName });
-    setCatType(row.type);
-    setCatValue(String(row.value));
+    if (row.type === 'PERCENT_OFF' || row.type === 'FIXED_OFF') {
+      setCatType(row.type);
+      setCatValue(String(row.value));
+    } else {
+      // legacy FIXED_PRICE — в UI больше не задаётся
+      setCatType('PERCENT_OFF');
+      setCatValue('10');
+    }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -202,9 +248,9 @@ export function UserGroupCategoryPricesTab({ groupId, onChanged }: Props) {
               {editingExisting ? 'Изменить правило' : 'Новое правило'}
             </p>
             <p className={catalogStyles.muted} style={{ margin: '4px 0 0' }}>
-              Только конечные категории без подкатегорий. Можно выбрать несколько или сразу все
-              leaf-категории. На витрине правило наследуется вниз; при расчёте берётся ближайшее
-              правило вверх по дереву.
+              Только категории без подкатегорий. Можно выбрать несколько или сразу все свободные.
+              На витрине правило наследуется вниз; при расчёте берётся ближайшее правило вверх по
+              дереву.
             </p>
           </div>
           {selectedCategoryIds.length ? (
@@ -230,7 +276,7 @@ export function UserGroupCategoryPricesTab({ groupId, onChanged }: Props) {
               disabled={saving}
               onClick={() => void selectAllLeafCategories()}
             >
-              Все leaf-категории
+              Все конечные категории
             </AdminCompactBtn>
           </div>
 
@@ -257,18 +303,11 @@ export function UserGroupCategoryPricesTab({ groupId, onChanged }: Props) {
             items={[
               { id: 'PERCENT_OFF', label: '−%' },
               { id: 'FIXED_OFF', label: '−₽' },
-              { id: 'FIXED_PRICE', label: 'Фикс ₽' },
             ]}
           />
 
           <AdminTextField
-            label={
-              catType === 'PERCENT_OFF'
-                ? 'Скидка, %'
-                : catType === 'FIXED_OFF'
-                  ? 'Скидка, ₽'
-                  : 'Цена, ₽'
-            }
+            label={catType === 'PERCENT_OFF' ? 'Скидка, %' : 'Скидка, ₽'}
             value={catValue}
             onChange={(e) => setCatValue(e.target.value)}
             disabled={saving}
@@ -317,7 +356,8 @@ export function UserGroupCategoryPricesTab({ groupId, onChanged }: Props) {
                   <div className={settingsStyles.settingsEmpty}>
                     <p className={settingsStyles.settingsEmptyTitle}>Правил категорий пока нет</p>
                     <p className={settingsStyles.settingsEmptyHint}>
-                      Выберите категории или нажмите «Все leaf-категории», задайте скидку и сохраните.
+                      Выберите категории или нажмите «Все конечные категории», задайте скидку и
+                      сохраните.
                     </p>
                     <div className={settingsStyles.menuProductActions}>
                       <AdminCompactBtn
@@ -326,7 +366,7 @@ export function UserGroupCategoryPricesTab({ groupId, onChanged }: Props) {
                         disabled={saving}
                         onClick={() => void selectAllLeafCategories()}
                       >
-                        Все leaf-категории
+                        Все конечные категории
                       </AdminCompactBtn>
                       <AdminCompactBtn
                         type="button"
@@ -346,23 +386,29 @@ export function UserGroupCategoryPricesTab({ groupId, onChanged }: Props) {
                   <td>{r.categoryName}</td>
                   <td>{CATEGORY_TYPE_LABELS[r.type] ?? r.type}</td>
                   <td>{r.type === 'PERCENT_OFF' ? `${r.value}%` : `${r.value} ₽`}</td>
-                  <td>
-                    <div className={settingsStyles.menuProductActions}>
+                  <td className={catalogStyles.tableCellActions}>
+                    <div className={catalogStyles.actionGroup}>
                       <AdminCompactBtn
                         type="button"
                         variant="outline"
+                        className={catalogStyles.iconBtn}
                         disabled={saving}
                         onClick={() => startEditCategory(r)}
+                        aria-label={`Изменить «${r.categoryName}»`}
+                        title="Изменить"
                       >
-                        Изменить
+                        <EditIcon />
                       </AdminCompactBtn>
                       <AdminCompactBtn
                         type="button"
-                        variant="outline"
+                        variant="danger"
+                        className={catalogStyles.iconDangerBtn}
                         disabled={saving}
                         onClick={() => setDeleteRow(r)}
+                        aria-label={`Удалить «${r.categoryName}»`}
+                        title="Удалить"
                       >
-                        Удалить
+                        <TrashIcon />
                       </AdminCompactBtn>
                     </div>
                   </td>
