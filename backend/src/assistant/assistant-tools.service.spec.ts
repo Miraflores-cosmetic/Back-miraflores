@@ -12,7 +12,22 @@ describe('AssistantToolsService', () => {
   };
   const orders = { list: vi.fn() };
   const catalog = { listProducts: vi.fn() };
-  const prisma = { $queryRaw: vi.fn() };
+  const userGroups = {
+    list: vi.fn(),
+    one: vi.fn(),
+    listCategoryPrices: vi.fn(),
+    listVariantPrices: vi.fn(),
+    listGroupVisibility: vi.fn(),
+    listMembers: vi.fn(),
+    listAllVisibilityDetailed: vi.fn(),
+  };
+  const discounts = { list: vi.fn(), get: vi.fn() };
+  const promo = { list: vi.fn(), get: vi.fn() };
+  const prisma = {
+    $queryRaw: vi.fn(),
+    userGroup: { findFirst: vi.fn() },
+    promoCode: { findFirst: vi.fn() },
+  };
   let svc: AssistantToolsService;
 
   beforeEach(() => {
@@ -21,11 +36,14 @@ describe('AssistantToolsService', () => {
       dashboard as never,
       orders as never,
       catalog as never,
+      userGroups as never,
+      discounts as never,
+      promo as never,
       prisma as never,
     );
   });
 
-  it('listToolDefs включает фазу 1 и 2', () => {
+  it('listToolDefs включает commerce tools', () => {
     const names = svc.listToolDefs().map((t) => t.function.name);
     expect(names).toEqual([
       'get_dashboard_overview',
@@ -37,6 +55,13 @@ describe('AssistantToolsService', () => {
       'top_products',
       'funnel_lite',
       'content_gaps',
+      'list_user_groups',
+      'list_discounts',
+      'get_discount',
+      'list_promo_codes',
+      'get_promo_code',
+      'list_catalog_visibility',
+      'get_user_group',
     ]);
   });
 
@@ -131,6 +156,7 @@ describe('AssistantToolsService', () => {
       'sales_timeseries',
       'compare_periods',
       'top_products',
+      'list_catalog_visibility',
     ]);
   });
 
@@ -142,5 +168,160 @@ describe('AssistantToolsService', () => {
       }),
     ).resolves.toEqual({ error: 'Нет доступа к этому инструменту' });
     expect(orders.list).not.toHaveBeenCalled();
+  });
+
+  it('list_user_groups делегирует UserGroupsAdminService', async () => {
+    userGroups.list.mockResolvedValue({
+      total: 1,
+      page: 1,
+      limit: 20,
+      items: [
+        {
+          id: 'g1',
+          name: 'Розница',
+          slug: 'retail-registered',
+          active: true,
+          isDefaultGuest: false,
+          isDefaultRegistered: true,
+          assignable: false,
+          allowCatalogDiscounts: true,
+          allowPromoCodes: true,
+          priceRounding: 'NEAREST',
+          counts: { users: 0, variantPrices: 0, categoryPrices: 18, visibilityRules: 0 },
+        },
+      ],
+    });
+
+    const res = (await svc.execute('list_user_groups', '{"q":"retail"}')) as {
+      items: Array<{ kind: string; slug: string }>;
+    };
+
+    expect(userGroups.list).toHaveBeenCalledWith(
+      expect.objectContaining({ q: 'retail', page: 1, limit: 20 }),
+    );
+    expect(res.items[0].kind).toBe('retail');
+    expect(res.items[0].slug).toBe('retail-registered');
+  });
+
+  it('get_user_group по slug подгружает include', async () => {
+    prisma.userGroup.findFirst.mockResolvedValue({ id: 'g1' });
+    userGroups.one.mockResolvedValue({
+      id: 'g1',
+      name: 'Розница',
+      slug: 'retail-registered',
+      active: true,
+      isDefaultGuest: false,
+      isDefaultRegistered: true,
+      assignable: false,
+      allowCatalogDiscounts: true,
+      allowPromoCodes: true,
+      priceRounding: 'NEAREST',
+      counts: { users: 0, variantPrices: 0, categoryPrices: 1, visibilityRules: 0 },
+    });
+    userGroups.listCategoryPrices.mockResolvedValue({
+      items: [
+        {
+          categoryId: 'c1',
+          categoryName: 'Уход',
+          categorySlug: 'uhod',
+          type: 'PERCENT_OFF',
+          value: 10,
+        },
+      ],
+    });
+
+    const res = (await svc.execute(
+      'get_user_group',
+      '{"slug":"retail-registered","include":["category_prices"]}',
+    )) as { categoryPrices: { items: Array<{ label: string }> } };
+
+    expect(userGroups.one).toHaveBeenCalledWith('g1');
+    expect(res.categoryPrices.items[0].label).toBe('−10%');
+  });
+
+  it('get_user_group без groupId/slug — error', async () => {
+    await expect(svc.execute('get_user_group', '{}')).resolves.toEqual({
+      error: 'Укажите groupId или slug группы',
+    });
+  });
+
+  it('list_discounts live делегирует DiscountsAdminService', async () => {
+    discounts.list.mockResolvedValue({
+      total: 1,
+      page: 1,
+      limit: 20,
+      items: [
+        {
+          id: 'd1',
+          name: 'Весна',
+          scope: 'CATEGORY',
+          status: 'RUNNING',
+          active: true,
+          startsAt: new Date(),
+          endsAt: null,
+          ruleCount: 1,
+        },
+      ],
+    });
+
+    const res = (await svc.execute('list_discounts', '{"live":true}')) as {
+      items: Array<{ status: string }>;
+    };
+    expect(discounts.list).toHaveBeenCalledWith(
+      expect.objectContaining({ live: true }),
+    );
+    expect(res.items[0].status).toBe('RUNNING');
+  });
+
+  it('get_promo_code по code', async () => {
+    prisma.promoCode.findFirst.mockResolvedValue({ id: 'p1' });
+    promo.get.mockResolvedValue({
+      id: 'p1',
+      code: 'SALE10',
+      type: 'PERCENT',
+      value: 10,
+      active: true,
+      startsAt: null,
+      endsAt: null,
+      maxUses: null,
+      oneShot: false,
+      minOrderAmount: null,
+      usedCount: 3,
+      redemptions: [],
+      redemptionsTotal: 0,
+    });
+
+    const res = (await svc.execute('get_promo_code', '{"code":"sale10"}')) as {
+      promo: { code: string };
+    };
+    expect(promo.get).toHaveBeenCalledWith('p1', expect.any(Object));
+    expect(res.promo.code).toBe('SALE10');
+  });
+
+  it('list_catalog_visibility делегирует listAllVisibilityDetailed', async () => {
+    userGroups.listAllVisibilityDetailed.mockResolvedValue({
+      total: 1,
+      page: 1,
+      limit: 20,
+      items: [
+        {
+          id: 'v1',
+          mode: 'SHOW_ONLY_GROUP',
+          targetType: 'PRODUCT',
+          targetId: 'prod1',
+          targetLabel: 'Крем',
+          groupId: 'g1',
+          groupName: 'Дилеры',
+          groupSlug: 'dealers',
+        },
+      ],
+    });
+
+    const res = (await svc.execute(
+      'list_catalog_visibility',
+      '{"groupId":"g1"}',
+    )) as { items: Array<{ targetLabel: string }> };
+    expect(userGroups.listAllVisibilityDetailed).toHaveBeenCalled();
+    expect(res.items[0].targetLabel).toBe('Крем');
   });
 });

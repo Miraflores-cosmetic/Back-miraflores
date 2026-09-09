@@ -14,6 +14,13 @@ export const ASSISTANT_TOOL_SECTIONS: Record<string, AdminSectionId | AdminSecti
   search_products: 'catalog',
   list_oos_variants: 'catalog',
   content_gaps: ['blog', 'settings'],
+  list_user_groups: 'users',
+  get_user_group: 'users',
+  list_discounts: 'discounts',
+  get_discount: 'discounts',
+  list_promo_codes: 'discounts',
+  get_promo_code: 'discounts',
+  list_catalog_visibility: ['users', 'catalog'],
 };
 
 export function staffCanUseAssistantTool(

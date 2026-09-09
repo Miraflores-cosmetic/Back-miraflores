@@ -117,10 +117,10 @@ export class CatalogProductsAdminService {
         continue;
       }
       const opt = await tx.productAttributeOption.findFirst({
-        where: { kind, label },
-        select: { id: true },
+        where: { kind, label: { equals: label, mode: 'insensitive' } },
+        select: { id: true, label: true },
       });
-      out[labelKey] = label;
+      out[labelKey] = opt?.label ?? label;
       out[optionKey] = opt?.id ?? null;
     }
     return out;

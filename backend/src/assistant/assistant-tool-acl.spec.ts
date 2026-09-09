@@ -55,6 +55,30 @@ describe('assistant-tool-acl', () => {
     ).toBe(true);
   });
 
+  it('user groups tools требуют section users', () => {
+    expect(staffCanUseAssistantTool('list_user_groups', ['dashboard'], false)).toBe(
+      false,
+    );
+    expect(staffCanUseAssistantTool('get_user_group', ['users'], false)).toBe(true);
+  });
+
+  it('discount / promo tools требуют section discounts', () => {
+    expect(staffCanUseAssistantTool('list_discounts', ['catalog'], false)).toBe(false);
+    expect(staffCanUseAssistantTool('get_promo_code', ['discounts'], false)).toBe(true);
+  });
+
+  it('visibility tool — users OR catalog', () => {
+    expect(staffCanUseAssistantTool('list_catalog_visibility', ['dashboard'], false)).toBe(
+      false,
+    );
+    expect(staffCanUseAssistantTool('list_catalog_visibility', ['users'], false)).toBe(
+      true,
+    );
+    expect(staffCanUseAssistantTool('list_catalog_visibility', ['catalog'], false)).toBe(
+      true,
+    );
+  });
+
   it('filterAssistantToolNames отсекает лишнее', () => {
     const names = [
       'get_dashboard_overview',

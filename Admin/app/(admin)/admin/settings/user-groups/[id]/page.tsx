@@ -13,7 +13,5 @@ export default async function AdminUserGroupDetailPage({
   }
 
   const { id } = await params;
-  return (
-    <UserGroupDetailClient groupId={id} showSettingsBack={session.staff.isSuperAdmin} />
-  );
+  return <UserGroupDetailClient groupId={id} />;
 }

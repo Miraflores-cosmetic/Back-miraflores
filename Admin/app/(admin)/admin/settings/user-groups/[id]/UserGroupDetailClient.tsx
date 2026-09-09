@@ -14,12 +14,11 @@ import {
   resolveUserGroupTab,
   type UserGroupTabId,
 } from '@/lib/userGroupDetailTabs';
-import { UserGroupCategoryPricesTab } from '../UserGroupCategoryPricesTab';
 import { UserGroupGeneralTab } from '../UserGroupGeneralTab';
 import { UserGroupKindBadge } from '../UserGroupKindBadge';
 import { UserGroupPageNav } from '../UserGroupPageNav';
 import { UserGroupMembersTab } from '../UserGroupMembersTab';
-import { UserGroupSkuPricesTab } from '../UserGroupSkuPricesTab';
+import { UserGroupPricingTab } from '../UserGroupPricingTab';
 import { UserGroupVisibilityTab } from '../UserGroupVisibilityTab';
 import catalogStyles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
 import pn from '@/app/(admin)/admin/catalog/products/productNew.module.css';
@@ -27,13 +26,7 @@ import settingsStyles from '@/app/(admin)/admin/settings/Settings.module.css';
 
 const GROUPS_HREF = '/admin/settings/user-groups';
 
-export function UserGroupDetailClient({
-  groupId,
-  showSettingsBack,
-}: {
-  groupId: string;
-  showSettingsBack: boolean;
-}) {
+export function UserGroupDetailClient({ groupId }: { groupId: string }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -87,13 +80,27 @@ export function UserGroupDetailClient({
 
   useEffect(() => {
     if (!group) return;
-    const fromUrl = parseUserGroupTab(searchParams.get('tab'));
-    const resolved = resolveUserGroupTab(searchParams.get('tab'), group);
+    const rawTab = searchParams.get('tab');
+    const fromUrl = parseUserGroupTab(rawTab);
+    const resolved = resolveUserGroupTab(rawTab, group);
     setTab(resolved);
-    if (fromUrl === resolved) return;
+
     const sp = new URLSearchParams(searchParams.toString());
-    if (resolved === 'general') sp.delete('tab');
-    else sp.set('tab', resolved);
+    let needsReplace = false;
+
+    if (rawTab?.trim() === 'categories') {
+      sp.set('tab', 'prices');
+      sp.set('section', 'categories');
+      needsReplace = true;
+    }
+
+    if (fromUrl !== resolved) {
+      if (resolved === 'general') sp.delete('tab');
+      else sp.set('tab', resolved);
+      needsReplace = true;
+    }
+
+    if (!needsReplace) return;
     const qs = sp.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   }, [group, pathname, router, searchParams]);
@@ -123,8 +130,10 @@ export function UserGroupDetailClient({
   const tabItems = [
     { id: 'general', label: 'Общее' },
     ...(group.assignable ? [{ id: 'members', label: `Участники (${group.counts.users})` }] : []),
-    { id: 'prices', label: `Цены SKU (${group.counts.variantPrices})` },
-    { id: 'categories', label: `Категории (${group.counts.categoryPrices})` },
+    {
+      id: 'prices',
+      label: `Цены (${group.counts.variantPrices + group.counts.categoryPrices})`,
+    },
     { id: 'visibility', label: `Видимость (${group.counts.visibilityRules})` },
   ];
 
@@ -132,7 +141,7 @@ export function UserGroupDetailClient({
     <div className={`${catalogStyles.form} ${catalogStyles.formWide}`}>
       <div className={pn.stickyToolbar}>
         <div className={pn.stickyToolbarMain}>
-          <UserGroupPageNav variant="detail" showSettingsBack={showSettingsBack} />
+          <UserGroupPageNav variant="detail" />
           <h1 className={pn.stickyToolbarTitle}>{group.name}</h1>
           <div className={pn.stickyToolbarMeta}>
             <UserGroupKindBadge group={group} />
@@ -179,16 +188,9 @@ export function UserGroupDetailClient({
       ) : null}
 
       {tab === 'prices' ? (
-        <UserGroupSkuPricesTab
+        <UserGroupPricingTab
           groupId={groupId}
-          totalCount={group.counts.variantPrices}
-          onPricesChanged={() => void refreshGroupMeta()}
-        />
-      ) : null}
-
-      {tab === 'categories' ? (
-        <UserGroupCategoryPricesTab
-          groupId={groupId}
+          group={group}
           onChanged={() => void refreshGroupMeta()}
         />
       ) : null}

@@ -124,7 +124,7 @@ Miraflores 3.0/
 - Форма товара: select по `*OptionId`; на Product хранятся FK + denormalized labels для витрины  
 - BFF: СДЭК, Яндекс Доставка/карты, webhook ЮKassa  
 - ACL: разделы из `@miraflores/admin-sections` (`orders`, `catalog`, `users`, `blog`, …); hub `/admin/settings` — только super-admin (`staff`)  
-- **Группы** (`/admin/settings/user-groups`) — ACL `users`; nav: **канон — Пользователи → Группы** (в sidebar «Настройки» пункта нет; `excludePaths` не подсвечивает Settings на карточке группы); hub «Настройки» — карточка только у **super-admin** (badge «доступ: Пользователи»); legacy `/admin/user-groups/*` → redirect; pickers каталога требуют grant `catalog`
+- **Группы** (`/admin/settings/user-groups`) — ACL `users`; nav: **Настройки → Группы пользователей** (grant `users`; не в группе «Пользователи»); hub «Настройки» — карточка у **super-admin** (badge «доступ: Пользователи»); legacy `/admin/user-groups/*` → redirect; pickers каталога требуют grant `catalog`
 
 ### Front (Vite)
 
@@ -218,6 +218,34 @@ backend/.env.example      ← ONEC_*
 
 ---
 
+## LLM-ассистент админки (дашборд)
+
+UI: панель **🤦‍♀️ Ассистент** на дашборде и в chrome (`AdminAssistantPanel`); ACL — `staffCanAssistant` (super-admin или grant analytics).
+
+Backend: `POST /api/v1/assistant/admin/chat` (SSE), `AssistantService` + GPTunnel, tools только **read-only** (KPI, заказы, каталог, контент, **группы пользователей**).
+
+| Tool | ACL | Назначение |
+|------|-----|------------|
+| `list_user_groups` | `users` | список групп, kind, флаги, counts |
+| `get_user_group` | `users` | профиль + optional include (category_prices, variant_prices, visibility, members) |
+| `list_discounts` | `discounts` | кампании Discount; `live=true` — идут сейчас |
+| `get_discount` | `discounts` | кампания: scope, категории/товары, rules |
+| `list_promo_codes` | `discounts` | промокоды checkout |
+| `get_promo_code` | `discounts` | промокод по id/code; optional redemptions |
+| `list_catalog_visibility` | `users` **or** `catalog` | global visibility rules |
+
+Справочники prompt: `assistant-knowledge/user-groups.ts`, `assistant-knowledge/discounts-promo-visibility.ts`.
+
+**Справочники для ответов «как настроить»** (не tools, не Cursor Skill) — блоки в system prompt:
+
+| Тема | Файл |
+|------|------|
+| Группы пользователей | `backend/src/assistant/assistant-knowledge/user-groups.ts` → подмешивается в `ASSISTANT_SYSTEM_PROMPT` |
+
+При добавлении новых доменов — новый файл в `assistant-knowledge/` + import в `assistant.constants.ts`. `structure.md` — для разработчиков; ассистент читает только prompt.
+
+---
+
 ## Группы пользователей (User Groups)
 
 Site-only (не синхронизируются с 1С). Один `User.groupId` на покупателя; контекст цен/видимости/промо — через `CommerceContextService`.
@@ -255,9 +283,9 @@ Site-only (не синхронизируются с 1С). Один `User.groupId
 | **Admin write (visibility CATEGORY)** | Любая категория (`DiscountCategoryPickerModal` без `leafOnly`) — можно скрыть родительскую ветку |
 | **Pricing engine read** | `category-tree.util` / `findNearestCategoryRule()` — **walk ancestors**, nearest rule wins |
 
-На вкладках **SKU** и **Категории** в Admin — hint `USER_GROUP_PRICE_STACK_HINT`: SKU override → nearest category rule → base + rounding группы.
-
 Category prices: parent rule **нельзя** задать в UI цен категорий — только leaf; для ветки целиком — правило на каждый leaf или SKU override. Visibility на parent category — отдельно, через вкладку «Видимость».
+
+**Витрина:** групповая цена в `price` на карточке/PDP; зачёркнутая база (`oldPrice`/`compareAt`) — только от `compareAt` в каталоге или кампании Discount, не автоматически от правила группы.
 
 ### Visibility
 
@@ -296,8 +324,9 @@ Members: `GET/POST /user-groups/admin/:id/members`, `DELETE …/members/:userId`
 |---------|-----------|---------|
 | Общее | `UserGroupGeneralTab` | профиль, flags, delete (каскад SKU/category/visibility); системные — без delete |
 | Участники | `UserGroupMembersTab` | только `assignable`; paginated; `ConfirmDialog` на remove |
-| Цены SKU | `UserGroupSkuPricesTab` | paginated (25); edit/delete; ссылка на товар; `VariantPickerModal` |
-| Категории | `UserGroupCategoryPricesTab` | leaf-only; список без paginate (soft limit ~50 + hint); `ConfirmDialog` |
+| Цены | `UserGroupPricingTab` | pill-чипы **Категории** / **Товары**; `?tab=prices&section=products`; legacy `?tab=categories` → prices |
+| ↳ Категории | `UserGroupCategoryPricesTab` | leaf-only; pill тип правила; soft limit ~50 |
+| ↳ Товары | `UserGroupProductPricesTab` | один товар → −% или фикс ₽ по вариантам; список SKU-цен paginated (25) |
 | Видимость | `UserGroupVisibilityTab` | self-load rules; product/category/variant pickers |
 
 **Pickers (reuse catalog/discounts, не raw UUID):**
@@ -310,7 +339,7 @@ Members: `GET/POST /user-groups/admin/:id/members`, `DELETE …/members/:userId`
 | Variant (SKU price / visibility) | `VariantPickerModal` (gratitude/orders) |
 | Member | `UserGroupMemberPickerModal` |
 
-**IA / breadcrumbs:** `UserGroupPageNav` — users-only: «← Пользователи»; super-admin: «← Настройки» + «← Группы» на detail. Pill-бейджи типа: `UserGroupKindBadge` (Гости / Розница / Кастомная). Розница/гости: «Авто · все зарег. без группы» / «Авто · все гости» (не пугающий 0 участников).
+**IA / breadcrumbs:** `UserGroupPageNav` — «← Настройки» (+ «← Группы» на detail). Бейджи типа: `UserGroupKindBadge` — `catalogAdmin.badge*` (как статусы на `/admin/orders`). Розница/гости: «Авто · все зарег. без группы» / «Авто · все гости» (не пугающий 0 участников).
 
 Instant-save чекбоксы и destructive — **toast** + **`ConfirmDialog`** (единый паттерн, не `window.confirm`).
 
@@ -408,10 +437,12 @@ backend/src/orders/orders.public.service.ts     ← pricing snapshot on create
 
 Admin/app/(admin)/admin/settings/user-groups/
   UserGroupsAdminClient.tsx UserGroupDetailClient.tsx
-  UserGroupGeneralTab.tsx UserGroupMembersTab.tsx UserGroupSkuPricesTab.tsx
-  UserGroupCategoryPricesTab.tsx UserGroupVisibilityTab.tsx
+  UserGroupGeneralTab.tsx UserGroupMembersTab.tsx UserGroupPricingTab.tsx
+  UserGroupCategoryPricesTab.tsx UserGroupProductPricesTab.tsx UserGroupVisibilityTab.tsx
   UserGroupKindBadge.tsx UserGroupPageNav.tsx UserGroupMemberPickerModal.tsx
-Admin/lib/adminUserGroupTypes.ts userGroupDetailTabs.ts userGroupAdminUi.ts slugify.ts
+Admin/lib/adminUserGroupTypes.ts userGroupDetailTabs.ts userGroupPricing.ts userGroupAdminUi.ts slugify.ts
+backend/src/assistant/assistant-knowledge/user-groups.ts   ← справочник для LLM-ассистента
+backend/src/assistant/assistant.constants.ts               ← ASSISTANT_SYSTEM_PROMPT + knowledge
 Admin/lib/buyerPublicBff.ts
 Admin/app/(admin)/admin/discounts/DiscountScopePickerModal.tsx  ← shared category/product pickers
 packages/admin-sections/src/index.ts            ← user-groups → users; settings excludePaths

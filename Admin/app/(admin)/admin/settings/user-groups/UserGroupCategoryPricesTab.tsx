@@ -4,13 +4,13 @@ import { useCallback, useEffect, useState } from 'react';
 import { DiscountCategoryPickerModal } from '@/app/(admin)/admin/discounts/DiscountScopePickerModal';
 import { AdminCompactBtn } from '@/components/AdminCompactBtn/AdminCompactBtn';
 import { AdminTextField } from '@/components/AdminTextField/AdminTextField';
+import { AdminTabs } from '@/components/AdminTabs/AdminTabs';
 import { ConfirmDialog } from '@/components/ConfirmDialog/ConfirmDialog';
 import { useToast } from '@/components/Toast/ToastProvider';
 import {
   AdminBackendRequestError,
   adminBackendJson,
 } from '@/lib/adminBackendFetch';
-import { USER_GROUP_PRICE_STACK_HINT } from '@/lib/userGroupAdminUi';
 import type { AdminGroupCategoryPriceRow } from '@/lib/adminUserGroupTypes';
 import catalogStyles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
 import settingsStyles from '@/app/(admin)/admin/settings/Settings.module.css';
@@ -23,6 +23,8 @@ const CATEGORY_TYPE_LABELS: Record<string, string> = {
   FIXED_OFF: '−₽',
   FIXED_PRICE: 'Фикс ₽',
 };
+
+type CatType = 'PERCENT_OFF' | 'FIXED_OFF' | 'FIXED_PRICE';
 
 type Props = {
   groupId: string;
@@ -39,7 +41,7 @@ export function UserGroupCategoryPricesTab({ groupId, onChanged }: Props) {
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [selectedCategoryLabel, setSelectedCategoryLabel] = useState('');
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
-  const [catType, setCatType] = useState<'PERCENT_OFF' | 'FIXED_OFF' | 'FIXED_PRICE'>('PERCENT_OFF');
+  const [catType, setCatType] = useState<CatType>('PERCENT_OFF');
   const [catValue, setCatValue] = useState('10');
   const [deleteRow, setDeleteRow] = useState<AdminGroupCategoryPriceRow | null>(null);
 
@@ -90,6 +92,14 @@ export function UserGroupCategoryPricesTab({ groupId, onChanged }: Props) {
     setSelectedCategoryLabel(row.categoryName);
     setCatType(row.type);
     setCatValue(String(row.value));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function clearForm() {
+    setSelectedCategoryId(null);
+    setSelectedCategoryLabel('');
+    setCatType('PERCENT_OFF');
+    setCatValue('10');
   }
 
   async function confirmDeleteCategory() {
@@ -112,6 +122,9 @@ export function UserGroupCategoryPricesTab({ groupId, onChanged }: Props) {
     }
   }
 
+  const editingExisting =
+    selectedCategoryId != null && items.some((r) => r.categoryId === selectedCategoryId);
+
   return (
     <>
       {error ? (
@@ -119,59 +132,62 @@ export function UserGroupCategoryPricesTab({ groupId, onChanged }: Props) {
           {error}
         </p>
       ) : null}
-      <p className={catalogStyles.muted} style={{ margin: '0 0 12px' }}>
-        {USER_GROUP_PRICE_STACK_HINT}
-      </p>
+
       <section className={settingsStyles.faqCard}>
-        <p className={catalogStyles.muted} style={{ margin: 0 }}>
-          Только leaf-категории. На витрине правило наследуется вниз по дереву; при расчёте ищется
-          ближайшее правило вверх от leaf.
-        </p>
+        <div className={settingsStyles.faqCardHead}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p className={settingsStyles.settingsEmptyTitle} style={{ margin: 0 }}>
+              {editingExisting ? 'Изменить правило' : 'Новое правило'}
+            </p>
+            <p className={catalogStyles.muted} style={{ margin: '4px 0 0' }}>
+              Только конечные категории без подкатегорий. На витрине правило наследуется вниз; при
+              расчёте берётся ближайшее правило вверх по дереву.
+            </p>
+          </div>
+          {selectedCategoryId ? (
+            <AdminCompactBtn type="button" variant="outline" disabled={saving} onClick={clearForm}>
+              Сбросить
+            </AdminCompactBtn>
+          ) : null}
+        </div>
+
         <form className={settingsStyles.menuFormStack} onSubmit={(e) => void upsertCategoryPrice(e)}>
           <AdminCompactBtn type="button" variant="outline" onClick={() => setCategoryPickerOpen(true)}>
             {selectedCategoryLabel || 'Выбрать категорию'}
           </AdminCompactBtn>
-          <label className={catalogStyles.label}>
-            Тип правила
-            <select
-              className={catalogStyles.select}
-              value={catType}
-              onChange={(e) => setCatType(e.target.value as typeof catType)}
-            >
-              <option value="PERCENT_OFF">−%</option>
-              <option value="FIXED_OFF">−₽</option>
-              <option value="FIXED_PRICE">Фикс ₽</option>
-            </select>
-          </label>
+
+          <AdminTabs
+            ariaLabel="Тип правила категории"
+            variant="pill"
+            compact
+            activeId={catType}
+            onChange={(id) => setCatType(id as CatType)}
+            items={[
+              { id: 'PERCENT_OFF', label: '−%' },
+              { id: 'FIXED_OFF', label: '−₽' },
+              { id: 'FIXED_PRICE', label: 'Фикс ₽' },
+            ]}
+          />
+
           <AdminTextField
-            label="Значение"
+            label={catType === 'PERCENT_OFF' ? 'Скидка, %' : catType === 'FIXED_OFF' ? 'Скидка, ₽' : 'Цена, ₽'}
             value={catValue}
             onChange={(e) => setCatValue(e.target.value)}
             disabled={saving}
             inputMode="numeric"
           />
+
           <div className={settingsStyles.menuProductActions}>
             <AdminCompactBtn type="submit" variant="accent" disabled={saving || !selectedCategoryId}>
-              {selectedCategoryId && items.some((r) => r.categoryId === selectedCategoryId)
-                ? 'Обновить'
-                : 'Сохранить'}
+              {editingExisting ? 'Обновить' : 'Сохранить'}
             </AdminCompactBtn>
-            {selectedCategoryId ? (
-              <AdminCompactBtn
-                type="button"
-                variant="outline"
-                disabled={saving}
-                onClick={() => {
-                  setSelectedCategoryId(null);
-                  setSelectedCategoryLabel('');
-                }}
-              >
-                Сбросить форму
-              </AdminCompactBtn>
-            ) : null}
           </div>
         </form>
       </section>
+
+      <h2 className={catalogStyles.sectionTitle} style={{ marginTop: 24 }}>
+        Сохранённые правила
+      </h2>
       {items.length > CATEGORY_LIST_SOFT_LIMIT ? (
         <p className={catalogStyles.muted}>
           {items.length} правил — список без пагинации (пока комфортно до ~{CATEGORY_LIST_SOFT_LIMIT}).
@@ -195,7 +211,7 @@ export function UserGroupCategoryPricesTab({ groupId, onChanged }: Props) {
                   <div className={settingsStyles.settingsEmpty}>
                     <p className={settingsStyles.settingsEmptyTitle}>Правил категорий пока нет</p>
                     <p className={settingsStyles.settingsEmptyHint}>
-                      Выберите leaf-категорию выше и задайте скидку или фиксированную цену.
+                      Выберите конечную категорию и задайте скидку или фиксированную цену.
                     </p>
                     <AdminCompactBtn
                       type="button"
@@ -213,7 +229,9 @@ export function UserGroupCategoryPricesTab({ groupId, onChanged }: Props) {
                 <tr key={r.categoryId}>
                   <td>{r.categoryName}</td>
                   <td>{CATEGORY_TYPE_LABELS[r.type] ?? r.type}</td>
-                  <td>{r.value}</td>
+                  <td>
+                    {r.type === 'PERCENT_OFF' ? `${r.value}%` : `${r.value} ₽`}
+                  </td>
                   <td>
                     <div className={settingsStyles.menuProductActions}>
                       <AdminCompactBtn
@@ -240,6 +258,7 @@ export function UserGroupCategoryPricesTab({ groupId, onChanged }: Props) {
           </tbody>
         </table>
       </div>
+
       <DiscountCategoryPickerModal
         open={categoryPickerOpen}
         single

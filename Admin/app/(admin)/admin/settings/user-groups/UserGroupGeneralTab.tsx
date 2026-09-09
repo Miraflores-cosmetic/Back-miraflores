@@ -119,13 +119,9 @@ export function UserGroupGeneralTab({
             <p className={catalogStyles.muted} style={{ margin: 0 }}>
               Slug системной группы нельзя менять.
             </p>
-          ) : (
-            <p className={catalogStyles.muted} style={{ margin: 0 }}>
-              Латиница, цифры, дефис.
-            </p>
-          )}
+          ) : null}
           <label className={catalogStyles.label}>
-            Округление цен категорий
+            Округление итога по правилам категории
             <select
               className={catalogStyles.select}
               value={editRounding}
@@ -139,6 +135,9 @@ export function UserGroupGeneralTab({
               ))}
             </select>
           </label>
+          <p className={catalogStyles.muted} style={{ margin: 0 }}>
+            Для −% и −₽ от базовой цены (не для фиксированных SKU-цен и не для фикс ₽ категории).
+          </p>
           <div>
             <AdminCompactBtn type="submit" variant="accent" disabled={saving}>
               {saving ? 'Сохранение…' : 'Сохранить профиль'}
@@ -204,8 +203,7 @@ export function UserGroupGeneralTab({
           </p>
           <AdminCompactBtn
             type="button"
-            variant="outline"
-            className={catalogStyles.iconDangerBtn}
+            variant="danger"
             disabled={saving || group.counts.users > 0}
             onClick={() => setDeleteOpen(true)}
           >

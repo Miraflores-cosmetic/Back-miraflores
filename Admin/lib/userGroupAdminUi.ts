@@ -17,10 +17,6 @@ export function getUserGroupKind(
 }
 
 /** Текст для колонки «Участники» / сводки на карточке. */
-/** Стек расчёта групповой цены на витрине (см. CommerceContextService). */
-export const USER_GROUP_PRICE_STACK_HINT =
-  'Как считается: цена SKU (если задана) → ближайшее правило категории вверх по дереву → базовая цена варианта; итог округляется по настройке группы.';
-
 export function formatUserGroupMembersLabel(
   group: Pick<AdminUserGroup, 'isDefaultGuest' | 'isDefaultRegistered' | 'assignable' | 'counts'>,
 ): string {

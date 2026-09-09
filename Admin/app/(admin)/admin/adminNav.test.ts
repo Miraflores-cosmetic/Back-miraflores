@@ -109,14 +109,14 @@ describe('isGroupPathActive', () => {
     expect(isGroupPathActive(settingsGroup, '/admin/settings/seo')).toBe(true);
   });
 
-  it('user-groups открывает Users, не Settings', () => {
+  it('user-groups открывает Settings, не Users', () => {
     const usersGroup = ADMIN_NAV.find((i) => i.type === 'group' && i.id === 'users');
     const settingsGroup = ADMIN_NAV.find((i) => i.type === 'group' && i.id === 'settings');
     expect(usersGroup?.type).toBe('group');
     expect(settingsGroup?.type).toBe('group');
     if (usersGroup?.type !== 'group' || settingsGroup?.type !== 'group') return;
-    expect(isGroupPathActive(usersGroup, '/admin/settings/user-groups/abc')).toBe(true);
-    expect(isGroupPathActive(settingsGroup, '/admin/settings/user-groups/abc')).toBe(false);
+    expect(isGroupPathActive(usersGroup, '/admin/settings/user-groups/abc')).toBe(false);
+    expect(isGroupPathActive(settingsGroup, '/admin/settings/user-groups/abc')).toBe(true);
   });
 });
 

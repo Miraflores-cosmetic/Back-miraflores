@@ -1,17 +1,17 @@
 'use client';
 
-import { AdminPillBadge } from '@/components/AdminPillChip/AdminPillChip';
 import {
   USER_GROUP_KIND_LABELS,
   getUserGroupKind,
+  type UserGroupKind,
 } from '@/lib/userGroupAdminUi';
 import type { AdminUserGroup } from '@/lib/adminUserGroupTypes';
-import settingsStyles from '@/app/(admin)/admin/settings/Settings.module.css';
+import catalogStyles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
 
-const KIND_CLASS: Record<ReturnType<typeof getUserGroupKind>, string> = {
-  guest: settingsStyles.groupKindGuest,
-  retail: settingsStyles.groupKindRetail,
-  custom: settingsStyles.groupKindCustom,
+const KIND_BADGE_CLASS: Record<UserGroupKind, string> = {
+  guest: catalogStyles.badgeOrderShipped,
+  retail: catalogStyles.badgeOn,
+  custom: catalogStyles.badgeOrderPacking,
 };
 
 export function UserGroupKindBadge({
@@ -21,6 +21,8 @@ export function UserGroupKindBadge({
 }) {
   const kind = getUserGroupKind(group);
   return (
-    <AdminPillBadge className={KIND_CLASS[kind]}>{USER_GROUP_KIND_LABELS[kind]}</AdminPillBadge>
+    <span className={`${catalogStyles.badge} ${KIND_BADGE_CLASS[kind]}`}>
+      {USER_GROUP_KIND_LABELS[kind]}
+    </span>
   );
 }

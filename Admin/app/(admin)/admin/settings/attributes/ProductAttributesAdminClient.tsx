@@ -141,19 +141,14 @@ function SortableAttrRow({
         >
           ⋮⋮
         </button>
-        <div className={styles.attrActiveBlock}>
-          <label className={styles.activeLabel}>
-            <AdminCheckbox
-              checked={item.active}
-              onChange={(e) => onChange({ active: e.target.checked })}
-              disabled={disabled}
-            />
-            Активен
-          </label>
-          <p className={styles.attrActiveHint}>
-            Скрывает из формы товара; товары с этим значением сохраняют его, пока не пересохранят.
-          </p>
-        </div>
+        <label className={styles.activeLabel}>
+          <AdminCheckbox
+            checked={item.active}
+            onChange={(e) => onChange({ active: e.target.checked })}
+            disabled={disabled}
+          />
+          Активен
+        </label>
         <AdminCompactBtn
           type="button"
           variant="outline"
@@ -179,13 +174,6 @@ function SortableAttrRow({
         disabled={disabled}
         maxLength={500}
       />
-      {item.usageCount > 0 ? (
-        <p className={catalogStyles.muted}>
-          {item.usageCount}{' '}
-          {item.usageCount === 1 ? 'товар' : item.usageCount < 5 ? 'товара' : 'товаров'}. Чтобы
-          удалить — снимите значение с товаров. Переименование обновит label на этих товарах.
-        </p>
-      ) : null}
     </li>
   );
 }

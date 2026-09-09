@@ -30,6 +30,19 @@ describe('assistantToolStatusMessage', () => {
     expect(assistantToolStatusMessage('content_gaps')).toBe(
       'Ищу пробелы в контенте…',
     );
+    expect(assistantToolStatusMessage('list_user_groups')).toBe(
+      'Смотрю группы пользователей…',
+    );
+    expect(assistantToolStatusMessage('get_user_group')).toBe(
+      'Загружаю настройки группы…',
+    );
+    expect(assistantToolStatusMessage('list_discounts')).toBe(
+      'Смотрю кампании Discount…',
+    );
+    expect(assistantToolStatusMessage('get_promo_code')).toBe('Загружаю промокод…');
+    expect(assistantToolStatusMessage('list_catalog_visibility')).toBe(
+      'Смотрю правила видимости…',
+    );
     expect(assistantToolStatusMessage('unknown_tool')).toBe('Смотрю данные…');
   });
 });

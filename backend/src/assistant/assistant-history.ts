@@ -27,6 +27,20 @@ export function assistantToolStatusMessage(toolName: string): string {
       return 'Смотрю воронку статусов заказов…';
     case 'content_gaps':
       return 'Ищу пробелы в контенте…';
+    case 'list_user_groups':
+      return 'Смотрю группы пользователей…';
+    case 'get_user_group':
+      return 'Загружаю настройки группы…';
+    case 'list_discounts':
+      return 'Смотрю кампании Discount…';
+    case 'get_discount':
+      return 'Загружаю кампанию Discount…';
+    case 'list_promo_codes':
+      return 'Смотрю промокоды…';
+    case 'get_promo_code':
+      return 'Загружаю промокод…';
+    case 'list_catalog_visibility':
+      return 'Смотрю правила видимости…';
     default:
       return 'Смотрю данные…';
   }

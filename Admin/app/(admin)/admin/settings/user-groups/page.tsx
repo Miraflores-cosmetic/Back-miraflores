@@ -8,7 +8,5 @@ export default async function AdminUserGroupsPage() {
     redirect('/admin/login');
   }
 
-  return (
-    <UserGroupsAdminClient showSettingsBack={session.staff.isSuperAdmin} />
-  );
+  return <UserGroupsAdminClient />;
 }

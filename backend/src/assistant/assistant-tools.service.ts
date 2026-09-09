@@ -1,8 +1,11 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { CatalogProductsAdminService } from '../catalog/catalog-products.admin.service';
 import { DashboardAdminService } from '../dashboard/dashboard-admin.service';
+import { DiscountsAdminService } from '../discounts/discounts-admin.service';
 import { OrdersAdminService } from '../orders/orders-admin.service';
+import { PromoAdminService } from '../promo/promo.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { UserGroupsAdminService } from '../user-groups/user-groups-admin.service';
 import { staffCanUseAssistantTool, contentGapScopesForStaff } from './assistant-tool-acl';
 import type { GptToolDef } from './gptunnel.client';
 
@@ -55,6 +58,37 @@ const PERIOD_ENUM = [
   'custom',
 ] as const;
 
+const USER_GROUP_INCLUDE = [
+  'category_prices',
+  'variant_prices',
+  'visibility',
+  'members',
+] as const;
+
+type UserGroupInclude = (typeof USER_GROUP_INCLUDE)[number];
+
+function userGroupKind(row: {
+  isDefaultGuest: boolean;
+  isDefaultRegistered: boolean;
+}): 'guest' | 'retail' | 'custom' {
+  if (row.isDefaultGuest) return 'guest';
+  if (row.isDefaultRegistered) return 'retail';
+  return 'custom';
+}
+
+function categoryPriceLabel(type: string, value: number): string {
+  switch (type) {
+    case 'PERCENT_OFF':
+      return `−${value}%`;
+    case 'FIXED_OFF':
+      return `−${value} ₽`;
+    case 'FIXED_PRICE':
+      return `${value} ₽`;
+    default:
+      return `${type}: ${value}`;
+  }
+}
+
 const PERIOD_PROPS = {
   period: {
     type: 'string',
@@ -72,6 +106,9 @@ export class AssistantToolsService {
     private readonly dashboard: DashboardAdminService,
     private readonly orders: OrdersAdminService,
     private readonly catalog: CatalogProductsAdminService,
+    private readonly userGroups: UserGroupsAdminService,
+    private readonly discounts: DiscountsAdminService,
+    private readonly promo: PromoAdminService,
     private readonly prisma: PrismaService,
   ) {}
 
@@ -243,6 +280,173 @@ export class AssistantToolsService {
           parameters: {
             type: 'object',
             properties: {},
+            additionalProperties: false,
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'list_user_groups',
+          description:
+            'Список групп пользователей (цены, видимость, промо): тип guest/retail/custom, флаги allowCatalogDiscounts/allowPromoCodes, счётчики правил. Для «какая группа у розницы» — q=retail или смотри kind=retail.',
+          parameters: {
+            type: 'object',
+            properties: {
+              q: { type: 'string', description: 'Поиск по name/slug' },
+              active: {
+                type: 'boolean',
+                description: 'true — только активные, false — выключенные',
+              },
+              page: { type: 'integer', description: 'Страница, с 1' },
+              limit: { type: 'integer', description: '1–50, по умолчанию 20' },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'list_discounts',
+          description:
+            'Кампании Discount (каталожные акции): scope, статус RUNNING/SCHEDULED/…, даты, число правил. live=true — только идущие сейчас.',
+          parameters: {
+            type: 'object',
+            properties: {
+              q: { type: 'string', description: 'Поиск по названию' },
+              live: {
+                type: 'boolean',
+                description: 'true — только активные кампании в текущий момент',
+              },
+              active: {
+                type: 'boolean',
+                description: 'Флаг active (если live не задан)',
+              },
+              page: { type: 'integer' },
+              limit: { type: 'integer', description: '1–50' },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'get_discount',
+          description: 'Детали кампании Discount по discountId: scope, категории/товары, правила награды.',
+          parameters: {
+            type: 'object',
+            properties: {
+              discountId: { type: 'string', description: 'UUID кампании' },
+            },
+            required: ['discountId'],
+            additionalProperties: false,
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'list_promo_codes',
+          description:
+            'Промокоды checkout: тип PERCENT/FIXED, active, usedCount. Поиск по коду (q).',
+          parameters: {
+            type: 'object',
+            properties: {
+              q: { type: 'string', description: 'Поиск по коду' },
+              active: { type: 'boolean' },
+              page: { type: 'integer' },
+              limit: { type: 'integer', description: '1–50' },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'get_promo_code',
+          description:
+            'Детали промокода по promoCodeId или code. includeRedemptions=true — последние применения (email маскируется).',
+          parameters: {
+            type: 'object',
+            properties: {
+              promoCodeId: { type: 'string' },
+              code: { type: 'string', description: 'Код промо, напр. SALE10' },
+              includeRedemptions: { type: 'boolean' },
+              redemptionsLimit: { type: 'integer', description: '1–20, по умолчанию 10' },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'list_catalog_visibility',
+          description:
+            'Правила видимости каталога (global): mode, targetType PRODUCT/CATEGORY/VARIANT, groupId. Для одной группы — также get_user_group include=[visibility].',
+          parameters: {
+            type: 'object',
+            properties: {
+              mode: {
+                type: 'string',
+                enum: [
+                  'HIDE_FROM_GUESTS',
+                  'HIDE_FROM_REGISTERED',
+                  'HIDE_FROM_GROUP',
+                  'SHOW_ONLY_REGISTERED',
+                  'SHOW_ONLY_GROUP',
+                ],
+              },
+              targetType: {
+                type: 'string',
+                enum: ['PRODUCT', 'CATEGORY', 'VARIANT'],
+              },
+              groupId: { type: 'string' },
+              page: { type: 'integer' },
+              limit: { type: 'integer', description: '1–50' },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'get_user_group',
+          description:
+            'Детали одной группы по groupId или slug. include: category_prices | variant_prices | visibility | members (можно несколько). Без include — только профиль и счётчики.',
+          parameters: {
+            type: 'object',
+            properties: {
+              groupId: { type: 'string', description: 'UUID группы' },
+              slug: {
+                type: 'string',
+                description: 'slug группы, напр. retail-registered или guests',
+              },
+              include: {
+                type: 'array',
+                items: {
+                  type: 'string',
+                  enum: [...USER_GROUP_INCLUDE],
+                },
+                description: 'Доп. блоки; variant_prices/members — paginated',
+              },
+              variantPricesQ: {
+                type: 'string',
+                description: 'Поиск SKU/товара (только с include variant_prices)',
+              },
+              variantPricesLimit: {
+                type: 'integer',
+                description: 'SKU-цен, 1–30, по умолчанию 15',
+              },
+              membersLimit: {
+                type: 'integer',
+                description: 'Участников, 1–30, по умолчанию 15',
+              },
+            },
             additionalProperties: false,
           },
         },
@@ -488,6 +692,384 @@ export class AssistantToolsService {
       return this.dashboard.getContentGaps({ scopes });
     }
 
+    if (name === 'list_user_groups') {
+      const page = clampInt(args.page, 1, 1, 100);
+      const limit = clampInt(args.limit, 20, 1, 50);
+      const q = typeof args.q === 'string' ? args.q : undefined;
+      const active =
+        typeof args.active === 'boolean' ? args.active : undefined;
+      const result = await this.userGroups.list({ q, active, page, limit });
+      return {
+        total: result.total,
+        page: result.page,
+        limit: result.limit,
+        adminLink: '/admin/settings/user-groups',
+        items: result.items.map((g) => ({
+          id: g.id,
+          name: g.name,
+          slug: g.slug,
+          kind: userGroupKind(g),
+          active: g.active,
+          assignable: g.assignable,
+          allowCatalogDiscounts: g.allowCatalogDiscounts,
+          allowPromoCodes: g.allowPromoCodes,
+          priceRounding: g.priceRounding,
+          counts: g.counts,
+          adminLink: `/admin/settings/user-groups/${g.id}`,
+        })),
+      };
+    }
+
+    if (name === 'get_user_group') {
+      return this.getUserGroupForAssistant(args);
+    }
+
+    if (name === 'list_discounts') {
+      const page = clampInt(args.page, 1, 1, 100);
+      const limit = clampInt(args.limit, 20, 1, 50);
+      const q = typeof args.q === 'string' ? args.q : undefined;
+      const live = typeof args.live === 'boolean' ? args.live : undefined;
+      const active = typeof args.active === 'boolean' ? args.active : undefined;
+      const result = await this.discounts.list({ q, live, active, page, limit });
+      return {
+        total: result.total,
+        page: result.page,
+        limit: result.limit,
+        adminLink: '/admin/discounts',
+        items: result.items.map((d) => ({
+          id: d.id,
+          name: d.name,
+          scope: d.scope,
+          status: d.status,
+          active: d.active,
+          startsAt: d.startsAt,
+          endsAt: d.endsAt,
+          ruleCount: d.ruleCount,
+          adminLink: `/admin/discounts/${d.id}`,
+        })),
+      };
+    }
+
+    if (name === 'get_discount') {
+      const discountId =
+        typeof args.discountId === 'string' ? args.discountId.trim() : '';
+      if (!discountId) return { error: 'Укажите discountId' };
+      try {
+        const d = await this.discounts.get(discountId);
+        return {
+          discount: {
+            id: d.id,
+            name: d.name,
+            description: d.description,
+            scope: d.scope,
+            status: d.status,
+            active: d.active,
+            startsAt: d.startsAt,
+            endsAt: d.endsAt,
+            categories: d.categories,
+            products: d.products.map((p) => ({
+              ...p,
+              adminLink: `/admin/catalog/products/${p.id}`,
+            })),
+            rules: d.rules.map((r) => ({
+              id: r.id,
+              name: r.name,
+              rewardType: r.rewardType,
+              rewardValue: r.rewardValue,
+              description: r.description,
+            })),
+          },
+          adminLink: `/admin/discounts/${d.id}`,
+        };
+      } catch (e) {
+        if (e instanceof NotFoundException) return { error: 'Кампания не найдена' };
+        throw e;
+      }
+    }
+
+    if (name === 'list_promo_codes') {
+      const page = clampInt(args.page, 1, 1, 100);
+      const limit = clampInt(args.limit, 20, 1, 50);
+      const q = typeof args.q === 'string' ? args.q : undefined;
+      const active = typeof args.active === 'boolean' ? args.active : undefined;
+      const result = await this.promo.list({ q, active, page, limit });
+      return {
+        total: result.total,
+        page: result.page,
+        limit: result.limit,
+        adminLink: '/admin/promo',
+        items: result.items.map((p) => ({
+          id: p.id,
+          code: p.code,
+          type: p.type,
+          value: p.value,
+          active: p.active,
+          startsAt: p.startsAt,
+          endsAt: p.endsAt,
+          maxUses: p.maxUses,
+          oneShot: p.oneShot,
+          minOrderAmount: p.minOrderAmount,
+          usedCount: p.usedCount,
+          adminLink: `/admin/promo/${p.id}`,
+        })),
+      };
+    }
+
+    if (name === 'get_promo_code') {
+      return this.getPromoCodeForAssistant(args);
+    }
+
+    if (name === 'list_catalog_visibility') {
+      const page = clampInt(args.page, 1, 1, 100);
+      const limit = clampInt(args.limit, 20, 1, 50);
+      const mode = typeof args.mode === 'string' ? args.mode : undefined;
+      const targetType =
+        typeof args.targetType === 'string' ? args.targetType : undefined;
+      const groupId = typeof args.groupId === 'string' ? args.groupId.trim() : undefined;
+      const result = await this.userGroups.listAllVisibilityDetailed({
+        mode: mode as never,
+        targetType,
+        groupId,
+        page,
+        limit,
+      });
+      return {
+        total: result.total,
+        page: result.page,
+        limit: result.limit,
+        adminLink: '/admin/settings/user-groups',
+        items: result.items.map((r) => ({
+          id: r.id,
+          mode: r.mode,
+          targetType: r.targetType,
+          targetId: r.targetId,
+          targetLabel: r.targetLabel,
+          groupId: r.groupId,
+          groupName: r.groupName,
+          groupSlug: r.groupSlug,
+          groupAdminLink: r.groupId
+            ? `/admin/settings/user-groups/${r.groupId}?tab=visibility`
+            : null,
+        })),
+      };
+    }
+
     return { error: `Неизвестный tool: ${name}` };
+  }
+
+  private async resolvePromoCodeId(args: Record<string, unknown>): Promise<string | null> {
+    const promoCodeId =
+      typeof args.promoCodeId === 'string' ? args.promoCodeId.trim() : '';
+    if (promoCodeId) return promoCodeId;
+    const codeRaw = typeof args.code === 'string' ? args.code.trim() : '';
+    if (!codeRaw) return null;
+    const row = await this.prisma.promoCode.findFirst({
+      where: { code: { equals: codeRaw, mode: 'insensitive' } },
+      select: { id: true },
+    });
+    return row?.id ?? null;
+  }
+
+  private async getPromoCodeForAssistant(args: Record<string, unknown>): Promise<unknown> {
+    const promoCodeId = await this.resolvePromoCodeId(args);
+    if (!promoCodeId) {
+      return { error: 'Укажите promoCodeId или code' };
+    }
+    const includeRedemptions = args.includeRedemptions === true;
+    const redemptionsLimit = clampInt(args.redemptionsLimit, 10, 1, 20);
+
+    try {
+      const row = await this.promo.get(promoCodeId, {
+        redemptionsPage: 1,
+        redemptionsLimit: includeRedemptions ? redemptionsLimit : 0,
+      });
+      return {
+        promo: {
+          id: row.id,
+          code: row.code,
+          type: row.type,
+          value: row.value,
+          active: row.active,
+          startsAt: row.startsAt,
+          endsAt: row.endsAt,
+          maxUses: row.maxUses,
+          oneShot: row.oneShot,
+          minOrderAmount: row.minOrderAmount,
+          usedCount: row.usedCount,
+          redemptions: includeRedemptions
+            ? row.redemptions.map((r) => ({
+                id: r.id,
+                orderId: r.orderId,
+                orderNumber: r.order?.number ?? null,
+                discountAmount: r.discountAmount,
+                email: maskEmail(r.email),
+                createdAt: r.createdAt,
+              }))
+            : undefined,
+          redemptionsTotal: includeRedemptions ? row.redemptionsTotal : undefined,
+        },
+        adminLink: `/admin/promo/${row.id}`,
+      };
+    } catch (e) {
+      if (e instanceof NotFoundException) return { error: 'Промокод не найден' };
+      throw e;
+    }
+  }
+
+  private parseUserGroupInclude(raw: unknown): UserGroupInclude[] {
+    if (!Array.isArray(raw)) return [];
+    const set = new Set<UserGroupInclude>();
+    for (const v of raw) {
+      if (typeof v === 'string' && (USER_GROUP_INCLUDE as readonly string[]).includes(v)) {
+        set.add(v as UserGroupInclude);
+      }
+    }
+    return [...set];
+  }
+
+  private async resolveUserGroupId(args: Record<string, unknown>): Promise<string | null> {
+    const groupId = typeof args.groupId === 'string' ? args.groupId.trim() : '';
+    if (groupId) return groupId;
+    const slug = typeof args.slug === 'string' ? args.slug.trim().toLowerCase() : '';
+    if (!slug) return null;
+    const row = await this.prisma.userGroup.findFirst({
+      where: { slug },
+      select: { id: true },
+    });
+    return row?.id ?? null;
+  }
+
+  private async getUserGroupForAssistant(args: Record<string, unknown>): Promise<unknown> {
+    const groupId = await this.resolveUserGroupId(args);
+    if (!groupId) {
+      return { error: 'Укажите groupId или slug группы' };
+    }
+
+    let group;
+    try {
+      group = await this.userGroups.one(groupId);
+    } catch (e) {
+      if (e instanceof NotFoundException) {
+        return { error: 'Группа не найдена' };
+      }
+      throw e;
+    }
+
+    const include = this.parseUserGroupInclude(args.include);
+    const out: Record<string, unknown> = {
+      group: {
+        id: group.id,
+        name: group.name,
+        slug: group.slug,
+        kind: userGroupKind(group),
+        active: group.active,
+        assignable: group.assignable,
+        allowCatalogDiscounts: group.allowCatalogDiscounts,
+        allowPromoCodes: group.allowPromoCodes,
+        priceRounding: group.priceRounding,
+        counts: group.counts,
+        membersLabel:
+          group.isDefaultGuest
+            ? 'Авто · все гости'
+            : group.isDefaultRegistered
+              ? 'Авто · все зарег. без группы'
+              : `${group.counts.users} участников`,
+      },
+      adminLinks: {
+        group: `/admin/settings/user-groups/${group.id}`,
+        prices: `/admin/settings/user-groups/${group.id}?tab=prices`,
+        visibility: `/admin/settings/user-groups/${group.id}?tab=visibility`,
+        members: group.assignable
+          ? `/admin/settings/user-groups/${group.id}?tab=members`
+          : null,
+      },
+    };
+
+    if (include.includes('category_prices')) {
+      const cat = await this.userGroups.listCategoryPrices(groupId);
+      out.categoryPrices = {
+        total: cat.items.length,
+        items: cat.items.map((r) => ({
+          categoryId: r.categoryId,
+          categoryName: r.categoryName,
+          categorySlug: r.categorySlug,
+          type: r.type,
+          value: r.value,
+          label: categoryPriceLabel(r.type, r.value),
+        })),
+      };
+    }
+
+    if (include.includes('variant_prices')) {
+      const q =
+        typeof args.variantPricesQ === 'string' ? args.variantPricesQ : undefined;
+      const limit = clampInt(args.variantPricesLimit, 15, 1, 30);
+      const sku = await this.userGroups.listVariantPrices(groupId, {
+        q,
+        page: 1,
+        limit,
+      });
+      out.variantPrices = {
+        total: sku.total,
+        page: sku.page,
+        limit: sku.limit,
+        items: sku.items.map((r) => ({
+          variantId: r.variantId,
+          sku: r.sku,
+          variantName: r.variantName,
+          productId: r.productId,
+          productName: r.productName,
+          basePrice: r.basePrice,
+          groupPrice: r.price,
+          adminLink: `/admin/catalog/products/${r.productId}`,
+        })),
+      };
+    }
+
+    if (include.includes('visibility')) {
+      const vis = await this.userGroups.listGroupVisibility(groupId);
+      out.visibilityRules = {
+        total: vis.items.length,
+        items: vis.items.map((r) => ({
+          id: r.id,
+          mode: r.mode,
+          targetType: r.targetType,
+          targetId: r.targetId,
+          targetLabel: r.targetLabel,
+        })),
+      };
+    }
+
+    if (include.includes('members')) {
+      if (!group.assignable) {
+        out.members = {
+          assignable: false,
+          note: 'Системная группа — участники назначаются автоматически',
+          total: group.counts.users,
+        };
+      } else {
+        const limit = clampInt(args.membersLimit, 15, 1, 30);
+        const members = await this.userGroups.listMembers(groupId, {
+          page: 1,
+          limit,
+        });
+        out.members = {
+          assignable: true,
+          total: members.total,
+          page: members.page,
+          limit: members.limit,
+          items: members.items.map((u) => ({
+            id: u.id,
+            email: maskEmail(u.email),
+            displayName: u.displayName
+              ? `${u.displayName.trim().slice(0, 1)}***`
+              : null,
+            createdAt: u.createdAt,
+          })),
+        };
+      }
+    }
+
+    return out;
   }
 }

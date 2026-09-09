@@ -591,6 +591,35 @@ export class UserGroupsAdminService {
     return { items: rows, total, page, limit };
   }
 
+  /** Список visibility с human-readable targetLabel (admin + assistant). */
+  async listAllVisibilityDetailed(
+    opts: {
+      mode?: CatalogVisibilityMode;
+      targetType?: string;
+      groupId?: string;
+      page?: number;
+      limit?: number;
+    } = {},
+  ) {
+    const pageResult = await this.listAllVisibility(opts);
+    const labels = await this.resolveVisibilityTargetLabels(pageResult.items);
+    return {
+      ...pageResult,
+      items: pageResult.items.map((r) => ({
+        id: r.id,
+        mode: r.mode,
+        targetType: r.targetType,
+        targetId: r.targetId,
+        groupId: r.groupId,
+        groupName: r.group?.name ?? null,
+        groupSlug: r.group?.slug ?? null,
+        targetLabel: labels.get(`${r.targetType}:${r.targetId}`) ?? null,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+      })),
+    };
+  }
+
   async createVisibility(dto: CreateCatalogVisibilityDto) {
     assertGroupModeNeedsGroupId(dto.mode, dto.groupId);
     if (dto.groupId) await this.ensureGroup(dto.groupId);

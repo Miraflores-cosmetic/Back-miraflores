@@ -109,11 +109,8 @@ export const ADMIN_NAV: NavItem[] = [
     id: 'users',
     label: 'Пользователи',
     section: 'users',
-    prefixes: ['/admin/users', '/admin/settings/user-groups'],
-    children: [
-      { href: '/admin/users', label: 'Покупатели', section: 'users' },
-      { href: '/admin/settings/user-groups', label: 'Группы', section: 'users' },
-    ],
+    prefixes: ['/admin/users'],
+    children: [{ href: '/admin/users', label: 'Покупатели', section: 'users' }],
   },
   { type: 'divider' },
   {
@@ -126,11 +123,15 @@ export const ADMIN_NAV: NavItem[] = [
       '/admin/settings/staff/me',
       '/admin/settings/home',
       '/admin/settings/menu',
-      '/admin/settings/user-groups',
     ],
     children: [
       { href: '/admin/settings/seo', label: 'SEO', section: 'settings' },
       { href: '/admin/settings/attributes', label: 'Атрибуты', section: 'settings' },
+      {
+        href: '/admin/settings/user-groups',
+        label: 'Группы пользователей',
+        section: 'users',
+      },
       { href: '/admin/cart', label: 'Корзина', section: 'settings' },
       { href: '/admin/settings/gratitude', label: 'Программа благодарности', section: 'settings' },
       { href: '/admin/settings/staff', label: 'Сотрудники', section: 'staff' },

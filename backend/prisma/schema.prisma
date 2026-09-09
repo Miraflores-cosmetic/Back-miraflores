@@ -904,7 +904,7 @@ model ProductAttributeOption {
   productsAsShelfLife Product[] @relation("ProductShelfLifeAttr")
   productsAsStorage   Product[] @relation("ProductStorageAttr")
 
-  @@unique([kind, label])
+  /// Case-sensitive @@unique нельзя: «Крем»/«крем». CI unique: migration …_label_ci
   @@index([kind, active, sortOrder])
 }
 

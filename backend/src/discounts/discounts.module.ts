@@ -6,6 +6,6 @@ import { DiscountsPublicService } from './discounts-public.service';
 @Module({
   controllers: [DiscountsAdminController],
   providers: [DiscountsAdminService, DiscountsPublicService],
-  exports: [DiscountsPublicService],
+  exports: [DiscountsPublicService, DiscountsAdminService],
 })
 export class DiscountsModule {}

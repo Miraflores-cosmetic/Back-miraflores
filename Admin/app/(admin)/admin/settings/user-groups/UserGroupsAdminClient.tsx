@@ -28,7 +28,7 @@ const GROUPS_HREF = '/admin/settings/user-groups';
 
 type ActiveFilter = 'all' | '1' | '0';
 
-export function UserGroupsAdminClient({ showSettingsBack }: { showSettingsBack: boolean }) {
+export function UserGroupsAdminClient() {
   const router = useRouter();
   const [q, setQ] = useState('');
   const [qDebounced, setQDebounced] = useState('');
@@ -132,11 +132,8 @@ export function UserGroupsAdminClient({ showSettingsBack }: { showSettingsBack: 
     <div className={`${catalogStyles.form} ${catalogStyles.formWide}`}>
       <div className={pn.stickyToolbar}>
         <div className={pn.stickyToolbarMain}>
-          <UserGroupPageNav variant="list" showSettingsBack={showSettingsBack} />
+          <UserGroupPageNav variant="list" />
           <h1 className={pn.stickyToolbarTitle}>Группы пользователей</h1>
-          <p className={catalogStyles.muted} style={{ margin: 0, fontSize: '0.875rem' }}>
-            Цены и видимость каталога по сегментам покупателей.
-          </p>
         </div>
         <div className={pn.stickyToolbarActions}>
           <AdminCompactBtn type="button" variant="accent" onClick={openCreate}>
@@ -209,7 +206,6 @@ export function UserGroupsAdminClient({ showSettingsBack }: { showSettingsBack: 
           <thead>
             <tr>
               <th>Название</th>
-              <th>Slug</th>
               <th>Тип</th>
               <th>Участники</th>
               <th>SKU</th>
@@ -226,7 +222,6 @@ export function UserGroupsAdminClient({ showSettingsBack }: { showSettingsBack: 
                   </Link>
                   {!g.active ? <span className={catalogStyles.muted}> (выкл.)</span> : null}
                 </td>
-                <td>{g.slug}</td>
                 <td>
                   <UserGroupKindBadge group={g} />
                 </td>
