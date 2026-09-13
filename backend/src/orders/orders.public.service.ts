@@ -878,7 +878,10 @@ export class OrdersPublicService {
     );
     if (pending?.externalId) {
       const raw = pending.raw as { confirmationToken?: string } | null;
-      if (raw?.confirmationToken) {
+      // Не отдаём старый confirmationToken, если сумма платежа ≠ order.total
+      // (защита от рассинхрона после правок / повторного pay).
+      const amountOk = Math.round(Number(pending.amount) || 0) === Math.round(order.total);
+      if (raw?.confirmationToken && amountOk) {
         return {
           alreadyPaid: false as const,
           orderId: order.id,
@@ -887,6 +890,13 @@ export class OrdersPublicService {
           paymentId: pending.externalId,
           confirmationToken: raw.confirmationToken,
         };
+      }
+      if (!amountOk) {
+        await this.prisma.payment.update({
+          where: { id: pending.id },
+          data: { status: PaymentStatus.CANCELED },
+        });
+        await this.yookassa.cancelPaymentsBestEffort([pending.externalId]);
       }
     }
 

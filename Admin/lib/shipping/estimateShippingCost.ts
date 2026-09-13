@@ -15,6 +15,7 @@ import {
   filterCdekCourierTariffs,
   filterCdekPvzTariffs,
 } from '@/lib/shipping/cdekPvzTariffs';
+import { CDEK_ORIGIN_CITY_CODE } from '@/lib/shipping/cdekOrigin';
 import type { ShippingSelection } from '@/components/shipping/ShippingCarrierModal';
 import {
   calculateDelivery as calculateYandexDelivery,
@@ -22,8 +23,6 @@ import {
   parseYandexOfferPrice,
 } from '@/lib/shipping/yandexDelivery';
 
-/** Склад отправителя СДЭК: Санкт-Петербург */
-const CDEK_FROM_CITY_CODE = 137;
 const DEFAULT_WEIGHT_G = 2000;
 
 export async function estimateShippingCostRub(
@@ -85,7 +84,7 @@ export async function estimateShippingCostRub(
     if (!picked) return null;
 
     const { tariffs } = await calculateCdekDelivery({
-      fromCityCode: CDEK_FROM_CITY_CODE,
+      fromCityCode: CDEK_ORIGIN_CITY_CODE,
       toCityCode: picked.code,
       weight: DEFAULT_WEIGHT_G,
     });

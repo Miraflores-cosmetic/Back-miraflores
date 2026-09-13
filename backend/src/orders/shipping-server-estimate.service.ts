@@ -239,7 +239,9 @@ export class ShippingServerEstimateService {
     if (!packages.length) return null;
 
     const fromCode = Number.parseInt(
-      this.config.get<string>('CDEK_SHIP_FROM_CITY_CODE') || '44',
+      this.config.get<string>('CDEK_FROM_CITY_CODE') ||
+        this.config.get<string>('CDEK_SHIP_FROM_CITY_CODE') ||
+        '44',
       10,
     );
     const toLocation: Record<string, string | number> = { country_code: 'RU' };

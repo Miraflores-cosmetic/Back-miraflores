@@ -3,7 +3,9 @@
  * перевозчик, dropoff, координаты, id ПВЗ.
  * Пользовательский комментарий — со второй строки (или пусто).
  *
- * Формат: `__JCOS:carrier=cdek|dropoff=pvz|lon=…|lat=…|pvz=…__`
+ * Форматы (эквивалентны по полям):
+ * - `__JCOS:carrier=cdek|dropoff=pvz|lon=…|lat=…|pvz=…__` (пишем так)
+ * - `__VSP:carrier=cdek|…__` (legacy с витрины — только читаем)
  */
 
 export type JcosShippingCarrier = 'cdek' | 'yandex';
@@ -19,9 +21,9 @@ export type JcosAddressMeta = {
 };
 
 function parseMetaFirstLine(first: string): JcosAddressMeta | null {
-  const m = first.match(/^__JCOS:carrier=(cdek|yandex)(.*)__$/);
+  const m = first.match(/^__(?:JCOS|VSP):carrier=(cdek|yandex)(.*)__$/i);
   if (!m) return null;
-  const carrier = m[1] as JcosShippingCarrier;
+  const carrier = m[1].toLowerCase() as JcosShippingCarrier;
   const tail = m[2] || '';
   const meta: JcosAddressMeta = { carrier };
   if (!tail) return meta;

@@ -157,6 +157,7 @@ export class CarrierShipmentService {
       throw new BadRequestException('Нет телефона получателя для СДЭК');
     }
 
+    // Дефолт: Москва, Зеленодольская 36 — ПВЗ MSK12 (CDEK_SHIPMENT_POINT).
     const shipmentPoint = this.config
       .get<string>('CDEK_SHIPMENT_POINT')
       ?.trim();

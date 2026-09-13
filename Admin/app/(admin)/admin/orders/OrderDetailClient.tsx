@@ -1698,10 +1698,10 @@ export function OrderDetailClient({
               <dd>{order.customerNote.trim()}</dd>
             </>
           ) : null}
-          {order.shippingAddress?.comment?.trim() ? (
+          {shippingMeta.comment.trim() ? (
             <>
               <dt>Комментарий к адресу</dt>
-              <dd>{order.shippingAddress.comment.trim()}</dd>
+              <dd>{shippingMeta.comment.trim()}</dd>
             </>
           ) : null}
         </dl>
