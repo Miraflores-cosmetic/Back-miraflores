@@ -8,6 +8,20 @@ const CDEK_API_URL = 'https://api.cdek.ru/v2'
 const CDEK_ACCOUNT = process.env.CDEK_ACCOUNT!
 const CDEK_SECURE = process.env.CDEK_SECURE!
 
+/** Фулфилмент СДЭК — не для checkout с MSK12. */
+const CDEK_EXCLUDED_TARIFF_CODES = new Set<number>([358])
+
+function stripExcludedCdekTariffs<T extends { tariff_code?: number }>(
+  tariffs: T[] | undefined,
+): T[] {
+  if (!Array.isArray(tariffs)) return []
+  return tariffs.filter(
+    (t) =>
+      typeof t.tariff_code !== 'number' ||
+      !CDEK_EXCLUDED_TARIFF_CODES.has(t.tariff_code),
+  )
+}
+
 // ============================================
 // TOKEN CACHE
 // ============================================
@@ -257,6 +271,9 @@ export async function POST(req: NextRequest) {
         body: data,
       })
       const result = await res.json()
+      if (result && Array.isArray(result.tariff_codes)) {
+        result.tariff_codes = stripExcludedCdekTariffs(result.tariff_codes)
+      }
       console.log('CDEK calculator/tarifflist result:', JSON.stringify(result).slice(0, 500))
       return json(result, res.status)
     }
