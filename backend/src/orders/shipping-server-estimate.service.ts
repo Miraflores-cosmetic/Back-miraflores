@@ -15,6 +15,7 @@ type EstimateAddress = {
 };
 
 type CdekTariffRow = {
+  tariff_code?: number;
   delivery_sum?: number;
   total_sum?: number;
   delivery_mode?: number;
@@ -23,6 +24,8 @@ type CdekTariffRow = {
 
 const CDEK_MODE_WAREHOUSE_DOOR = 3;
 const CDEK_MODE_WAREHOUSE_WAREHOUSE = 4;
+/** Фулфилмент СДЭК — не для отправлений с MSK12. */
+const CDEK_EXCLUDED_TARIFF_CODES = new Set<number>([358]);
 
 function parseVspMeta(comment?: string | null): {
   carrier?: string;
@@ -99,13 +102,20 @@ function pickCheapestTariff(
   const list = (data as { tariff_codes?: CdekTariffRow[] }).tariff_codes;
   if (!Array.isArray(list) || list.length === 0) return null;
 
-  const filtered = list.filter((t) => tariffMatchesModes(t, modes));
-  const anyTyped = list.some(
+  const eligible = list.filter(
+    (t) =>
+      typeof t.tariff_code !== 'number' ||
+      !CDEK_EXCLUDED_TARIFF_CODES.has(t.tariff_code),
+  );
+  if (eligible.length === 0) return null;
+
+  const filtered = eligible.filter((t) => tariffMatchesModes(t, modes));
+  const anyTyped = eligible.some(
     (t) =>
       typeof t.delivery_mode === 'number' ||
       /склад\s*[-–—]?\s*(склад|дверь)/i.test(t.tariff_name || ''),
   );
-  const pool = filtered.length > 0 ? filtered : anyTyped ? [] : list;
+  const pool = filtered.length > 0 ? filtered : anyTyped ? [] : eligible;
   if (pool.length === 0) return null;
 
   let min = Infinity;

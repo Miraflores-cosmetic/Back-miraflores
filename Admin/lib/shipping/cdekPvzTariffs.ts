@@ -1,5 +1,12 @@
 import type { CdekTariff } from '@/lib/shipping/types'
-import { CDEK_TARIFFS } from '@/lib/shipping/types'
+import {
+  CDEK_EXCLUDED_TARIFF_CODES,
+  CDEK_TARIFFS,
+} from '@/lib/shipping/types'
+
+function withoutExcluded(tariffs: CdekTariff[]): CdekTariff[] {
+  return tariffs.filter((t) => !CDEK_EXCLUDED_TARIFF_CODES.has(t.tariff_code))
+}
 
 /**
  * Тарифы СДЭК с доставкой до пункта выдачи (склад/дверь отправителя → ПВЗ/постамат).
@@ -23,11 +30,12 @@ function looksLikeDeliveryToPickup(t: CdekTariff): boolean {
 }
 
 export function filterCdekPvzTariffs(tariffs: CdekTariff[]): CdekTariff[] {
-  if (!tariffs.length) return []
-  const byCode = tariffs.filter((t) => PVZ_TARIFF_CODES.has(t.tariff_code))
+  const eligible = withoutExcluded(tariffs)
+  if (!eligible.length) return []
+  const byCode = eligible.filter((t) => PVZ_TARIFF_CODES.has(t.tariff_code))
   if (byCode.length > 0) return byCode
-  const heuristic = tariffs.filter(looksLikeDeliveryToPickup)
-  return heuristic.length > 0 ? heuristic : tariffs
+  const heuristic = eligible.filter(looksLikeDeliveryToPickup)
+  return heuristic.length > 0 ? heuristic : eligible
 }
 
 /**
@@ -50,9 +58,10 @@ function looksLikeCourierToDoor(t: CdekTariff): boolean {
 }
 
 export function filterCdekCourierTariffs(tariffs: CdekTariff[]): CdekTariff[] {
-  if (!tariffs.length) return []
-  const byCode = tariffs.filter((t) => COURIER_TARIFF_CODES.has(t.tariff_code))
+  const eligible = withoutExcluded(tariffs)
+  if (!eligible.length) return []
+  const byCode = eligible.filter((t) => COURIER_TARIFF_CODES.has(t.tariff_code))
   if (byCode.length > 0) return byCode
-  const heuristic = tariffs.filter(looksLikeCourierToDoor)
-  return heuristic.length > 0 ? heuristic : tariffs
+  const heuristic = eligible.filter(looksLikeCourierToDoor)
+  return heuristic.length > 0 ? heuristic : eligible
 }

@@ -503,6 +503,13 @@ export const CDEK_TARIFFS = {
   EXPRESS_PVZ: 366,
   ECONOMY_PVZ: 234,
   ECONOMY_DOOR: 233,
+  /** Фулфилмент СДЭК — не для обычных отправлений с ПВЗ MSK12. */
+  FULFILLMENT_WAREHOUSE: 358,
 } as const
+
+/** Не участвуют в расчёте checkout / server reprice. */
+export const CDEK_EXCLUDED_TARIFF_CODES: ReadonlySet<number> = new Set([
+  CDEK_TARIFFS.FULFILLMENT_WAREHOUSE,
+])
 
 export type CdekTariffCode = (typeof CDEK_TARIFFS)[keyof typeof CDEK_TARIFFS]

@@ -14,6 +14,7 @@ import {
   CdekOrderUpdateRequest,
   CdekDeleteResponse,
   CdekRefusalResponse,
+  CDEK_EXCLUDED_TARIFF_CODES,
   CDEK_TARIFFS,
 } from '@/lib/shipping/types'
 
@@ -179,7 +180,9 @@ export async function calculateDelivery(params: {
 
   const result = await calculateTariffList(request)
 
-  const tariffs = result.tariff_codes || []
+  const tariffs = (result.tariff_codes || []).filter(
+    (t) => !CDEK_EXCLUDED_TARIFF_CODES.has(t.tariff_code),
+  )
   const cheapest = tariffs.length
     ? tariffs.reduce((min, t) => (t.delivery_sum < min.delivery_sum ? t : min), tariffs[0])
     : undefined
