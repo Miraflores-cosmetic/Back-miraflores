@@ -7,6 +7,8 @@ import {
 import { ConfigService } from '@nestjs/config';
 
 const YOOKASSA_API_URL = 'https://api.yookassa.ru/v3';
+/** АУСН / УСН без НДС — «Без НДС» в справочнике ЮKassa (не путать с legacy-кодами 4=20%). */
+const YOOKASSA_RECEIPT_VAT_CODE = 1;
 
 export type YooKassaAmount = { value: string; currency: string };
 
@@ -116,7 +118,7 @@ export class YooKassaService {
           value: i.amountRub.toFixed(2),
           currency: 'RUB',
         },
-        vat_code: 4,
+        vat_code: YOOKASSA_RECEIPT_VAT_CODE,
         payment_mode: 'full_payment',
         payment_subject: 'commodity',
       }));
@@ -200,7 +202,7 @@ export class YooKassaService {
           value: i.amountRub.toFixed(2),
           currency: 'RUB',
         },
-        vat_code: 4,
+        vat_code: YOOKASSA_RECEIPT_VAT_CODE,
         payment_mode: 'full_payment',
         payment_subject: 'commodity',
       }));
