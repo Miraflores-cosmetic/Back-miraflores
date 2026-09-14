@@ -4,7 +4,6 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { AdminListPagination } from '@/components/admin/AdminListPagination/AdminListPagination';
 import { AdminListShell } from '@/components/admin/AdminListShell/AdminListShell';
-import { AdminModal } from '@/components/admin/AdminModal/AdminModal';
 import { AdminSearchBox } from '@/components/SearchBox/SearchBox';
 import {
   AdminBackendRequestError,
@@ -13,6 +12,7 @@ import {
 import { formatAdminDateTime } from '@/lib/adminFormat';
 import type { AdminRetailUserListResponse } from '@/lib/adminUserTypes';
 import styles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
+import { UsersFormsModal } from './UsersFormsModal';
 
 const LIMIT = 20;
 
@@ -136,43 +136,7 @@ export function UsersListClient() {
         </table>
       </AdminListShell>
 
-      <AdminModal
-        open={formsOpen}
-        title="Формы"
-        onClose={() => setFormsOpen(false)}
-      >
-        <div style={{ display: 'grid', gap: 16 }}>
-          <section>
-            <h3 style={{ margin: '0 0 8px', fontSize: 15 }}>1. Подписка (Home)</h3>
-            <p style={{ margin: '0 0 8px', opacity: 0.85, lineHeight: 1.45 }}>
-              Форма на главной в блоке «Кто хочет знать больше». Сохраняет подписчика и, если
-              email уже есть у покупателя, включает маркетинговое согласие в карточке
-              пользователя.
-            </p>
-            <ul style={{ margin: 0, paddingLeft: '1.2em', lineHeight: 1.5 }}>
-              <li>
-                <strong>Email</strong> — обязательное поле, ключ подписки
-              </li>
-              <li>
-                <strong>ФИО</strong> — опционально; подставляется в имя пользователя, если оно
-                пустое
-              </li>
-              <li>
-                <strong>Источник</strong> — сейчас <code>homepage</code>
-              </li>
-              <li>
-                <strong>Дата подписки</strong> — когда отправили форму
-              </li>
-              <li>
-                <strong>Согласие</strong> — текст на форме: «Согласие на маркетинговые письма»
-              </li>
-              <li>
-                Галочка в таблице = согласие в ЛК/профиле <em>или</em> активная запись формы Home
-              </li>
-            </ul>
-          </section>
-        </div>
-      </AdminModal>
+      <UsersFormsModal open={formsOpen} onClose={() => setFormsOpen(false)} />
     </>
   );
 }

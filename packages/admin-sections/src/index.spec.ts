@@ -36,6 +36,8 @@ const ADMIN_API_PATH_SAMPLES = [
   '/api/v1/orders/admin/abc/packing',
   '/api/v1/users/admin',
   '/api/v1/user-groups/admin',
+  '/api/v1/newsletter/admin/stats',
+  '/api/v1/newsletter/admin/export.csv',
   '/api/v1/catalog/admin/visibility',
   '/api/v1/dashboard/admin/summary',
   '/api/v1/discounts/admin',
@@ -51,6 +53,7 @@ describe('isAllowedAdminBackendPath', () => {
     expect(isAllowedAdminBackendPath(['auth', 'admin', 'me'])).toBe(true);
     expect(isAllowedAdminBackendPath(['quiz', 'admin'])).toBe(true);
     expect(isAllowedAdminBackendPath(['assistant', 'admin', 'chat'])).toBe(true);
+    expect(isAllowedAdminBackendPath(['newsletter', 'admin', 'stats'])).toBe(true);
   });
 
   it('отклоняет чужие пути', () => {
@@ -157,6 +160,8 @@ describe('resolveAdminSectionFromApiPath', () => {
       'orders_finance',
     );
     expect(resolveAdminSectionFromApiPath('/api/v1/orders/admin/abc/packing')).toBe('orders');
+    expect(resolveAdminSectionFromApiPath('/api/v1/newsletter/admin/stats')).toBe('users');
+    expect(resolveAdminSectionFromApiPath('/api/v1/newsletter/admin/export.csv')).toBe('users');
   });
 });
 

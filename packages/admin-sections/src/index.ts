@@ -85,6 +85,7 @@ export type AdminApiAccessTarget = AdminSectionId | 'staff' | 'certificates_read
 export const ADMIN_BACKEND_BFF_PREFIXES: ReadonlyArray<readonly [string, string]> = [
   ['catalog', 'admin'],
   ['users', 'admin'],
+  ['newsletter', 'admin'],
   ['dashboard', 'admin'],
   ['discounts', 'admin'],
   ['promo', 'admin'],
@@ -137,6 +138,7 @@ export function resolveAdminSectionFromApiPath(
 
   if (p.includes('/users/admin')) return 'users';
   if (p.includes('/user-groups/admin')) return 'users';
+  if (p.includes('/newsletter/admin')) return 'users';
   if (
     p.includes('/orders/admin/') &&
     (p.endsWith('/mark-paid') || p.endsWith('/refund'))
