@@ -57,20 +57,41 @@ export class UsersAdminService {
           displayName: true,
           isActive: true,
           createdAt: true,
+          marketingConsent: true,
           _count: { select: { orders: true } },
         },
       }),
     ]);
 
+    const emails = rows.map((r) => r.email.toLowerCase());
+    const subscribers =
+      emails.length === 0
+        ? []
+        : await this.prisma.newsletterSubscriber.findMany({
+            where: {
+              email: { in: emails },
+              unsubscribedAt: null,
+            },
+            select: { email: true },
+          });
+    const subSet = new Set(subscribers.map((s) => s.email.toLowerCase()));
+
     return {
-      items: rows.map((r) => ({
-        id: r.id,
-        email: r.email,
-        displayName: r.displayName,
-        isActive: r.isActive,
-        createdAt: r.createdAt,
-        orderCount: r._count.orders,
-      })),
+      items: rows.map((r) => {
+        const email = r.email.toLowerCase();
+        const newsletterSubscribed = subSet.has(email);
+        return {
+          id: r.id,
+          email: r.email,
+          displayName: r.displayName,
+          isActive: r.isActive,
+          createdAt: r.createdAt,
+          orderCount: r._count.orders,
+          marketingConsent: r.marketingConsent,
+          newsletterSubscribed,
+          subscribed: r.marketingConsent || newsletterSubscribed,
+        };
+      }),
       total,
       page,
       limit,
@@ -159,6 +180,17 @@ export class UsersAdminService {
       }),
     ]);
 
+    const newsletter = await this.prisma.newsletterSubscriber.findUnique({
+      where: { email: u.email.toLowerCase() },
+      select: {
+        email: true,
+        name: true,
+        source: true,
+        subscribedAt: true,
+        unsubscribedAt: true,
+      },
+    });
+
     return {
       id: u.id,
       email: u.email,
@@ -180,6 +212,17 @@ export class UsersAdminService {
       ordersPage,
       ordersLimit,
       quiz: this.buildQuizAdminView(quizResultRow, quizEvents),
+      newsletter: newsletter
+        ? {
+            email: newsletter.email,
+            name: newsletter.name,
+            source: newsletter.source,
+            subscribedAt: newsletter.subscribedAt,
+            unsubscribedAt: newsletter.unsubscribedAt,
+            active: !newsletter.unsubscribedAt,
+          }
+        : null,
+      subscribed: u.marketingConsent || Boolean(newsletter && !newsletter.unsubscribedAt),
     };
   }
 

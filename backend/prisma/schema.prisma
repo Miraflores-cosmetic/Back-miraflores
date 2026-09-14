@@ -1232,3 +1232,21 @@ model GiftCertificateLedger {
   @@index([certificateId, createdAt])
   @@index([orderId])
 }
+
+/// Подписка с homepage-формы (email может ещё не быть User).
+model NewsletterSubscriber {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  name           String?
+  source         String    @default("homepage")
+  subscribedAt   DateTime  @default(now())
+  unsubscribedAt DateTime?
+  /// Если покупатель с таким email уже есть / зарегистрировался позже
+  userId         String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([subscribedAt])
+  @@index([userId])
+  @@index([unsubscribedAt])
+}

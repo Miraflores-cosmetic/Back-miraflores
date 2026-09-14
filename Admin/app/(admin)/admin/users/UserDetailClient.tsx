@@ -269,6 +269,27 @@ export function UserDetailClient({ userId }: { userId: string }) {
               </dd>
             </div>
             <div className={styles.detailDlRow}>
+              <dt>Подписка (форма Home)</dt>
+              <dd>
+                {user.newsletter?.active
+                  ? [
+                      'Да',
+                      user.newsletter.name ? `ФИО: ${user.newsletter.name}` : null,
+                      `источник: ${user.newsletter.source}`,
+                      `с ${formatAdminDateTime(user.newsletter.subscribedAt)}`,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')
+                  : user.newsletter
+                    ? `Отписан${
+                        user.newsletter.unsubscribedAt
+                          ? ` · ${formatAdminDateTime(user.newsletter.unsubscribedAt)}`
+                          : ''
+                      }`
+                    : 'Нет'}
+              </dd>
+            </div>
+            <div className={styles.detailDlRow}>
               <dt>Согласие на ПДн</dt>
               <dd>
                 {user.privacyConsentAt

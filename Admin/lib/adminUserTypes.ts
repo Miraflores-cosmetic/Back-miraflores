@@ -5,6 +5,12 @@ export type AdminRetailUser = {
   isActive: boolean;
   createdAt: string;
   orderCount: number;
+  /** Согласие на маркетинг в профиле / ЛК */
+  marketingConsent?: boolean;
+  /** Активная запись homepage-формы NewsletterSubscriber */
+  newsletterSubscribed?: boolean;
+  /** marketingConsent ∪ newsletterSubscribed */
+  subscribed?: boolean;
 };
 
 export type AdminRetailUserListResponse = {
@@ -60,6 +66,15 @@ export type AdminRetailUserDetail = AdminRetailUser & {
   ordersPage: number;
   ordersLimit: number;
   quiz: AdminRetailUserQuiz;
+  newsletter: {
+    email: string;
+    name: string | null;
+    source: string;
+    subscribedAt: string;
+    unsubscribedAt: string | null;
+    active: boolean;
+  } | null;
+  subscribed: boolean;
 };
 
 export type AdminRetailUserQuizSaved = {

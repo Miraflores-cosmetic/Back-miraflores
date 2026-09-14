@@ -24,6 +24,7 @@ import { QuizModule } from './quiz/quiz.module';
 import { AssistantModule } from './assistant/assistant.module';
 import { OnecModule } from './onec/onec.module';
 import { UserGroupsModule } from './user-groups/user-groups.module';
+import { NewsletterModule } from './newsletter/newsletter.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RlsInterceptor } from './rls/rls.interceptor';
 
@@ -64,6 +65,7 @@ import { RlsInterceptor } from './rls/rls.interceptor';
     AssistantModule,
     OnecModule,
     UserGroupsModule,
+    NewsletterModule,
   ],
   controllers: [HealthController],
   providers: [
