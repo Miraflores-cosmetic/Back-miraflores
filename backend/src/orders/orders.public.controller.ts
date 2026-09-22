@@ -84,8 +84,14 @@ export class OrdersPublicController {
   paymentStatus(
     @Param('paymentId') paymentId: string,
     @Query('payToken') payToken?: string,
+    @CurrentUser() user?: { sub?: string; role?: string },
   ) {
-    return this.orders.paymentStatus(paymentId, payToken);
+    const buyerUserId =
+      user?.role === 'USER' && user.sub ? user.sub : null;
+    return this.orders.paymentStatus(paymentId, {
+      payToken,
+      buyerUserId,
+    });
   }
 
   /** Success после 3DS: payToken и/или JWT buyer. */
@@ -107,8 +113,14 @@ export class OrdersPublicController {
   createPayment(
     @Param('orderId') orderId: string,
     @Body() body: OrderPayAccessDto,
+    @CurrentUser() user?: { sub?: string; role?: string },
   ) {
-    return this.orders.createPayment(orderId, body.payToken);
+    const buyerUserId =
+      user?.role === 'USER' && user.sub ? user.sub : null;
+    return this.orders.createPayment(orderId, {
+      payToken: body.payToken,
+      buyerUserId,
+    });
   }
 
   @Post(':orderId/abandon')

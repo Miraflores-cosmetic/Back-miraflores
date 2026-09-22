@@ -49,7 +49,9 @@ export function OrderAddressEditModal({
   const [pending, setPending] = useState<PendingSelection | null>(null);
   const [cost, setCost] = useState('0');
   const [estimating, setEstimating] = useState(false);
+  const [estimateHint, setEstimateHint] = useState<string | null>(null);
   const [notifyCustomer, setNotifyCustomer] = useState(true);
+  const [localError, setLocalError] = useState<string | null>(null);
 
   const seed = useMemo(() => {
     if (!initial) return null;
@@ -79,22 +81,39 @@ export function OrderAddressEditModal({
       setConfirmOpen(false);
       setPending(null);
       setEstimating(false);
+      setEstimateHint(null);
+      setLocalError(null);
     }
   }, [open]);
 
   async function handleCarrierConfirm(selection: ShippingSelection) {
+    if (selection.dropoff === 'pvz' && !selection.pvzId?.trim()) {
+      setLocalError('Выберите пункт выдачи (ПВЗ)');
+      return;
+    }
+    setLocalError(null);
     setPending(selection);
     setNotifyCustomer(true);
     setCost(String(shippingCost ?? 0));
     setConfirmOpen(true);
+    setEstimateHint(null);
     setEstimating(true);
     try {
       const estimated = await estimateShippingCostRub(selection);
       if (estimated != null && estimated >= 0) {
         setCost(String(estimated));
+        setEstimateHint(
+          'Ориентир по тарифу перевозчика — итоговая сумма может отличаться. Можно задать любую.',
+        );
+      } else {
+        setEstimateHint(
+          'Автооценку получить не удалось — укажите стоимость вручную.',
+        );
       }
     } catch {
-      /* keep previous cost */
+      setEstimateHint(
+        'Автооценку получить не удалось — укажите стоимость вручную.',
+      );
     } finally {
       setEstimating(false);
     }
@@ -102,7 +121,14 @@ export function OrderAddressEditModal({
 
   async function save() {
     if (!pending) return;
-    const shippingCostNum = Math.max(0, Math.round(Number(cost) || 0));
+    if (pending.dropoff === 'pvz' && !pending.pvzId?.trim()) {
+      setLocalError('Выберите пункт выдачи (ПВЗ)');
+      return;
+    }
+    const shippingCostNum = Math.max(
+      0,
+      Math.min(500_000, Math.round(Number(cost) || 0)),
+    );
     const comment = buildJcosAddress2WithMeta(
       {
         carrier: pending.carrier,
@@ -143,6 +169,14 @@ export function OrderAddressEditModal({
     setPending(null);
   }
 
+  function backToCarrier() {
+    if (busy) return;
+    setConfirmOpen(false);
+    setPending(null);
+    setEstimateHint(null);
+    setLocalError(null);
+  }
+
   return (
     <>
       <ShippingCarrierModal
@@ -152,6 +186,7 @@ export function OrderAddressEditModal({
           recipientName: customerName ?? undefined,
           phone: customerPhone ?? undefined,
         }}
+        closeAfterConfirm={false}
         onClose={onClose}
         onConfirm={(selection) => void handleCarrierConfirm(selection)}
       />
@@ -159,20 +194,13 @@ export function OrderAddressEditModal({
       <AdminModal
         open={confirmOpen}
         title="Сохранить адрес доставки"
-        onClose={() => {
-          if (busy) return;
-          setConfirmOpen(false);
-          setPending(null);
-        }}
+        onClose={backToCarrier}
         footer={
           <AdminModalActions
-            onCancel={() => {
-              setConfirmOpen(false);
-              setPending(null);
-            }}
+            onCancel={backToCarrier}
             onConfirm={() => void save()}
             confirmLabel={busy ? 'Сохранение…' : 'Сохранить'}
-            confirmDisabled={busy || !pending}
+            confirmDisabled={busy || !pending || estimating}
             cancelLabel="Назад к карте"
           />
         }
@@ -208,7 +236,18 @@ export function OrderAddressEditModal({
               value={cost}
               onChange={(e) => setCost(e.target.value)}
               disabled={busy || estimating}
+              inputMode="numeric"
             />
+            {estimateHint ? (
+              <p className={styles.muted} style={{ margin: '8px 0 0' }}>
+                {estimateHint}
+              </p>
+            ) : null}
+            {localError ? (
+              <p className={styles.error} style={{ margin: '8px 0 0' }}>
+                {localError}
+              </p>
+            ) : null}
             <div className={styles.labelCheckboxRow} style={{ marginTop: 14 }}>
               <AdminCheckbox
                 id="order-address-notify"

@@ -27,6 +27,7 @@ import { GIFT_PARTIAL_REFUND_POLICY } from '@/lib/giftHoldCopy';
 import { OrderAccordion, OrderIconBtn } from './OrderAccordion';
 import { OrderAddressEditModal } from './OrderAddressEditModal';
 import { OrderItemsEditModal } from './OrderItemsEditModal';
+import { OrderShippingCostEditModal } from './OrderShippingCostEditModal';
 import catalogStyles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
 import orderStyles from './orders.module.css';
 
@@ -111,6 +112,7 @@ export function OrderDetailClient({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [addressModalOpen, setAddressModalOpen] = useState(false);
+  const [shippingCostModalOpen, setShippingCostModalOpen] = useState(false);
   const [itemsModalOpen, setItemsModalOpen] = useState(false);
   const [surchargeUrl, setSurchargeUrl] = useState<string | null>(null);
   const [openClient, setOpenClient] = useState(true);
@@ -379,6 +381,38 @@ export function OrderDetailClient({
     }
   }
 
+  async function saveShippingCost(payload: {
+    shippingCost: number;
+    notifyCustomer: boolean;
+  }) {
+    setBusy(true);
+    setError(null);
+    try {
+      const row = await adminBackendJson<EditResult>(
+        `orders/admin/${orderId}/shipping-address`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({
+            shippingCost: payload.shippingCost,
+            notifyCustomer: payload.notifyCustomer,
+          }),
+        },
+      );
+      setOrder(row);
+      setShippingCostModalOpen(false);
+      showFlash('Стоимость доставки обновлена');
+      offerSettleDelta(row);
+    } catch (e) {
+      setError(
+        e instanceof AdminBackendRequestError
+          ? e.message
+          : 'Ошибка сохранения стоимости доставки',
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function saveItems(payload: {
     items: Array<{
       variantId: string | null;
@@ -477,19 +511,19 @@ export function OrderDetailClient({
     canRefund &&
     (order.status === 'SHIPPED' || order.status === 'DELIVERED');
 
-  const methodHint = [
-    order.shippingMethod,
-    shippingMeta.meta
-      ? [
-          carrierLabel(shippingMeta.meta.carrier),
-          dropoffLabel(shippingMeta.meta.dropoff),
-        ]
-          .filter(Boolean)
-          .join(' · ')
-      : null,
-  ]
-    .filter(Boolean)
-    .join(' · ');
+  const methodHint = (() => {
+    if (shippingMeta.meta) {
+      const carrier = carrierLabel(shippingMeta.meta.carrier);
+      const dropoff =
+        dropoffLabel(shippingMeta.meta.dropoff) ||
+        (shippingMeta.meta.pvzId ? 'ПВЗ' : '');
+      return [carrier, dropoff].filter(Boolean).join(' · ') || null;
+    }
+    const m = (order.shippingMethod || '').toUpperCase();
+    if (m === 'YANDEX') return 'Яндекс Доставка';
+    if (m === 'CDEK') return 'СДЭК';
+    return order.shippingMethod || null;
+  })();
 
   const events = order.events ?? [];
   const supportNotes = events.filter((e) => e.type === 'NOTE');
@@ -715,7 +749,16 @@ export function OrderDetailClient({
               </div>
               <div className={styles.detailDlRow}>
                 <dt>Стоимость</dt>
-                <dd>{formatAdminMoney(order.shippingCost)}</dd>
+                <dd className={styles.orderShippingCostDd}>
+                  <span>{formatAdminMoney(order.shippingCost)}</span>
+                  {order.actions.canEditAddress ? (
+                    <OrderIconBtn
+                      label="Изменить стоимость доставки"
+                      disabled={busy}
+                      onClick={() => setShippingCostModalOpen(true)}
+                    />
+                  ) : null}
+                </dd>
               </div>
               {order.shippingAddress?.carrierQuote ? (
                 <div className={styles.detailDlRow}>
@@ -1648,6 +1691,14 @@ export function OrderDetailClient({
         customerPhone={order.phone || order.shippingAddress?.phone}
         onClose={() => setAddressModalOpen(false)}
         onSave={saveAddress}
+      />
+
+      <OrderShippingCostEditModal
+        open={shippingCostModalOpen}
+        shippingCost={order.shippingCost}
+        busy={busy}
+        onClose={() => setShippingCostModalOpen(false)}
+        onSave={saveShippingCost}
       />
 
       <OrderItemsEditModal

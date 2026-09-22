@@ -416,6 +416,34 @@
   margin-bottom: 32px;
 }
 
+.orderListPay {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.orderListPayLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 14px 20px;
+  border-radius: 999px;
+  background: var(--color-black, #000);
+  color: #fff;
+  text-decoration: none;
+  font-size: var(--text-body, 15px);
+  font-weight: 500;
+  text-align: center;
+}
+
+.orderListPayLink:hover {
+  background: #1f1f1f;
+}
+
 .orderLink {
   display: block;
   color: inherit;

@@ -489,6 +489,7 @@ export class AccountService {
         status: true,
         total: true,
         createdAt: true,
+        guestId: true,
         items: {
           select: {
             id: true,
@@ -532,16 +533,48 @@ export class AccountService {
       },
     });
 
-    return orders.map((o) => ({
-      id: o.id,
-      number: o.number,
-      status: o.status,
-      total: o.total,
-      createdAt: o.createdAt,
-      items: this.mapOrderItems(o.items),
-      tracking: o.shipments[0]?.tracking?.trim() || null,
-      trackingProvider: o.shipments[0]?.provider ?? null,
-    }));
+    const needGuestIds = orders.filter(
+      (o) =>
+        (o.status === OrderStatus.AWAITING_PAYMENT ||
+          o.status === OrderStatus.NEW) &&
+        !o.guestId?.trim(),
+    );
+    if (needGuestIds.length > 0) {
+      const { randomUUID } = await import('node:crypto');
+      await Promise.all(
+        needGuestIds.map(async (o) => {
+          const guestId = randomUUID();
+          await this.prisma.order.update({
+            where: { id: o.id },
+            data: { guestId },
+          });
+          o.guestId = guestId;
+        }),
+      );
+    }
+
+    return orders.map((o) => {
+      const canPay =
+        o.status === OrderStatus.AWAITING_PAYMENT || o.status === OrderStatus.NEW;
+      const guestId = o.guestId?.trim() || '';
+      return {
+        id: o.id,
+        number: o.number,
+        status: o.status,
+        total: o.total,
+        createdAt: o.createdAt,
+        items: this.mapOrderItems(o.items),
+        tracking: o.shipments[0]?.tracking?.trim() || null,
+        trackingProvider: o.shipments[0]?.provider ?? null,
+        canPay,
+        payToken: canPay && guestId ? this.payTokens.issue(o.id, guestId) : null,
+        payExpiresAt: canPay
+          ? new Date(
+              o.createdAt.getTime() + this.payTokens.awaitingTtlMinutes() * 60_000,
+            ).toISOString()
+          : null,
+      };
+    });
   }
 
   async getOrder(userId: string, orderId: string) {
@@ -620,12 +653,18 @@ export class AccountService {
 
     const snap = (order.shippingAddress ?? null) as ShippingAddressSnap | null;
     const canPay =
-      (order.status === OrderStatus.AWAITING_PAYMENT ||
-        order.status === OrderStatus.NEW) &&
-      Boolean(order.guestId?.trim());
-    const canCancelUnpaid =
       order.status === OrderStatus.AWAITING_PAYMENT ||
       order.status === OrderStatus.NEW;
+    const canCancelUnpaid = canPay;
+    let guestId = order.guestId?.trim() || '';
+    if (canPay && !guestId) {
+      const { randomUUID } = await import('node:crypto');
+      guestId = randomUUID();
+      await this.prisma.order.update({
+        where: { id: order.id },
+        data: { guestId },
+      });
+    }
     const payExpiresAt = canPay
       ? new Date(
           order.createdAt.getTime() +
@@ -672,11 +711,9 @@ export class AccountService {
       createdAt: order.createdAt,
       shipments: order.shipments,
       items: this.mapOrderItems(order.items),
-      payToken:
-        canPay && order.guestId
-          ? this.payTokens.issue(order.id, order.guestId)
-          : null,
+      payToken: canPay && guestId ? this.payTokens.issue(order.id, guestId) : null,
       payExpiresAt,
+      canPay,
       canCancel: canCancelUnpaid,
     };
   }

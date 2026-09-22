@@ -204,7 +204,7 @@ export class OrdersPublicService {
   }
 
   /**
-   * Доступ к checkout-status: payToken (гость) или JWT buyer (userId заказа).
+   * Доступ к checkout-status / pay: payToken (гость) или JWT buyer (userId заказа).
    * Без одного из двух — 403 (не отдаём number/paid по голому orderId).
    */
   private assertCheckoutStatusAccess(
@@ -223,6 +223,13 @@ export class OrdersPublicService {
     throw new ForbiddenException(
       'Нужен payToken или вход в аккаунт владельца заказа',
     );
+  }
+
+  private assertOrderPayAccess(
+    order: { id: string; guestId: string | null; userId: string | null },
+    opts: { payToken?: string | null; buyerUserId?: string | null },
+  ) {
+    this.assertCheckoutStatusAccess(order, opts);
   }
 
   /**
@@ -830,7 +837,10 @@ export class OrdersPublicService {
   }
 
   /** Создаёт платёж ЮKassa (embedded) для заказа AWAITING_PAYMENT. */
-  async createPayment(orderId: string, payToken?: string | null) {
+  async createPayment(
+    orderId: string,
+    opts: { payToken?: string | null; buyerUserId?: string | null } = {},
+  ) {
     await this.expireStaleAwaitingOrders();
 
     const order = await this.prisma.order.findUnique({
@@ -838,7 +848,7 @@ export class OrdersPublicService {
       include: { items: true, payments: { orderBy: { createdAt: 'desc' }, take: 5 } },
     });
     if (!order) throw new NotFoundException('Заказ не найден');
-    this.assertPayTokenAccess(order, payToken);
+    this.assertOrderPayAccess(order, opts);
 
     if (order.status === OrderStatus.CANCELLED) {
       throw new BadRequestException('Срок оплаты истёк, оформите заказ заново');
@@ -889,6 +899,10 @@ export class OrdersPublicService {
           total: order.total,
           paymentId: pending.externalId,
           confirmationToken: raw.confirmationToken,
+          payToken:
+            order.guestId?.trim()
+              ? this.payTokens.issue(order.id, order.guestId.trim())
+              : null,
         };
       }
       if (!amountOk) {
@@ -904,12 +918,21 @@ export class OrdersPublicService {
       this.config.get<string>('FRONTEND_PUBLIC_URL')?.replace(/\/+$/, '') ||
       'http://localhost:3000';
 
-    // createPayment всегда через assertPayTokenAccess → guestId обязателен.
-    // return_url без payToken: токен живёт в sessionStorage вкладки checkout
-    // (см. Front pendingCheckoutOrder / OrderSuccess).
-    const guestId = order.guestId?.trim() || '';
+    // return_url без payToken: токен живёт в sessionStorage вкладки
+    // (см. Front pendingCheckoutOrder / OrderSuccess). Buyer JWT тоже ок на success.
+    let guestId = order.guestId?.trim() || '';
     if (!guestId) {
-      throw new BadRequestException('Нет guestId для оплаты');
+      const buyerId = opts.buyerUserId?.trim() || '';
+      if (buyerId && order.userId === buyerId) {
+        const { randomUUID } = await import('node:crypto');
+        guestId = randomUUID();
+        await this.prisma.order.update({
+          where: { id: order.id },
+          data: { guestId },
+        });
+      } else {
+        throw new BadRequestException('Нет guestId для оплаты');
+      }
     }
     const returnQs = new URLSearchParams({
       orderId: order.id,
@@ -984,18 +1007,30 @@ export class OrdersPublicService {
       total: order.total,
       paymentId: payment.id,
       confirmationToken,
+      payToken: this.payTokens.issue(order.id, guestId),
     };
   }
 
-  async paymentStatus(externalId: string, payToken?: string | null) {
+  async paymentStatus(
+    externalId: string,
+    opts: { payToken?: string | null; buyerUserId?: string | null } = {},
+  ) {
     const row = await this.prisma.payment.findFirst({
       where: { externalId },
       include: {
-        order: { select: { id: true, number: true, status: true, guestId: true } },
+        order: {
+          select: {
+            id: true,
+            number: true,
+            status: true,
+            guestId: true,
+            userId: true,
+          },
+        },
       },
     });
     if (!row) throw new NotFoundException('Платёж не найден');
-    this.assertPayTokenAccess(row.order, payToken);
+    this.assertOrderPayAccess(row.order, opts);
 
     const remote = await this.yookassa.getPayment(externalId);
     const providerPaid = Boolean(remote.paid || remote.status === 'succeeded');

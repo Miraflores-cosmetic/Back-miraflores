@@ -349,17 +349,17 @@ describe('OrdersPublicService', () => {
         payments: [],
       });
 
-      await expect(service.createPayment('ord1', 'bogus')).rejects.toBeInstanceOf(
-        BadRequestException,
-      );
+      await expect(
+        service.createPayment('ord1', { payToken: 'bogus' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
     });
 
     it('404 если заказ не найден', async () => {
       order.findUnique.mockResolvedValue(null);
       const token = payTokens.issue('missing', 'guest-123456');
-      await expect(service.createPayment('missing', token)).rejects.toBeInstanceOf(
-        NotFoundException,
-      );
+      await expect(
+        service.createPayment('missing', { payToken: token }),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
 
     it('return_url ЮKassa без payToken (только orderId)', async () => {
@@ -368,6 +368,7 @@ describe('OrdersPublicService', () => {
         id: 'ord1',
         number: 'JCOS-1',
         guestId: 'guest-1',
+        userId: null,
         email: 'a@b.co',
         status: OrderStatus.AWAITING_PAYMENT,
         total: 500,
@@ -390,7 +391,7 @@ describe('OrdersPublicService', () => {
         confirmationToken: 'conf-tok',
       });
 
-      await service.createPayment('ord1', token);
+      await service.createPayment('ord1', { payToken: token });
 
       expect(yookassa.createEmbeddedPayment).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -403,6 +404,54 @@ describe('OrdersPublicService', () => {
       const url = new URL(call.returnUrl);
       expect(url.searchParams.get('orderId')).toBe('ord1');
       expect(url.searchParams.get('payToken')).toBeNull();
+    });
+
+    it('JWT владелец может платить без payToken', async () => {
+      order.findUnique.mockResolvedValue({
+        id: 'ord1',
+        number: 'JCOS-1',
+        guestId: 'guest-1',
+        userId: 'buyer-1',
+        email: 'a@b.co',
+        status: OrderStatus.AWAITING_PAYMENT,
+        total: 500,
+        giftPurchaseDenominationId: null,
+        items: [{ title: 'Item', qty: 1, unitPrice: 500 }],
+        payments: [],
+      });
+      payment.create.mockResolvedValue({});
+      yookassa.createEmbeddedPayment.mockResolvedValue({
+        payment: {
+          id: 'yk_pay_1',
+          confirmation: { confirmation_token: 'conf-tok', confirmation_url: null },
+        },
+        confirmationToken: 'conf-tok',
+      });
+
+      const res = await service.createPayment('ord1', { buyerUserId: 'buyer-1' });
+      expect(res).toEqual(
+        expect.objectContaining({
+          confirmationToken: 'conf-tok',
+          paymentId: 'yk_pay_1',
+          payToken: expect.any(String),
+        }),
+      );
+    });
+
+    it('чужой JWT → 403', async () => {
+      order.findUnique.mockResolvedValue({
+        id: 'ord1',
+        guestId: 'guest-1',
+        userId: 'buyer-1',
+        status: OrderStatus.AWAITING_PAYMENT,
+        total: 100,
+        items: [],
+        payments: [],
+      });
+
+      await expect(
+        service.createPayment('ord1', { buyerUserId: 'other' }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
     });
   });
 

@@ -70,6 +70,11 @@ type Props = {
   profileDefaults?: { recipientName?: string; phone?: string } | null;
   onClose: () => void;
   onConfirm: (selection: ShippingSelection) => void;
+  /**
+   * После onConfirm закрывать модалку (default true).
+   * Админка: false — родитель держит open и показывает шаг «стоимость».
+   */
+  closeAfterConfirm?: boolean;
 };
 
 function CloseIcon() {
@@ -100,6 +105,7 @@ export function ShippingCarrierModal({
   profileDefaults = null,
   onClose,
   onConfirm,
+  closeAfterConfirm = true,
 }: Props) {
   const titleId = useId();
   const panelRef = useRef<HTMLElement>(null);
@@ -328,7 +334,7 @@ export function ShippingCarrierModal({
       ...(dropoff === 'pvz' && pvzId?.trim() ? { pvzId: pvzId.trim() } : {}),
     });
     setSubmitting(false);
-    onClose();
+    if (closeAfterConfirm) onClose();
   }
 
   const selectedSummary =

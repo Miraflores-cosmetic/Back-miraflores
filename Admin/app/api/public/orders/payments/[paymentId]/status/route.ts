@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { buyerForwardHeaders } from '@/lib/buyerPublicBff';
 import { getServerApiBase } from '@/lib/serverApiBase';
 
 export const dynamic = 'force-dynamic';
@@ -13,7 +14,7 @@ export async function GET(
   try {
     const res = await fetch(
       `${base}/orders/payments/${encodeURIComponent(params.paymentId)}/status${qs}`,
-      { cache: 'no-store', headers: { Accept: 'application/json' } },
+      { cache: 'no-store', headers: buyerForwardHeaders() },
     );
     const text = await res.text();
     return new NextResponse(text, {

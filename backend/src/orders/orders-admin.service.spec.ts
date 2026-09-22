@@ -100,6 +100,7 @@ const lifecycle = {
   notifyCustomer: vi.fn(async () => undefined),
   notifyOrderRefund: vi.fn(async () => undefined),
   notifyOrderCancelled: vi.fn(async () => undefined),
+  notifyOrderUpdated: vi.fn(async () => undefined),
 };
 
 const yookassa = {
@@ -445,5 +446,156 @@ describe('OrdersAdminService.refund + gift RELEASE', () => {
 
     expect(revokeGiftCertificatesIssuedByPurchaseOrder).not.toHaveBeenCalled();
     expect(order.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('OrdersAdminService.updateShippingAddress', () => {
+  let service: OrdersAdminService;
+
+  beforeEach(() => {
+    order.findUnique.mockReset();
+    order.update.mockReset();
+    payment.findMany.mockReset();
+    payment.findMany.mockResolvedValue([]);
+    payment.updateMany.mockReset();
+    orderEvent.create.mockReset();
+    $queryRaw.mockReset();
+    $queryRaw.mockResolvedValue([{ id: 'o1' }]);
+    lifecycle.addEvent.mockClear();
+    lifecycle.notifyOrderUpdated.mockClear();
+    prisma.$transaction.mockClear();
+    prisma.order.findUnique.mockResolvedValue({
+      ...detailOrder,
+      status: OrderStatus.PAID,
+      shippingCost: 200,
+      total: 1200,
+      shippingMethod: 'CDEK',
+      shippingAddress: {
+        city: 'Москва',
+        address: 'Тверская 1',
+        comment: '__JCOS:carrier=cdek|dropoff=pvz|pvz=MSK1__',
+        pvzCode: 'MSK1',
+      },
+    });
+    service = new OrdersAdminService(
+      prisma as never,
+      lifecycle as never,
+      yookassa as never,
+      {
+        isCdekConfigured: () => false,
+        register: vi.fn(),
+      } as never,
+      { get: vi.fn().mockReturnValue('http://localhost:5173') } as never,
+    );
+  });
+
+  function baseEditableOrder(over: Record<string, unknown> = {}) {
+    return {
+      id: 'o1',
+      number: 'JCOS-1',
+      status: OrderStatus.PAID,
+      email: 'a@b.com',
+      phone: '+7900',
+      giftPurchaseDenominationId: null,
+      shippingCost: 200,
+      subtotal: 1000,
+      discountTotal: 0,
+      giftCertificateAmount: 0,
+      total: 1200,
+      shippingMethod: 'CDEK',
+      shippingAddress: {
+        city: 'Москва',
+        address: 'Тверская 1',
+        apartment: '',
+        region: '',
+        district: '',
+        postalCode: '',
+        comment: '__JCOS:carrier=cdek|dropoff=pvz|pvz=MSK1__',
+        pvzCode: 'MSK1',
+        phone: '',
+        recipientName: '',
+        carrierQuote: { tariffId: 1, tariffName: 'test' },
+      },
+      payments: [],
+      shipments: [],
+      ...over,
+    };
+  }
+
+  it('cost-only: меняет сумму, сохраняет carrierQuote', async () => {
+    order.findUnique.mockResolvedValue(baseEditableOrder());
+    await service.updateShippingAddress('o1', 'admin1', {
+      shippingCost: 350,
+      notifyCustomer: false,
+    });
+    expect(order.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          shippingCost: 350,
+          total: 1350,
+          shippingAddress: expect.objectContaining({
+            carrierQuote: { tariffId: 1, tariffName: 'test' },
+            city: 'Москва',
+          }),
+        }),
+      }),
+    );
+    expect(lifecycle.addEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        message: expect.stringMatching(/Стоимость доставки/i),
+        meta: expect.objectContaining({ costOnly: true }),
+      }),
+    );
+  });
+
+  it('dropoff=pvz без кода → 400', async () => {
+    order.findUnique.mockResolvedValue(baseEditableOrder());
+    await expect(
+      service.updateShippingAddress('o1', 'admin1', {
+        city: 'Москва',
+        address: 'Тверская 1',
+        comment: '__JCOS:carrier=cdek|dropoff=pvz__',
+        pvzCode: '',
+        shippingMethod: 'CDEK',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('comment carrier ≠ method → 400', async () => {
+    order.findUnique.mockResolvedValue(baseEditableOrder());
+    await expect(
+      service.updateShippingAddress('o1', 'admin1', {
+        city: 'Москва',
+        address: 'Тверская 1',
+        comment: '__JCOS:carrier=yandex|dropoff=courier|lon=1|lat=2__',
+        shippingMethod: 'CDEK',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('адрес + ПВЗ: обновляет method/pvz и сбрасывает quote', async () => {
+    order.findUnique.mockResolvedValue(baseEditableOrder());
+    await service.updateShippingAddress('o1', 'admin1', {
+      city: 'Казань',
+      address: 'Баумана 1',
+      comment: '__JCOS:carrier=cdek|dropoff=pvz|pvz=KZN9__',
+      pvzCode: 'KZN9',
+      shippingMethod: 'CDEK',
+      shippingCost: 290,
+    });
+    expect(order.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          shippingCost: 290,
+          shippingMethod: 'CDEK',
+          shippingAddress: expect.objectContaining({
+            city: 'Казань',
+            pvzCode: 'KZN9',
+            carrierQuote: undefined,
+          }),
+        }),
+      }),
+    );
   });
 });

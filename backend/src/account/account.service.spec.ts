@@ -27,6 +27,7 @@ function makePrisma(tx: ReturnType<typeof makeTx>) {
     order: {
       findMany: vi.fn(),
       findFirst: vi.fn(),
+      update: vi.fn(),
     },
     $transaction: vi.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
   };
@@ -204,11 +205,41 @@ describe('AccountService', () => {
     const res = await svc.getOrder('u1', 'o1');
     expect(res.payToken).toBe('tok');
     expect(res.canCancel).toBe(true);
+    expect(res.canPay).toBe(true);
     expect(res.payExpiresAt).toBeTruthy();
     expect(payTokens.issue).toHaveBeenCalledWith('o1', 'guest-1');
     expect(res.shippingAddress).toEqual(
       expect.objectContaining({ city: 'Москва', address: 'Тверская 1' }),
     );
+  });
+
+  it('listOrders синтезирует guestId и отдаёт payToken', async () => {
+    prisma.order.findMany.mockResolvedValue([
+      {
+        id: 'o1',
+        number: 'J-1',
+        status: 'AWAITING_PAYMENT',
+        total: 500,
+        createdAt: new Date(),
+        guestId: null,
+        items: [],
+        shipments: [],
+      },
+    ]);
+    prisma.order.update.mockResolvedValue({});
+
+    const res = await svc.listOrders('u1');
+    expect(prisma.order.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'o1' },
+        data: expect.objectContaining({ guestId: expect.any(String) }),
+      }),
+    );
+    expect(res).toHaveLength(1);
+    expect(res[0].canPay).toBe(true);
+    expect(res[0].payToken).toBe('tok');
+    expect(res[0].payExpiresAt).toBeTruthy();
+    expect(payTokens.issue).toHaveBeenCalled();
   });
 
   it('getOrder → NotFound если заказ не найден', async () => {

@@ -40,6 +40,12 @@ import {
   parseShipmentProvider,
   remainingRefundable,
 } from './order-transitions';
+import {
+  assertCdekPvzCodePresent,
+  assertShippingCommentMatchesCarrier,
+  resolvePvzCode,
+  type CheckoutCarrier,
+} from './order-shipping.resolve';
 import { YooKassaService } from './yookassa.service';
 import {
   assertOrderEditable,
@@ -1442,6 +1448,18 @@ export class OrdersAdminService {
       }
 
       const before = (order.shippingAddress ?? {}) as ShippingAddressSnap;
+      const addressTouched =
+        dto.city !== undefined ||
+        dto.address !== undefined ||
+        dto.apartment !== undefined ||
+        dto.region !== undefined ||
+        dto.district !== undefined ||
+        dto.postalCode !== undefined ||
+        dto.comment !== undefined ||
+        dto.pvzCode !== undefined ||
+        dto.phone !== undefined ||
+        dto.recipientName !== undefined ||
+        dto.shippingMethod !== undefined;
       const after: ShippingAddressSnap = {
         city: dto.city?.trim() ?? before.city ?? '',
         address: dto.address?.trim() ?? before.address ?? '',
@@ -1453,17 +1471,59 @@ export class OrdersAdminService {
         pvzCode: dto.pvzCode?.trim() ?? before.pvzCode ?? '',
         phone: dto.phone?.trim() ?? before.phone ?? '',
         recipientName: dto.recipientName?.trim() ?? before.recipientName ?? '',
-        // Смена адреса сбрасывает старый quote-снимок — пересчёт на клиенте.
-        carrierQuote: undefined,
+        // Только смена адреса сбрасывает quote; правка суммы — оставляем снимок.
+        carrierQuote: addressTouched ? undefined : before.carrierQuote,
       };
       if (!after.city?.trim() || !after.address?.trim()) {
         throw new BadRequestException('Укажите город и адрес');
       }
 
-      const shippingMethod =
+      let shippingMethod =
         dto.shippingMethod != null
           ? parseShipmentProvider(dto.shippingMethod)
           : order.shippingMethod;
+
+      if (addressTouched) {
+        // Синхронизируем pvzCode с мета в comment
+        const resolvedPvz = resolvePvzCode(after.comment, after.pvzCode);
+        if (resolvedPvz) after.pvzCode = resolvedPvz;
+
+        if (
+          /(?:^|\|)dropoff=pvz(?:\||$)/i.test(after.comment || '') &&
+          !resolvePvzCode(after.comment, after.pvzCode)
+        ) {
+          throw new BadRequestException(
+            'Укажите пункт выдачи (код ПВЗ обязателен при доставке в ПВЗ)',
+          );
+        }
+
+        // Метод из comment meta, если DTO method не передан явно
+        const jcosCarrier = (after.comment || '').match(
+          /__(?:JCOS|VSP):carrier=(cdek|yandex)/i,
+        );
+        if (dto.shippingMethod == null && jcosCarrier) {
+          shippingMethod =
+            jcosCarrier[1].toLowerCase() === 'yandex'
+              ? ShipmentProvider.YANDEX
+              : ShipmentProvider.CDEK;
+        }
+
+        if (
+          shippingMethod === ShipmentProvider.CDEK ||
+          shippingMethod === ShipmentProvider.YANDEX
+        ) {
+          assertShippingCommentMatchesCarrier(
+            after.comment,
+            shippingMethod as CheckoutCarrier,
+          );
+        }
+        assertCdekPvzCodePresent({
+          shippingMethod,
+          comment: after.comment,
+          pvzCode: after.pvzCode,
+        });
+      }
+
       const shippingCost =
         dto.shippingCost != null
           ? Math.max(0, Math.round(dto.shippingCost))
@@ -1503,11 +1563,15 @@ export class OrdersAdminService {
         }
       }
 
-      const summary = `Адрес: ${formatAddressOneLine(before) || '—'} → ${formatAddressOneLine(after)}; доставка ${order.shippingCost} → ${shippingCost} ₽; итого ${previousTotal} → ${newTotal} ₽`;
+      const summary = addressTouched
+        ? `Адрес: ${formatAddressOneLine(before) || '—'} → ${formatAddressOneLine(after)}; доставка ${order.shippingCost} → ${shippingCost} ₽; итого ${previousTotal} → ${newTotal} ₽`
+        : `Доставка ${order.shippingCost} → ${shippingCost} ₽; итого ${previousTotal} → ${newTotal} ₽`;
       await this.lifecycle.addEvent(tx, {
         orderId: id,
         type: 'ADDRESS_UPDATED',
-        message: `Адрес обновлён (итого ${previousTotal} → ${newTotal} ₽)`,
+        message: addressTouched
+          ? `Адрес обновлён (итого ${previousTotal} → ${newTotal} ₽)`
+          : `Стоимость доставки изменена (итого ${previousTotal} → ${newTotal} ₽)`,
         actorUserId,
         meta: {
           before,
@@ -1516,6 +1580,7 @@ export class OrdersAdminService {
           total: newTotal,
           shippingCostBefore: order.shippingCost,
           shippingCostAfter: shippingCost,
+          costOnly: !addressTouched,
         },
       });
 

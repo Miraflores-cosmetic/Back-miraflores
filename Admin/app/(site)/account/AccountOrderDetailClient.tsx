@@ -18,6 +18,7 @@ import {
   parseJcosAddressMeta,
 } from '@/lib/shipping/addressShippingMeta';
 import type { BuyerOrderDetail } from './accountTypes';
+import { buyerOrderCanPayNow } from './accountTypes';
 import {
   GIFT_HOLD_ACCOUNT_UNPAID,
   GIFT_HOLD_RESERVED,
@@ -133,7 +134,7 @@ export function AccountOrderDetailClient({ orderId }: Props) {
   }
 
   async function startPayment() {
-    if (!order?.payToken) {
+    if (!order || !buyerOrderCanPayNow(order)) {
       setError('Оплата недоступна для этого заказа');
       return;
     }
@@ -167,10 +168,7 @@ export function AccountOrderDetailClient({ orderId }: Props) {
   const payToken = payment.payToken || order.payToken;
   const checkPaid = payment.checkPaid;
 
-  const canPay =
-    !paid &&
-    (order.status === 'AWAITING_PAYMENT' || order.status === 'NEW') &&
-    Boolean(order.payToken);
+  const canPay = !paid && buyerOrderCanPayNow(order);
   const showWidget = payment.showWidget;
   const payExpiresLabel = order.payExpiresAt
     ? formatOrderDate(order.payExpiresAt)

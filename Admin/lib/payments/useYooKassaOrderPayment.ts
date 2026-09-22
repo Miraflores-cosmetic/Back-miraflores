@@ -10,6 +10,8 @@ export type PayStartResult = {
   total?: number;
   paymentId?: string;
   confirmationToken?: string;
+  /** HMAC для poll status (если pay шёл по JWT buyer). */
+  payToken?: string | null;
   message?: string | string[];
 };
 
@@ -32,7 +34,7 @@ function writePendingSession(input: {
   orderId: string;
   number: string;
   paymentId?: string;
-  payToken?: string;
+  payToken?: string | null;
   confirmed?: boolean;
 }) {
   try {
@@ -64,8 +66,15 @@ export function clearPendingPaymentSession() {
   }
 }
 
+function paymentStatusUrl(paymentId: string, payToken?: string | null): string {
+  const base = `/api/public/orders/payments/${encodeURIComponent(paymentId)}/status`;
+  const token = payToken?.trim();
+  return token ? `${base}?payToken=${encodeURIComponent(token)}` : base;
+}
+
 /**
  * Общий поток: POST …/pay → confirmationToken + poll status.
+ * payToken опционален: владелец заказа может платить по JWT (BFF прокидывает cookie).
  * Используется checkout / account / certificates.
  */
 export function useYooKassaOrderPayment(opts: Options) {
@@ -104,12 +113,11 @@ export function useYooKassaOrderPayment(opts: Options) {
       (typeof sessionStorage !== 'undefined'
         ? sessionStorage.getItem('miraflores.pendingPayToken')
         : null);
-    if (!token) return false;
     try {
-      const res = await fetch(
-        `/api/public/orders/payments/${encodeURIComponent(paymentId)}/status?payToken=${encodeURIComponent(token)}`,
-        { cache: 'no-store' },
-      );
+      const res = await fetch(paymentStatusUrl(paymentId, token), {
+        cache: 'no-store',
+        credentials: 'same-origin',
+      });
       const data = (await res.json().catch(() => ({}))) as {
         paid?: boolean;
         number?: string;
@@ -117,8 +125,7 @@ export function useYooKassaOrderPayment(opts: Options) {
         message?: string;
       };
       if (!res.ok || !data.paid) {
-        // Не спамим onError при обычном poll «ещё не оплачено»
-        if (!res.ok && data.message) onErrorRef.current?.(data.message);
+        if (!res.ok && data.message) onErrorRef.current?.(String(data.message));
         return false;
       }
       markPaid({
@@ -133,9 +140,10 @@ export function useYooKassaOrderPayment(opts: Options) {
   }, [markPaid, orderMeta?.number, orderMeta?.orderId, payToken, paymentId]);
 
   const startPay = useCallback(
-    async (orderId: string, token: string) => {
+    async (orderId: string, token?: string | null) => {
       setBusy(true);
       try {
+        const payTokenTrim = token?.trim() || '';
         const res = await fetch(
           `/api/public/orders/${encodeURIComponent(orderId)}/pay`,
           {
@@ -144,8 +152,9 @@ export function useYooKassaOrderPayment(opts: Options) {
               Accept: 'application/json',
               'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ payToken: token }),
+            body: JSON.stringify(payTokenTrim ? { payToken: payTokenTrim } : {}),
             cache: 'no-store',
+            credentials: 'same-origin',
           },
         );
         const data = (await res.json().catch(() => ({}))) as PayStartResult;
@@ -153,7 +162,8 @@ export function useYooKassaOrderPayment(opts: Options) {
           onErrorRef.current?.(readApiError(data, 'Не удалось создать платёж'));
           return null;
         }
-        setPayToken(token);
+        const sessionToken = data.payToken?.trim() || payTokenTrim || null;
+        setPayToken(sessionToken);
         setOrderMeta({ orderId: data.orderId, number: data.number });
 
         if (data.alreadyPaid) {
@@ -161,7 +171,7 @@ export function useYooKassaOrderPayment(opts: Options) {
             writePendingSession({
               orderId: data.orderId,
               number: data.number,
-              payToken: token,
+              payToken: sessionToken,
               confirmed: true,
             });
           }
@@ -181,7 +191,7 @@ export function useYooKassaOrderPayment(opts: Options) {
             orderId: data.orderId,
             number: data.number,
             paymentId: data.paymentId,
-            payToken: token,
+            payToken: sessionToken,
           });
         }
         return data;

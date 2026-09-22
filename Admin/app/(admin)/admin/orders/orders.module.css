@@ -427,6 +427,13 @@
   cursor: not-allowed;
 }
 
+.orderShippingCostDd {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .orderAddressConfirm {
   display: flex;
   flex-direction: column;

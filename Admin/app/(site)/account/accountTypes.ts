@@ -48,7 +48,23 @@ export type BuyerOrder = {
   items: BuyerOrderItem[];
   tracking?: string | null;
   trackingProvider?: string | null;
+  /** Неоплаченный заказ: можно открыть виджет ЮKassa */
+  canPay?: boolean;
+  payToken?: string | null;
+  /** ISO: до какого момента ждать оплату (TTL). */
+  payExpiresAt?: string | null;
 };
+
+/** UI: canPay с бэка + не истёк TTL (если есть payExpiresAt). */
+export function buyerOrderCanPayNow(order: {
+  canPay?: boolean;
+  payExpiresAt?: string | null;
+}): boolean {
+  if (!order.canPay) return false;
+  if (!order.payExpiresAt) return true;
+  const ts = Date.parse(order.payExpiresAt);
+  return Number.isFinite(ts) ? ts > Date.now() : true;
+}
 
 export type BuyerOrderDetail = BuyerOrder & {
   email: string;
@@ -75,6 +91,7 @@ export type BuyerOrderDetail = BuyerOrder & {
   payToken: string | null;
   /** ISO: до какого момента ждать оплату (TTL). */
   payExpiresAt?: string | null;
+  canPay?: boolean;
   canCancel?: boolean;
   refundedAmount?: number;
   shipments?: Array<{

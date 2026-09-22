@@ -8,6 +8,7 @@ import {
   orderStatusBadgeClass,
 } from '@/lib/orderStatusLabels';
 import type { BuyerOrder } from './accountTypes';
+import { buyerOrderCanPayNow } from './accountTypes';
 import styles from './AccountPage.module.css';
 
 type Tab = 'all' | 'delivered' | 'process' | 'cancelled' | 'refunded';
@@ -133,66 +134,95 @@ export function AccountOrdersClient() {
                 : 'Нет заказов в этом статусе'}
             </p>
           ) : (
-            filtered.map((order) => (
-              <Link
-                key={order.id}
-                href={`/account/orders/${encodeURIComponent(order.id)}`}
-                className={[styles.orderGroup, styles.orderLink].join(' ')}
-                scroll={false}
-              >
-                <div className={styles.orderHead}>
-                  <div>
-                    <p className={styles.orderDate}>
-                      {formatOrderDate(order.createdAt)}
-                    </p>
-                    <p className={styles.orderNumber}>{order.number}</p>
-                    {order.tracking ? (
-                      <p className={styles.orderTracking}>
-                        Трек {order.tracking}
-                      </p>
-                    ) : null}
-                  </div>
-                  <div className={styles.orderHeadRight}>
-                    <span
-                      className={`${styles.badge} ${orderStatusBadgeClass(order.status, styles)}`}
-                    >
-                      {orderStatusLabel(order.status)}
-                    </span>
-                  </div>
-                </div>
-                <ul className={styles.itemList}>
-                  {order.items.map((item) => (
-                    <li key={item.id} className={styles.itemCard}>
-                      <div className={styles.itemThumb}>
-                        {item.imageUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            className={styles.itemThumbImg}
-                            src={item.imageUrl}
-                            alt=""
-                          />
+            filtered.map((order) => {
+              const canPay = buyerOrderCanPayNow(order);
+              return (
+                <article key={order.id} className={styles.orderGroup}>
+                  <Link
+                    href={`/account/orders/${encodeURIComponent(order.id)}`}
+                    className={styles.orderLink}
+                    scroll={false}
+                  >
+                    <div className={styles.orderHead}>
+                      <div>
+                        <p className={styles.orderDate}>
+                          {formatOrderDate(order.createdAt)}
+                        </p>
+                        <p className={styles.orderNumber}>{order.number}</p>
+                        {order.tracking ? (
+                          <p className={styles.orderTracking}>
+                            Трек {order.tracking}
+                          </p>
                         ) : null}
                       </div>
-                      <div className={styles.itemInfo}>
-                        <p className={styles.itemTitle}>{item.title}</p>
-                        <p className={styles.itemSub}>
-                          {[item.subtitle, item.qty > 1 ? `× ${item.qty}` : null]
-                            .filter(Boolean)
-                            .join(' · ') || item.sku}
-                        </p>
+                      <div className={styles.orderHeadRight}>
+                        <span
+                          className={`${styles.badge} ${orderStatusBadgeClass(order.status, styles)}`}
+                        >
+                          {orderStatusLabel(order.status)}
+                        </span>
                       </div>
-                      <p className={styles.itemPrice}>
-                        {formatRub(item.lineTotal)}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-                <p className={styles.orderTotal}>
-                  <span>Итого</span>
-                  <span>{formatRub(order.total)}</span>
-                </p>
-              </Link>
-            ))
+                    </div>
+                    <ul className={styles.itemList}>
+                      {order.items.map((item) => (
+                        <li key={item.id} className={styles.itemCard}>
+                          <div className={styles.itemThumb}>
+                            {item.imageUrl ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                className={styles.itemThumbImg}
+                                src={item.imageUrl}
+                                alt=""
+                              />
+                            ) : null}
+                          </div>
+                          <div className={styles.itemInfo}>
+                            <p className={styles.itemTitle}>{item.title}</p>
+                            <p className={styles.itemSub}>
+                              {[
+                                item.subtitle,
+                                item.qty > 1 ? `× ${item.qty}` : null,
+                              ]
+                                .filter(Boolean)
+                                .join(' · ') || item.sku}
+                            </p>
+                          </div>
+                          <p className={styles.itemPrice}>
+                            {formatRub(item.lineTotal)}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                    <p className={styles.orderTotal}>
+                      <span>Итого</span>
+                      <span>{formatRub(order.total)}</span>
+                    </p>
+                  </Link>
+                  {canPay ? (
+                    <div className={styles.orderListPay}>
+                      <Link
+                        href={`/account/orders/${encodeURIComponent(order.id)}`}
+                        className={styles.orderListPayLink}
+                        scroll={false}
+                      >
+                        Оплатить {formatRub(order.total)}
+                      </Link>
+                      {order.payExpiresAt ? (
+                        <p className={styles.orderMetaComment}>
+                          до{' '}
+                          {new Date(order.payExpiresAt).toLocaleString('ru-RU', {
+                            day: 'numeric',
+                            month: 'short',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </article>
+              );
+            })
           )}
         </>
       )}

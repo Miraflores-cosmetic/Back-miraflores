@@ -64,13 +64,16 @@ export function YooKassaWidget({
 
   const verifyPaymentStatus = useCallback(async () => {
     const id = paymentIdRef.current;
-    const token = payTokenRef.current?.trim();
-    if (!id || !token) return false;
+    if (!id) return false;
+    const token = payTokenRef.current?.trim() || '';
     try {
-      const res = await fetch(
-        `/api/public/orders/payments/${encodeURIComponent(id)}/status?payToken=${encodeURIComponent(token)}`,
-        { cache: 'no-store' },
-      );
+      const url = token
+        ? `/api/public/orders/payments/${encodeURIComponent(id)}/status?payToken=${encodeURIComponent(token)}`
+        : `/api/public/orders/payments/${encodeURIComponent(id)}/status`;
+      const res = await fetch(url, {
+        cache: 'no-store',
+        credentials: 'same-origin',
+      });
       if (!res.ok) return false;
       const data = (await res.json()) as { status?: string; paid?: boolean };
       if (data.status === 'succeeded' || data.paid) {

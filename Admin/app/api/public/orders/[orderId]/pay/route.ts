@@ -1,20 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { buyerForwardHeaders } from '@/lib/buyerPublicBff';
 import { getServerApiBase } from '@/lib/serverApiBase';
 
 export const dynamic = 'force-dynamic';
 
-async function proxy(path: string, init?: RequestInit) {
+export async function POST(
+  request: NextRequest,
+  { params }: { params: { orderId: string } },
+) {
   const base = getServerApiBase();
   try {
-    const res = await fetch(`${base}/${path.replace(/^\//, '')}`, {
-      ...init,
-      cache: 'no-store',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        ...(init?.headers ?? {}),
+    const body = await request.text();
+    const res = await fetch(
+      `${base}/orders/${encodeURIComponent(params.orderId)}/pay`,
+      {
+        method: 'POST',
+        cache: 'no-store',
+        headers: buyerForwardHeaders({ 'Content-Type': 'application/json' }),
+        body: body || '{}',
       },
-    });
+    );
     const text = await res.text();
     return new NextResponse(text, {
       status: res.status,
@@ -26,15 +31,4 @@ async function proxy(path: string, init?: RequestInit) {
   } catch {
     return NextResponse.json({ message: 'Сервис недоступен' }, { status: 502 });
   }
-}
-
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { orderId: string } },
-) {
-  const body = await request.text();
-  return proxy(`orders/${encodeURIComponent(params.orderId)}/pay`, {
-    method: 'POST',
-    body: body || '{}',
-  });
 }
