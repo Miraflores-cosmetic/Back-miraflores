@@ -234,7 +234,7 @@ export function OrderAddressEditModal({
                   : 'Стоимость доставки, ₽'
               }
               value={cost}
-              onChange={(e) => setCost(e.target.value)}
+              onChange={(e) => setCost(e.target.value.replace(/[^\d]/g, ''))}
               disabled={busy || estimating}
               inputMode="numeric"
             />

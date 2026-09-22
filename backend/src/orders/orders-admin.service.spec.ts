@@ -4,11 +4,22 @@ import { OrderStatus } from '@prisma/client';
 import { OrdersAdminService } from './orders-admin.service';
 
 const releaseGiftCertificateForOrder = vi.fn(async () => true);
+const holdGiftCertificateForOrder = vi.fn(async () => ({
+  certificateId: 'gc1',
+  code: 'GIFT',
+  faceValue: 1000,
+  balance: 500,
+  applyAmount: 500,
+  payableBeforeGift: 500,
+  total: 0,
+}));
 const revokeGiftCertificatesIssuedByPurchaseOrder = vi.fn(async () => 1);
 
 vi.mock('../gift-certificates/gift-certificate-hold.util', () => ({
   releaseGiftCertificateForOrder: (...args: unknown[]) =>
     releaseGiftCertificateForOrder(...args),
+  holdGiftCertificateForOrder: (...args: unknown[]) =>
+    holdGiftCertificateForOrder(...args),
 }));
 
 vi.mock('../gift-certificates/gift-certificate-purchase.util', async (importOriginal) => {
@@ -25,6 +36,10 @@ vi.mock('../gift-certificates/gift-certificate-purchase.util', async (importOrig
 const order = {
   findUnique: vi.fn(),
   update: vi.fn(),
+};
+const orderItem = {
+  deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+  createMany: vi.fn().mockResolvedValue({ count: 0 }),
 };
 const giftCertificate = {
   findMany: vi.fn().mockResolvedValue([]),
@@ -43,12 +58,14 @@ const promoCodeRedemption = {
 };
 const productVariant = {
   update: vi.fn(),
+  findUnique: vi.fn(),
 };
 const $executeRaw = vi.fn();
 const $queryRaw = vi.fn().mockResolvedValue([{ id: 'o1' }]);
 
 const tx = {
   order,
+  orderItem,
   payment,
   orderEvent,
   promoCodeRedemption,
@@ -597,5 +614,261 @@ describe('OrdersAdminService.updateShippingAddress', () => {
         }),
       }),
     );
+  });
+});
+
+describe('OrdersAdminService.updateItems', () => {
+  let service: OrdersAdminService;
+
+  beforeEach(() => {
+    order.findUnique.mockReset();
+    order.update.mockReset();
+    orderItem.deleteMany.mockReset();
+    orderItem.createMany.mockReset();
+    orderItem.deleteMany.mockResolvedValue({ count: 1 });
+    orderItem.createMany.mockResolvedValue({ count: 1 });
+    payment.findMany.mockReset();
+    payment.findMany.mockResolvedValue([]);
+    payment.updateMany.mockReset();
+    productVariant.findUnique.mockReset();
+    $queryRaw.mockReset();
+    $queryRaw.mockResolvedValue([{ id: 'o1' }]);
+    releaseGiftCertificateForOrder.mockClear();
+    releaseGiftCertificateForOrder.mockResolvedValue(true);
+    holdGiftCertificateForOrder.mockClear();
+    holdGiftCertificateForOrder.mockResolvedValue({
+      certificateId: 'gc1',
+      code: 'GIFT',
+      faceValue: 1000,
+      balance: 500,
+      applyAmount: 200,
+      payableBeforeGift: 200,
+      total: 0,
+    });
+    lifecycle.addEvent.mockClear();
+    lifecycle.notifyOrderUpdated.mockClear();
+    prisma.$transaction.mockClear();
+    prisma.order.findUnique.mockResolvedValue({
+      ...detailOrder,
+      status: OrderStatus.PAID,
+      discountTotal: 0,
+      giftCertificateAmount: 0,
+      shippingCost: 0,
+      total: 1000,
+      items: [
+        {
+          id: 'i1',
+          title: 'X',
+          sku: 's',
+          qty: 1,
+          unitPrice: 1000,
+          lineTotal: 1000,
+        },
+      ],
+    });
+    service = new OrdersAdminService(
+      prisma as never,
+      lifecycle as never,
+      yookassa as never,
+      {
+        isCdekConfigured: () => false,
+        register: vi.fn(),
+      } as never,
+      { get: vi.fn().mockReturnValue('http://localhost:5173') } as never,
+    );
+  });
+
+  function baseItemsOrder(over: Record<string, unknown> = {}) {
+    return {
+      id: 'o1',
+      number: 'JCOS-1',
+      status: OrderStatus.PAID,
+      email: 'a@b.com',
+      phone: '+7900',
+      giftPurchaseDenominationId: null,
+      giftCertificateId: null,
+      giftCertificateCode: null,
+      giftCertificateAmount: 0,
+      shippingCost: 200,
+      subtotal: 1000,
+      discountTotal: 0,
+      total: 1200,
+      payments: [],
+      items: [
+        {
+          id: 'i1',
+          title: 'Serum',
+          sku: 'SKU-1',
+          qty: 1,
+          unitPrice: 1000,
+          lineTotal: 1000,
+          variantId: 'v1',
+          shadeId: 'sh1',
+          isGratitudeGift: false,
+        },
+      ],
+      ...over,
+    };
+  }
+
+  it('сохраняет shadeId при replace', async () => {
+    order.findUnique.mockResolvedValue(baseItemsOrder());
+    await service.updateItems('o1', 'admin1', {
+      items: [
+        {
+          variantId: null,
+          shadeId: 'sh1',
+          qty: 1,
+          unitPrice: 1000,
+          title: 'Serum',
+          sku: 'SKU-1',
+        },
+      ],
+      notifyCustomer: false,
+    });
+    expect(orderItem.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: [
+          expect.objectContaining({
+            shadeId: 'sh1',
+            title: 'Serum',
+            unitPrice: 1000,
+          }),
+        ],
+      }),
+    );
+    expect(order.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          subtotal: 1000,
+          total: 1200,
+        }),
+      }),
+    );
+  });
+
+  it('clamp: discount + gift к новому subtotal', async () => {
+    order.findUnique.mockResolvedValue(
+      baseItemsOrder({
+        discountTotal: 500,
+        giftCertificateAmount: 800,
+        giftCertificateId: 'gc1',
+        giftCertificateCode: 'GIFT',
+        shippingCost: 100,
+        total: 0,
+        items: [
+          {
+            id: 'i1',
+            title: 'Serum',
+            sku: 'SKU-1',
+            qty: 2,
+            unitPrice: 1000,
+            lineTotal: 2000,
+            variantId: null,
+            shadeId: null,
+            isGratitudeGift: false,
+          },
+        ],
+      }),
+    );
+    // Новый состав: subtotal 400 → discount clamp 400, gift max = 0+100 = 100
+    await service.updateItems('o1', 'admin1', {
+      items: [
+        {
+          variantId: null,
+          qty: 1,
+          unitPrice: 400,
+          title: 'Serum',
+          sku: 'SKU-1',
+        },
+      ],
+      notifyCustomer: false,
+    });
+    expect(order.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          subtotal: 400,
+          discountTotal: 400,
+          giftCertificateAmount: 100,
+          // total = 400 - 400 - 100 + 100 = 0
+          total: 0,
+        }),
+      }),
+    );
+  });
+
+  it('unpaid: пересчёт hold при clamp gift', async () => {
+    order.findUnique.mockResolvedValue(
+      baseItemsOrder({
+        status: OrderStatus.AWAITING_PAYMENT,
+        discountTotal: 0,
+        giftCertificateAmount: 900,
+        giftCertificateId: 'gc1',
+        giftCertificateCode: 'GIFT',
+        shippingCost: 100,
+        subtotal: 1000,
+        total: 200,
+      }),
+    );
+    await service.updateItems('o1', 'admin1', {
+      items: [
+        {
+          variantId: null,
+          qty: 1,
+          unitPrice: 300,
+          title: 'Serum',
+          sku: 'SKU-1',
+        },
+      ],
+      notifyCustomer: false,
+    });
+    // maxGift = 300 - 0 + 100 = 400 → gift clamped 400 (from 900)
+    expect(releaseGiftCertificateForOrder).toHaveBeenCalledWith(
+      tx,
+      'o1',
+      expect.objectContaining({ note: expect.stringMatching(/состав/i) }),
+    );
+    expect(holdGiftCertificateForOrder).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        certificateId: 'gc1',
+        orderId: 'o1',
+        applyAmount: 400,
+      }),
+    );
+    expect(order.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          subtotal: 300,
+          giftCertificateAmount: 400,
+          total: 0,
+        }),
+      }),
+    );
+  });
+
+  it('блокирует пустой состав', async () => {
+    await expect(
+      service.updateItems('o1', 'admin1', { items: [] }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('блокирует заказ сертификата', async () => {
+    order.findUnique.mockResolvedValue(
+      baseItemsOrder({ giftPurchaseDenominationId: 'den1' }),
+    );
+    await expect(
+      service.updateItems('o1', 'admin1', {
+        items: [
+          {
+            variantId: null,
+            qty: 1,
+            unitPrice: 100,
+            title: 'X',
+            sku: 's',
+          },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

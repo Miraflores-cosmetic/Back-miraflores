@@ -22,7 +22,7 @@ import { applyPaidInTx } from './mark-order-paid';
 import { cancelUnpaidOrderInTx } from './cancel-unpaid-order';
 import { CarrierShipmentService } from './carrier-shipment.service';
 import { OrderLifecycleService } from './order-lifecycle.service';
-import { releaseGiftCertificateForOrder } from '../gift-certificates/gift-certificate-hold.util';
+import { releaseGiftCertificateForOrder, holdGiftCertificateForOrder } from '../gift-certificates/gift-certificate-hold.util';
 import {
   analyzeGiftPurchaseSpend,
   assertGiftPurchaseCodesUnusedForRefund,
@@ -1647,11 +1647,56 @@ export class OrdersAdminService {
 
       const resolved = await this.resolveAdminItemLines(tx, dto.items);
       const subtotal = resolved.reduce((s, l) => s + l.lineTotal, 0);
+
+      // Промо и сертификат «заморожены» при создании — clamp к новому составу.
+      const discountTotal = Math.min(
+        Math.max(0, order.discountTotal),
+        subtotal,
+      );
+      const maxGift = Math.max(
+        0,
+        subtotal - discountTotal + Math.max(0, order.shippingCost),
+      );
+      let giftCertificateAmount = Math.min(
+        Math.max(0, order.giftCertificateAmount),
+        maxGift,
+      );
+      let giftCertificateId = order.giftCertificateId;
+      let giftCertificateCode = order.giftCertificateCode;
+
+      if (
+        isUnpaidEditableStatus(order.status) &&
+        order.giftCertificateId &&
+        giftCertificateAmount !== order.giftCertificateAmount
+      ) {
+        await releaseGiftCertificateForOrder(tx, id, {
+          note: 'Пересчёт при изменении состава',
+        });
+        if (giftCertificateAmount > 0) {
+          await holdGiftCertificateForOrder(tx, {
+            certificateId: order.giftCertificateId,
+            orderId: id,
+            applyAmount: giftCertificateAmount,
+          });
+        } else {
+          giftCertificateId = null;
+          giftCertificateCode = null;
+          giftCertificateAmount = 0;
+        }
+      } else if (
+        giftCertificateAmount <= 0 &&
+        isUnpaidEditableStatus(order.status)
+      ) {
+        giftCertificateId = null;
+        giftCertificateCode = null;
+        giftCertificateAmount = 0;
+      }
+
       previousTotal = order.total;
       newTotal = recalcOrderTotal({
         subtotal,
-        discountTotal: order.discountTotal,
-        giftCertificateAmount: order.giftCertificateAmount,
+        discountTotal,
+        giftCertificateAmount,
         shippingCost: order.shippingCost,
       });
 
@@ -1687,7 +1732,14 @@ export class OrdersAdminService {
 
       await tx.order.update({
         where: { id },
-        data: { subtotal, total: newTotal },
+        data: {
+          subtotal,
+          total: newTotal,
+          discountTotal,
+          giftCertificateAmount,
+          giftCertificateId,
+          giftCertificateCode,
+        },
       });
 
       if (isUnpaidEditableStatus(order.status) && newTotal !== previousTotal) {
@@ -1720,12 +1772,15 @@ export class OrdersAdminService {
         meta: {
           previousTotal,
           newTotal,
+          discountTotal,
+          giftCertificateAmount,
           before: order.items.map((i) => ({
             title: i.title,
             sku: i.sku,
             qty: i.qty,
             unitPrice: i.unitPrice,
             variantId: i.variantId,
+            shadeId: i.shadeId,
           })),
           after: resolved.map((l) => ({
             title: l.title,
@@ -1733,6 +1788,7 @@ export class OrdersAdminService {
             qty: l.qty,
             unitPrice: l.unitPrice,
             variantId: l.variantId,
+            shadeId: l.shadeId,
           })),
         },
       });

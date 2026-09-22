@@ -341,10 +341,14 @@ export function AccountOrderDetailClient({ orderId }: Props) {
             <dd>−{formatRub(order.giftCertificateAmount ?? 0)}</dd>
           </div>
         ) : null}
-        {order.shippingCost > 0 ? (
+        {typeof order.shippingCost === 'number' && order.shippingAddress ? (
           <div className={styles.orderMetaRow}>
-            <dt>Доставка</dt>
-            <dd>{formatRub(order.shippingCost)}</dd>
+            <dt>Стоимость доставки</dt>
+            <dd>
+              {order.shippingCost > 0
+                ? formatRub(order.shippingCost)
+                : 'бесплатно'}
+            </dd>
           </div>
         ) : null}
         <div className={[styles.orderMetaRow, styles.orderMetaTotal].join(' ')}>

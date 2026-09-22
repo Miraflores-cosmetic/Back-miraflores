@@ -185,11 +185,14 @@ export function OrderDetailClient({
     void load();
   }, [load]);
 
-  /** Soft-poll + refetch on focus, пока ждём оплату. */
+  const editModalOpen =
+    itemsModalOpen || addressModalOpen || shippingCostModalOpen;
+
+  /** Soft-poll + refetch on focus, пока ждём оплату (не трогаем открытые модалки). */
   useEffect(() => {
     const awaiting =
       order?.status === 'AWAITING_PAYMENT' || order?.status === 'NEW';
-    if (!awaiting) return;
+    if (!awaiting || editModalOpen) return;
 
     const onFocus = () => void softLoad();
     const onVisibility = () => {
@@ -203,7 +206,7 @@ export function OrderDetailClient({
       document.removeEventListener('visibilitychange', onVisibility);
       window.clearInterval(timer);
     };
-  }, [order?.status, softLoad]);
+  }, [order?.status, softLoad, editModalOpen]);
 
   const shippingMeta = useMemo(() => {
     const comment = order?.shippingAddress?.comment ?? '';
@@ -416,6 +419,7 @@ export function OrderDetailClient({
   async function saveItems(payload: {
     items: Array<{
       variantId: string | null;
+      shadeId?: string | null;
       qty: number;
       unitPrice: number;
       title: string;
@@ -1705,6 +1709,12 @@ export function OrderDetailClient({
         open={itemsModalOpen}
         initialItems={order.items}
         busy={busy}
+        hasPromoOrGift={
+          order.discountTotal > 0 ||
+          Boolean(order.promoCode) ||
+          (order.giftCertificateAmount ?? 0) > 0 ||
+          Boolean(order.giftCertificateCode)
+        }
         onClose={() => setItemsModalOpen(false)}
         onSave={saveItems}
       />
