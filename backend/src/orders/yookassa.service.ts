@@ -9,6 +9,8 @@ import { ConfigService } from '@nestjs/config';
 const YOOKASSA_API_URL = 'https://api.yookassa.ru/v3';
 /** АУСН / УСН без НДС — «Без НДС» в справочнике ЮKassa (не путать с legacy-кодами 4=20%). */
 const YOOKASSA_RECEIPT_VAT_CODE = 1;
+/** УСН доходы → в АТОЛ уходит company.sno=usn_income (для АУСН отдельного кода нет). */
+const YOOKASSA_RECEIPT_TAX_SYSTEM_CODE = 2;
 
 export type YooKassaAmount = { value: string; currency: string };
 
@@ -157,6 +159,7 @@ export class YooKassaService {
         },
         receipt: {
           customer: { email: input.customerEmail },
+          tax_system_code: YOOKASSA_RECEIPT_TAX_SYSTEM_CODE,
           items: receiptItems,
         },
       },
@@ -243,6 +246,7 @@ export class YooKassaService {
         metadata,
         receipt: {
           customer: { email: input.customerEmail },
+          tax_system_code: YOOKASSA_RECEIPT_TAX_SYSTEM_CODE,
           items: receiptItems,
         },
       },
