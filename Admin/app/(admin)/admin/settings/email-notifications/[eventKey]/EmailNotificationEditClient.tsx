@@ -19,7 +19,7 @@ import {
 import catalogStyles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
 import pn from '@/app/(admin)/admin/catalog/products/productNew.module.css';
 import { formatAdminDateTime } from '@/lib/adminFormat';
-import styles from '../Settings.module.css';
+import styles from '../../Settings.module.css';
 import local from '../emailNotifications.module.css';
 
 type Detail = {
