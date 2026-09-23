@@ -51,15 +51,43 @@
   color: #7a5c2e;
 }
 
+.pathLegendDetails {
+  margin: 0 0 14px;
+  border: 1px solid var(--account-hairline-color, #e2e6e8);
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.pathLegendSummary {
+  cursor: pointer;
+  list-style: none;
+  padding: 8px 12px;
+  font-size: 0.8rem;
+  color: var(--color-gray, #6b6b6b);
+  user-select: none;
+}
+
+.pathLegendSummary::-webkit-details-marker {
+  display: none;
+}
+
+.pathLegendSummary::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: 6px;
+  transition: transform 0.15s ease;
+}
+
+.pathLegendDetails[open] > .pathLegendSummary::before {
+  transform: rotate(90deg);
+}
+
 .pathLegend {
   display: flex;
   flex-wrap: wrap;
   gap: 10px 16px;
-  margin: 0 0 14px;
-  padding: 10px 12px;
-  border: 1px solid var(--account-hairline-color, #e2e6e8);
-  border-radius: 8px;
-  background: #fafafa;
+  margin: 0;
+  padding: 0 12px 10px;
   list-style: none;
 }
 
@@ -287,8 +315,9 @@
 .formActions {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-end;
   gap: 8px;
+  max-width: 360px;
 }
 
 .moreWrap {

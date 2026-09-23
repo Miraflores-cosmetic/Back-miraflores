@@ -10,7 +10,7 @@ import {
   AdminCompactBtnLink,
 } from '@/components/AdminCompactBtn/AdminCompactBtn';
 import { AdminModal } from '@/components/admin/AdminModal/AdminModal';
-import { AdminTextArea, AdminTextField } from '@/components/AdminTextField/AdminTextField';
+import { AdminTextArea, AdminTextField, AdminSelect } from '@/components/AdminTextField/AdminTextField';
 import { useToast } from '@/components/Toast/ToastProvider';
 import {
   AdminBackendRequestError,
@@ -557,20 +557,17 @@ export function EmailNotificationEditClient({ eventKey }: { eventKey: string }) 
             </p>
 
             <div className={local.formActions}>
-              <label className={catalogStyles.mutedInline}>
-                Demo-данные:
-                <select
-                  value={sampleVariant}
-                  onChange={(e) =>
-                    setSampleVariant(e.target.value as 'full' | 'sparse')
-                  }
-                  style={{ marginLeft: 8 }}
-                  disabled={previewing || testing || saving}
-                >
-                  <option value="full">Полный пример</option>
-                  <option value="sparse">Без опциональных (#if пустые)</option>
-                </select>
-              </label>
+              <AdminSelect
+                label="Demo-данные"
+                value={sampleVariant}
+                onChange={(e) =>
+                  setSampleVariant(e.target.value as 'full' | 'sparse')
+                }
+                disabled={previewing || testing || saving}
+              >
+                <option value="full">Полный пример</option>
+                <option value="sparse">Без опциональных (#if пустые)</option>
+              </AdminSelect>
             </div>
           </div>
 
@@ -680,7 +677,7 @@ export function EmailNotificationEditClient({ eventKey }: { eventKey: string }) 
       <ConfirmDialog
         open={testConfirmOpen}
         title="Отправить тест себе?"
-        message={`На ваш email уйдёт письмо с префиксом [тест]. Подставляются demo-данные (${sampleVariant === 'sparse' ? 'без опциональных полей' : 'полный пример'}), флаг «Шлётся» игнорируется. Нужен настроенный SMTP.`}
+        message={`На ваш email уйдёт письмо с префиксом [тест]. Подставляются demo-данные (${sampleVariant === 'sparse' ? 'без опциональных полей' : 'полный пример'}), флаг «Шлётся» игнорируется.`}
         confirmLabel="Отправить"
         cancelLabel="Отмена"
         onConfirm={() => void runTestSend()}

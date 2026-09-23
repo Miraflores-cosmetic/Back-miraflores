@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
 import { AdminCompactBtnLink } from '@/components/AdminCompactBtn/AdminCompactBtn';
 import { AdminCheckbox } from '@/components/admin/AdminCheckbox/AdminCheckbox';
 import { AdminListShell } from '@/components/admin/AdminListShell/AdminListShell';
@@ -69,6 +68,26 @@ function pathBadgeClass(badge: 'on' | 'warn' | 'off') {
   if (badge === 'on') return local.badgeOn;
   if (badge === 'warn') return local.badgeWarn;
   return local.badgeOff;
+}
+
+function EditIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M12 20h9"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
 }
 
 export function EmailNotificationsAdminClient() {
@@ -155,15 +174,9 @@ export function EmailNotificationsAdminClient() {
   return (
     <div className={local.page}>
       <div className={styles.faqCardHead} style={{ marginBottom: 16 }}>
-        <div>
-          <h1 className={catalogStyles.title} style={{ margin: 0 }}>
-            Email-уведомления
-          </h1>
-          <p className={catalogStyles.muted} style={{ margin: '6px 0 0' }}>
-            Письма покупателям: заказы и сертификаты. OTP, сброс пароля и
-            staff-письма правятся только в коде. Отправитель — SMTP env.
-          </p>
-        </div>
+        <h1 className={catalogStyles.title} style={{ margin: 0 }}>
+          Email-уведомления
+        </h1>
       </div>
 
       <AdminTabs
@@ -179,16 +192,21 @@ export function EmailNotificationsAdminClient() {
         ]}
       />
 
-      <ul className={local.pathLegend} aria-label="Легенда последнего send-path">
-        {PATH_LEGEND.map((p) => (
-          <li key={p.short} className={local.pathLegendItem}>
-            <span className={pathBadgeClass(p.badge)}>{p.short}</span>
-            <span>
-              <strong>{p.short}</strong> — {p.title}
-            </span>
-          </li>
-        ))}
-      </ul>
+      <details className={local.pathLegendDetails}>
+        <summary className={local.pathLegendSummary}>
+          Легенда send-path
+        </summary>
+        <ul className={local.pathLegend} aria-label="Легенда последнего send-path">
+          {PATH_LEGEND.map((p) => (
+            <li key={p.short} className={local.pathLegendItem}>
+              <span className={pathBadgeClass(p.badge)}>{p.short}</span>
+              <span>
+                <strong>{p.short}</strong> — {p.title}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </details>
 
       <AdminListShell
         loading={loading}
@@ -284,8 +302,11 @@ export function EmailNotificationsAdminClient() {
                       <AdminCompactBtnLink
                         href={`/admin/settings/email-notifications/${encodeURIComponent(row.eventKey)}`}
                         variant="outline"
+                        className={catalogStyles.iconBtn}
+                        aria-label={`Изменить «${row.label}»`}
+                        title="Изменить"
                       >
-                        Изменить
+                        <EditIcon />
                       </AdminCompactBtnLink>
                     </td>
                   </tr>
@@ -295,12 +316,6 @@ export function EmailNotificationsAdminClient() {
           </table>
         </div>
       </AdminListShell>
-
-      <p style={{ marginTop: 16 }}>
-        <Link href="/admin/settings" className={catalogStyles.mutedInline}>
-          ← К настройкам
-        </Link>
-      </p>
 
       <ConfirmDialog
         open={Boolean(disableTarget)}
