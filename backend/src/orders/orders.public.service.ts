@@ -36,10 +36,6 @@ import { OrderPayTokenService } from './order-pay-token.service';
 import { OrderLifecycleService } from './order-lifecycle.service';
 import { formatPhoneE164, isValidPhone } from '../common/phone.util';
 import {
-  giftBuyerCopyEmail,
-  giftPurchasePaidEmail,
-} from '../gift-certificates/gift-purchase-email';
-import {
   GIFT_PURCHASE_SKU,
   assertGiftDenomCartNotMixedWithPhysical,
   giftPurchaseSkuForDenom,
@@ -728,6 +724,25 @@ export class OrdersPublicService {
     });
 
     this.assertIdempotentGuest(order, guestId);
+
+    if (
+      order.status === OrderStatus.AWAITING_PAYMENT &&
+      order.total > 0 &&
+      order.email?.trim()
+    ) {
+      const guestIdForPay = order.guestId?.trim() || '';
+      const payToken = guestIdForPay
+        ? this.payTokens.issue(order.id, guestIdForPay)
+        : null;
+      void this.lifecycle.notifyOrderAwaitingPayment({
+        to: order.email.trim(),
+        orderNumber: order.number,
+        total: order.total,
+        orderId: order.id,
+        payToken,
+      });
+    }
+
     return this.serializeCreated(order);
   }
 
@@ -1438,29 +1453,26 @@ export class OrdersPublicService {
       }
       return;
     }
-    const mail = giftPurchasePaidEmail({
+    const to = order.giftPurchaseRecipientEmail || order.email;
+    await this.lifecycle.notifyGiftPurchasePaid({
+      to,
       orderNumber,
       items: certs.map((c) => ({
         code: c.code,
         faceValue: c.faceValue,
         expiresAt: c.expiresAt,
       })),
-      recipientEmail: order.giftPurchaseRecipientEmail || order.email,
-      buyerEmail: order.email,
+      buyerEmail: order.email !== to ? order.email : undefined,
     });
-    await this.lifecycle.notifyCustomer(mail);
-    // Копия покупателю, если код ушёл другому
     if (
       order.giftPurchaseRecipientEmail &&
       order.giftPurchaseRecipientEmail.toLowerCase() !== order.email.toLowerCase()
     ) {
-      await this.lifecycle.notifyCustomer(
-        giftBuyerCopyEmail({
-          orderNumber,
-          recipientEmail: order.giftPurchaseRecipientEmail,
-          to: order.email,
-        }),
-      );
+      await this.lifecycle.notifyGiftBuyerCopy({
+        to: order.email,
+        orderNumber,
+        recipientEmail: order.giftPurchaseRecipientEmail,
+      });
     }
   }
 

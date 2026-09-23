@@ -4,6 +4,28 @@ import { resolve4 } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import * as nodemailer from 'nodemailer';
 import {
+  getEmailNotificationEventDef,
+  type EmailNotificationEventKey,
+} from './email-notification-events';
+import {
+  baseOrderVars,
+  formatGiftItemsHtml,
+  formatGiftItemsText,
+  guestOrderPayUrl,
+  rubLabel,
+} from './email-notification-format';
+import {
+  renderEditableEmail,
+  type EmailTemplateVars,
+} from './email-notification-render';
+import {
+  EmailNotificationsService,
+  type EmailSendPath,
+} from './email-notifications.service';
+import {
+  buildGiftBuyerCopyEmail,
+  buildGiftCertificateIssuedEmail,
+  buildGiftPurchasePaidEmail,
   buildOrderCancelledEmail,
   buildOrderDeliveredEmail,
   buildOrderPaidEmail,
@@ -16,13 +38,17 @@ import {
   buildStaffAdminPasswordResetEmail,
   buildStaffAdminWelcomeEmail,
   type BuiltEmail,
+  type GiftEmailCertItem,
 } from './email-templates';
 
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    private readonly emailNotifications: EmailNotificationsService,
+  ) {}
 
   frontendPublicUrl(): string {
     return (
@@ -38,10 +64,6 @@ export class MailService {
     return Boolean(host && user && pass);
   }
 
-  /**
-   * На VPS без маршрута IPv6 nodemailer может выбрать AAAA → ENETUNREACH.
-   * По умолчанию подключаемся к первому A-записи и задаём servername для TLS/SNI.
-   */
   private async smtpConnectTarget(hostname: string): Promise<{ host: string; servername?: string }> {
     const raw = String(this.config.get('SMTP_FORCE_IPV4', 'true')).toLowerCase();
     const forceIpv4 = !['0', 'false', 'no', 'off'].includes(raw);
@@ -132,6 +154,51 @@ export class MailService {
     await this.send({ to, ...built });
   }
 
+  /**
+   * Клиентские письма (заказы/сертификаты): шаблон из БД.
+   * Auth OTP / password / staff / OPS — не сюда (hardcoded builders).
+   * Выключенный event → skipped_disabled.
+   * Ошибка рендера/БД → rendered_legacy.
+   * Успех БД → rendered_db. Оба пути упали → failed.
+   */
+  private async sendNotification(
+    to: string,
+    eventKey: EmailNotificationEventKey,
+    vars: EmailTemplateVars,
+    context: string,
+    fallback: () => BuiltEmail,
+  ): Promise<void> {
+    const base = `email_notification event=${eventKey} to=${to} ${context}`;
+    const notePath = (path: EmailSendPath, extra = '') => {
+      this.logger.log(`${base} path=${path}${extra ? ` ${extra}` : ''}`);
+      void this.emailNotifications.recordSendPath(eventKey, path).catch((e) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        this.logger.warn(`${base} recordSendPath failed: ${msg}`);
+      });
+    };
+
+    try {
+      const built = await this.emailNotifications.buildForEvent(eventKey, vars);
+      if (!built) {
+        notePath('skipped_disabled');
+        return;
+      }
+      await this.sendBuilt(to, built);
+      notePath('rendered_db');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.logger.warn(`${base} path=rendered_legacy reason=${msg}`);
+      try {
+        await this.sendBuilt(to, fallback());
+        notePath('rendered_legacy', `reason=${msg}`);
+      } catch (e2) {
+        const msg2 = e2 instanceof Error ? e2.message : String(e2);
+        notePath('failed', `reason=${msg2}`);
+        throw e2;
+      }
+    }
+  }
+
   async sendRegistrationOtp(to: string, code: string): Promise<void> {
     await this.sendBuilt(
       to,
@@ -151,6 +218,61 @@ export class MailService {
     this.logger.log(`Password reset email sent to ${params.to}`);
   }
 
+  async sendOrderAwaitingPayment(params: {
+    to: string;
+    orderNumber: string;
+    total: number;
+    reserveHours?: number;
+    /** Deep-link `/order/pay` (не confirmation URL ЮKassa). */
+    payUrl?: string;
+    /** Для сборки guest deep-link `/order/pay?...`. */
+    orderId?: string;
+    payToken?: string | null;
+  }): Promise<void> {
+    const site = this.frontendPublicUrl();
+    const minutes = Number.parseInt(
+      this.config.get<string>('ORDER_AWAITING_TTL_MINUTES') || '60',
+      10,
+    );
+    const reserveHours =
+      params.reserveHours ??
+      Math.max(1, Math.ceil((Number.isFinite(minutes) ? minutes : 60) / 60));
+
+    let payUrl = (params.payUrl || '').trim();
+    const payToken = params.payToken?.trim() || '';
+    const orderId = params.orderId?.trim() || '';
+    if (!payUrl && payToken && orderId) {
+      payUrl = guestOrderPayUrl({
+        siteUrl: site,
+        orderId,
+        orderNumber: params.orderNumber,
+        payToken,
+      });
+    }
+
+    const vars = baseOrderVars({
+      orderNumber: params.orderNumber,
+      siteUrl: site,
+      total: params.total,
+      payUrl: payUrl || undefined,
+      reserveHours,
+    });
+    const def = getEmailNotificationEventDef('order_awaiting_payment');
+    await this.sendNotification(
+      params.to,
+      'order_awaiting_payment',
+      vars,
+      `order=${params.orderNumber}`,
+      () =>
+        renderEditableEmail({
+          subjectTemplate: def.defaultSubject,
+          bodyTemplate: def.defaultBody,
+          vars,
+          siteUrl: site,
+        }),
+    );
+  }
+
   async sendOrderPaid(params: {
     to: string;
     orderNumber: string;
@@ -166,11 +288,13 @@ export class MailService {
       isGratitudeGift?: boolean;
     }>;
   }): Promise<void> {
-    await this.sendBuilt(
+    const site = this.frontendPublicUrl();
+    await this.sendNotification(
       params.to,
-      buildOrderPaidEmail({
+      'order_paid',
+      baseOrderVars({
         orderNumber: params.orderNumber,
-        siteUrl: this.frontendPublicUrl(),
+        siteUrl: site,
         total: params.total,
         subtotal: params.subtotal,
         shippingCost: params.shippingCost,
@@ -178,8 +302,19 @@ export class MailService {
         giftCertificateAmount: params.giftCertificateAmount,
         items: params.items,
       }),
+      `order=${params.orderNumber}`,
+      () =>
+        buildOrderPaidEmail({
+          orderNumber: params.orderNumber,
+          siteUrl: site,
+          total: params.total,
+          subtotal: params.subtotal,
+          shippingCost: params.shippingCost,
+          discountTotal: params.discountTotal,
+          giftCertificateAmount: params.giftCertificateAmount,
+          items: params.items,
+        }),
     );
-    this.logger.log(`Order paid email sent to ${params.to} (${params.orderNumber})`);
   }
 
   async sendOrderShipped(params: {
@@ -187,37 +322,59 @@ export class MailService {
     orderNumber: string;
     tracking?: string | null;
   }): Promise<void> {
-    await this.sendBuilt(
+    const site = this.frontendPublicUrl();
+    await this.sendNotification(
       params.to,
-      buildOrderShippedEmail({
+      'order_shipped',
+      baseOrderVars({
         orderNumber: params.orderNumber,
+        siteUrl: site,
         tracking: params.tracking,
-        siteUrl: this.frontendPublicUrl(),
       }),
+      `order=${params.orderNumber}`,
+      () =>
+        buildOrderShippedEmail({
+          orderNumber: params.orderNumber,
+          tracking: params.tracking,
+          siteUrl: site,
+        }),
     );
-    this.logger.log(`Order shipped email sent to ${params.to} (${params.orderNumber})`);
   }
 
   async sendOrderDelivered(params: { to: string; orderNumber: string }): Promise<void> {
-    await this.sendBuilt(
+    const site = this.frontendPublicUrl();
+    await this.sendNotification(
       params.to,
-      buildOrderDeliveredEmail({
+      'order_delivered',
+      baseOrderVars({
         orderNumber: params.orderNumber,
-        siteUrl: this.frontendPublicUrl(),
+        siteUrl: site,
       }),
+      `order=${params.orderNumber}`,
+      () =>
+        buildOrderDeliveredEmail({
+          orderNumber: params.orderNumber,
+          siteUrl: site,
+        }),
     );
-    this.logger.log(`Order delivered email sent to ${params.to} (${params.orderNumber})`);
   }
 
   async sendOrderCancelled(params: { to: string; orderNumber: string }): Promise<void> {
-    await this.sendBuilt(
+    const site = this.frontendPublicUrl();
+    await this.sendNotification(
       params.to,
-      buildOrderCancelledEmail({
+      'order_cancelled',
+      baseOrderVars({
         orderNumber: params.orderNumber,
-        siteUrl: this.frontendPublicUrl(),
+        siteUrl: site,
       }),
+      `order=${params.orderNumber}`,
+      () =>
+        buildOrderCancelledEmail({
+          orderNumber: params.orderNumber,
+          siteUrl: site,
+        }),
     );
-    this.logger.log(`Order cancelled email sent to ${params.to} (${params.orderNumber})`);
   }
 
   async sendOrderUpdated(params: {
@@ -225,15 +382,23 @@ export class MailService {
     orderNumber: string;
     changesSummary: string;
   }): Promise<void> {
-    await this.sendBuilt(
+    const site = this.frontendPublicUrl();
+    await this.sendNotification(
       params.to,
-      buildOrderUpdatedEmail({
+      'order_updated',
+      baseOrderVars({
         orderNumber: params.orderNumber,
+        siteUrl: site,
         changesSummary: params.changesSummary,
-        siteUrl: this.frontendPublicUrl(),
       }),
+      `order=${params.orderNumber}`,
+      () =>
+        buildOrderUpdatedEmail({
+          orderNumber: params.orderNumber,
+          changesSummary: params.changesSummary,
+          siteUrl: site,
+        }),
     );
-    this.logger.log(`Order updated email sent to ${params.to} (${params.orderNumber})`);
   }
 
   async sendOrderSurcharge(params: {
@@ -242,17 +407,26 @@ export class MailService {
     amount: number;
     paymentUrl: string;
   }): Promise<void> {
-    await this.sendBuilt(
+    const site = this.frontendPublicUrl();
+    await this.sendNotification(
       params.to,
-      buildOrderSurchargeEmail({
-        orderNumber: params.orderNumber,
-        amount: params.amount,
-        paymentUrl: params.paymentUrl,
-        siteUrl: this.frontendPublicUrl(),
-      }),
-    );
-    this.logger.log(
-      `Order surcharge email sent to ${params.to} (${params.orderNumber}, ${params.amount}₽)`,
+      'order_surcharge',
+      {
+        ...baseOrderVars({
+          orderNumber: params.orderNumber,
+          siteUrl: site,
+          payUrl: params.paymentUrl,
+        }),
+        'order.surcharge_label': rubLabel(params.amount),
+      },
+      `order=${params.orderNumber}`,
+      () =>
+        buildOrderSurchargeEmail({
+          orderNumber: params.orderNumber,
+          amount: params.amount,
+          paymentUrl: params.paymentUrl,
+          siteUrl: site,
+        }),
     );
   }
 
@@ -263,17 +437,116 @@ export class MailService {
     full?: boolean;
     kind?: 'admin' | 'late';
   }): Promise<void> {
-    await this.sendBuilt(
+    const kind = params.kind ?? 'admin';
+    const site = this.frontendPublicUrl();
+    await this.sendNotification(
       params.to,
-      buildOrderRefundEmail({
+      'order_refund',
+      baseOrderVars({
         orderNumber: params.orderNumber,
-        amount: params.amount,
-        full: params.full,
-        kind: params.kind,
-        siteUrl: this.frontendPublicUrl(),
+        siteUrl: site,
+        refundAmount: params.amount,
+        refundFull: params.full,
+        refundKind: kind,
       }),
+      `order=${params.orderNumber}`,
+      () =>
+        buildOrderRefundEmail({
+          orderNumber: params.orderNumber,
+          amount: params.amount,
+          full: params.full,
+          kind,
+          siteUrl: site,
+        }),
     );
-    this.logger.log(`Order refund email sent to ${params.to} (${params.orderNumber})`);
+  }
+
+  async sendGiftPurchasePaid(params: {
+    to: string;
+    orderNumber: string;
+    items: GiftEmailCertItem[];
+    buyerEmail?: string;
+  }): Promise<void> {
+    const site = this.frontendPublicUrl();
+    await this.sendNotification(
+      params.to,
+      'gift_purchase_paid',
+      {
+        ...baseOrderVars({
+          orderNumber: params.orderNumber,
+          siteUrl: site,
+        }),
+        'gift.items_text': formatGiftItemsText(params.items),
+        'gift.items_html': formatGiftItemsHtml(params.items),
+        'gift.buyer_email': (params.buyerEmail || '').trim(),
+      },
+      `order=${params.orderNumber}`,
+      () =>
+        buildGiftPurchasePaidEmail({
+          orderNumber: params.orderNumber,
+          items: params.items,
+          buyerEmail: params.buyerEmail,
+          siteUrl: site,
+        }),
+    );
+  }
+
+  async sendGiftBuyerCopy(params: {
+    to: string;
+    orderNumber: string;
+    recipientEmail: string;
+  }): Promise<void> {
+    const site = this.frontendPublicUrl();
+    await this.sendNotification(
+      params.to,
+      'gift_buyer_copy',
+      {
+        ...baseOrderVars({
+          orderNumber: params.orderNumber,
+          siteUrl: site,
+        }),
+        'gift.recipient_email': params.recipientEmail.trim(),
+      },
+      `order=${params.orderNumber}`,
+      () =>
+        buildGiftBuyerCopyEmail({
+          orderNumber: params.orderNumber,
+          recipientEmail: params.recipientEmail,
+          siteUrl: site,
+        }),
+    );
+  }
+
+  async sendGiftCertificateIssued(params: {
+    to: string;
+    items: GiftEmailCertItem[];
+    resend?: boolean;
+  }): Promise<void> {
+    const plural = params.items.length > 1;
+    const resend = Boolean(params.resend);
+    const intro = resend
+      ? 'Повторно отправляем данные вашего подарочного сертификата Miraflores.'
+      : plural
+        ? 'Вам выпущены подарочные сертификаты Miraflores.'
+        : 'Вам выпущен подарочный сертификат Miraflores.';
+    const site = this.frontendPublicUrl();
+    await this.sendNotification(
+      params.to,
+      'gift_issued',
+      {
+        'site.url': site,
+        'gift.items_text': formatGiftItemsText(params.items),
+        'gift.items_html': formatGiftItemsHtml(params.items),
+        'gift.intro': intro,
+      },
+      `items=${params.items.length}`,
+      () =>
+        buildGiftCertificateIssuedEmail({
+          items: params.items,
+          resend,
+          siteUrl: site,
+        }),
+    );
   }
 
   async sendStaffAdminWelcome(params: {

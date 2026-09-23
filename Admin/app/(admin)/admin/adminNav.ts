@@ -119,6 +119,11 @@ export const ADMIN_NAV: NavItem[] = [
     ],
     children: [
       { href: '/admin/settings/seo', label: 'SEO', section: 'settings' },
+      {
+        href: '/admin/settings/email-notifications',
+        label: 'Email-уведомления',
+        section: 'settings',
+      },
       { href: '/admin/settings/attributes', label: 'Атрибуты', section: 'settings' },
       {
         href: '/admin/settings/user-groups',

@@ -1114,6 +1114,38 @@ model SiteSettings {
   updatedAt              DateTime @updatedAt
 }
 
+/// Редактируемые шаблоны transactional-писем (admin/settings).
+/// eventKey — стабильный ключ события; subject/body с плейсхолдерами {{order.number}}.
+model EmailNotificationTemplate {
+  id                 String    @id @default(cuid())
+  eventKey           String    @unique
+  enabled            Boolean   @default(true)
+  subject            String
+  body               String    @db.Text
+  /// skipped_disabled | rendered_db | rendered_legacy | failed
+  lastSendPath       String?
+  lastSendAt         DateTime?
+  lastEditedByUserId String?
+  lastEditedByEmail  String?
+  lastEditedAt       DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+}
+
+/// История правок шаблона (снимок ДО изменения).
+model EmailNotificationTemplateRevision {
+  id          String   @id @default(cuid())
+  eventKey    String
+  subject     String
+  body        String   @db.Text
+  enabled     Boolean
+  actorUserId String?
+  actorEmail  String?
+  createdAt   DateTime @default(now())
+
+  @@index([eventKey, createdAt])
+}
+
 /// Юридические / информационные страницы (оферта, политика, оплата/доставка)
 model CmsPage {
   id          String    @id @default(cuid())

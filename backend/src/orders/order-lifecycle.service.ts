@@ -84,6 +84,28 @@ export class OrderLifecycleService {
     }
   }
 
+  async notifyOrderAwaitingPayment(input: {
+    to: string;
+    orderNumber: string;
+    total: number;
+    orderId?: string;
+    payToken?: string | null;
+    payUrl?: string;
+  }): Promise<void> {
+    await this.runMail(
+      `Order awaiting payment mail ${input.orderNumber} → ${input.to}`,
+      () =>
+        this.mail.sendOrderAwaitingPayment({
+          to: input.to,
+          orderNumber: input.orderNumber,
+          total: input.total,
+          orderId: input.orderId,
+          payToken: input.payToken,
+          payUrl: input.payUrl,
+        }),
+    );
+  }
+
   async notifyOrderPaid(to: string, orderNumber: string): Promise<void> {
     const order = await this.prisma.order.findUnique({
       where: { number: orderNumber },
@@ -179,5 +201,47 @@ export class OrderLifecycleService {
       `Order refund mail ${input.orderNumber} → ${input.to}`,
       () => this.mail.sendOrderRefund(input),
     );
+  }
+
+  async notifyGiftPurchasePaid(input: {
+    to: string;
+    orderNumber: string;
+    items: Array<{ code: string; faceValue: number; expiresAt: Date | null }>;
+    buyerEmail?: string;
+  }): Promise<void> {
+    await this.runMail(
+      `Gift purchase paid mail ${input.orderNumber} → ${input.to}`,
+      () => this.mail.sendGiftPurchasePaid(input),
+    );
+  }
+
+  async notifyGiftBuyerCopy(input: {
+    to: string;
+    orderNumber: string;
+    recipientEmail: string;
+  }): Promise<void> {
+    await this.runMail(
+      `Gift buyer copy mail ${input.orderNumber} → ${input.to}`,
+      () => this.mail.sendGiftBuyerCopy(input),
+    );
+  }
+
+  async notifyGiftCertificateIssued(input: {
+    to: string;
+    items: Array<{ code: string; faceValue: number; expiresAt: Date | null }>;
+    resend?: boolean;
+  }): Promise<boolean> {
+    if (!this.mail.isConfigured()) {
+      this.logger.warn('Gift issued mail skipped (no SMTP)');
+      return false;
+    }
+    try {
+      await this.mail.sendGiftCertificateIssued(input);
+      return true;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.logger.warn(`Gift issued mail failed: ${msg}`);
+      return false;
+    }
   }
 }

@@ -1,4 +1,8 @@
-/** Общие письма по подарочным сертификатам. */
+/**
+ * Legacy sync-хелперы для gift-писем.
+ * Продакшен-отправка идёт через MailService.sendGift* (шаблоны БД + fallback сюда).
+ * Оставлены для unit-тестов builders и maskGiftCertificateCode.
+ */
 
 import {
   buildGiftBuyerCopyEmail,
@@ -11,7 +15,7 @@ function siteFromEnv(): string | null {
   return process.env.FRONTEND_PUBLIC_URL?.trim() || null;
 }
 
-/** После оплаты покупки на сайте. */
+/** @deprecated Используйте MailService.sendGiftPurchasePaid */
 export function giftPurchasePaidEmail(params: {
   orderNumber: string;
   items: GiftEmailCertItem[];
@@ -29,7 +33,7 @@ export function giftPurchasePaidEmail(params: {
   return { to, ...built };
 }
 
-/** Копия покупателю, если код ушёл на другой email. */
+/** @deprecated Используйте MailService.sendGiftBuyerCopy */
 export function giftBuyerCopyEmail(params: {
   orderNumber: string;
   recipientEmail: string;
@@ -43,7 +47,7 @@ export function giftBuyerCopyEmail(params: {
   return { to: params.to, ...built };
 }
 
-/** Ручной выпуск / повторная отправка из админки. */
+/** @deprecated Используйте MailService.sendGiftCertificateIssued */
 export function giftCertificateIssuedEmail(params: {
   items: GiftEmailCertItem[];
   to: string;

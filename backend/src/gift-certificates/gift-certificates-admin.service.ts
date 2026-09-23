@@ -26,7 +26,6 @@ import {
   normalizeGiftCertificateCode,
 } from './gift-certificate-code.util';
 import {
-  giftCertificateIssuedEmail,
   maskGiftCertificateCode,
 } from './gift-purchase-email';
 import { expireOverdueGiftCertificates } from './gift-certificate-expire.util';
@@ -695,9 +694,8 @@ export class GiftCertificatesAdminService {
       this.logger.warn('SMTP not configured — gift email skipped');
       return false;
     }
-    const mail = giftCertificateIssuedEmail(params);
     try {
-      await this.mail.sendRaw(mail);
+      await this.mail.sendGiftCertificateIssued(params);
       return true;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

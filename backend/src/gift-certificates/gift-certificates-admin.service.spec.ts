@@ -47,6 +47,7 @@ let prisma: ReturnType<typeof makePrisma>;
 const mail = {
   isConfigured: vi.fn(() => false),
   sendRaw: vi.fn(async () => undefined),
+  sendGiftCertificateIssued: vi.fn(async () => undefined),
 };
 
 const storage = {

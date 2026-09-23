@@ -28,7 +28,6 @@ import {
   assertGiftPurchaseCodesUnusedForRefund,
   revokeGiftCertificatesIssuedByPurchaseOrder,
 } from '../gift-certificates/gift-certificate-purchase.util';
-import { giftPurchasePaidEmail } from '../gift-certificates/gift-purchase-email';
 import {
   canCancel,
   canDeliver,
@@ -512,17 +511,17 @@ export class OrdersAdminService {
         orderBy: { createdAt: 'asc' },
       });
       if (order && certs.length) {
-        const mail = giftPurchasePaidEmail({
+        const to = order.giftPurchaseRecipientEmail || order.email;
+        await this.lifecycle.notifyGiftPurchasePaid({
+          to,
           orderNumber: result.number,
           items: certs.map((c) => ({
             code: c.code,
             faceValue: c.faceValue,
             expiresAt: c.expiresAt,
           })),
-          recipientEmail: order.giftPurchaseRecipientEmail || order.email,
-          buyerEmail: order.email,
+          buyerEmail: order.email !== to ? order.email : undefined,
         });
-        await this.lifecycle.notifyCustomer(mail);
       }
     } else {
       await this.lifecycle.notifyOrderPaid(result.email, result.number);
@@ -1913,7 +1912,8 @@ export class OrdersAdminService {
       to: order.email,
       orderNumber: order.number,
       amount,
-      paymentUrl: confirmationUrl,
+      // confirmation URL ЮKassa — только в admin response, не в письме
+      paymentUrl: '',
     });
 
     const detail = await this.getById(id);

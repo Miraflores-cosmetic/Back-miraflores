@@ -26,6 +26,7 @@ const ADMIN_API_PATH_SAMPLES = [
   '/api/v1/quiz/admin/overview',
   '/api/v1/assistant/admin/chat',
   '/api/v1/settings/admin/gratitude',
+  '/api/v1/settings/admin/email-notifications',
   '/api/v1/catalog/admin/products',
   '/api/v1/promo/admin',
   '/api/v1/gift-certificates/admin/issue',

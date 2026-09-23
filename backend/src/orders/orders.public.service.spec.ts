@@ -106,9 +106,17 @@ const config = {
 function makeService() {
   const payTokens = new OrderPayTokenService(config as never);
   const shippingQuotes = new ShippingQuoteService(config as never);
+  const shippingServerEstimate = {
+    estimate: vi.fn(),
+  };
   const lifecycle = {
     addEvent: vi.fn(async () => ({})),
     notifyCustomer: vi.fn(async () => undefined),
+    notifyOrderAwaitingPayment: vi.fn(async () => undefined),
+    notifyOrderPaid: vi.fn(async () => undefined),
+    notifyGiftPurchasePaid: vi.fn(async () => undefined),
+    notifyGiftBuyerCopy: vi.fn(async () => undefined),
+    notifyOrderRefund: vi.fn(async () => undefined),
   };
   return {
     service: new OrdersPublicService(
@@ -121,6 +129,7 @@ function makeService() {
       config as never,
       payTokens,
       shippingQuotes,
+      shippingServerEstimate as never,
       lifecycle as never,
     ),
     lifecycle,

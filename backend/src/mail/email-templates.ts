@@ -440,6 +440,7 @@ export function buildOrderUpdatedEmail(params: {
 export function buildOrderSurchargeEmail(params: {
   orderNumber: string;
   amount: number;
+  /** Deep-link /order/pay — не confirmation URL ЮKassa. Пусто → CTA в кабинет. */
   paymentUrl: string;
   siteUrl?: string | null;
 }): BuiltEmail {
@@ -452,7 +453,7 @@ export function buildOrderSurchargeEmail(params: {
   const text = [
     `По заказу ${number} изменилась сумма. Нужна доплата ${amountLabel}.`,
     '',
-    `Оплатить: ${payUrl}`,
+    payUrl ? `Оплатить: ${payUrl}` : `Оплатить в кабинете: ${profileUrl(site)}`,
     '',
     site,
   ].join('\n');
@@ -462,8 +463,10 @@ export function buildOrderSurchargeEmail(params: {
     title('Нужна доплата'),
     `<p style="margin:0 0 16px;">По заказу <strong>${escapeHtml(number)}</strong> изменилась сумма. К доплате: <strong>${escapeHtml(amountLabel)}</strong>.</p>`,
     orderNumberCard(number),
-    mailCtaButton(payUrl, 'Оплатить доплату'),
-    mailMutedNote('Ссылка ведёт на безопасную оплату ЮKassa. Вопросы — на info@miraflores.ru.'),
+    payUrl
+      ? mailCtaButton(payUrl, 'Оплатить доплату')
+      : mailCtaButton(profileUrl(site), 'Смотреть заказ'),
+    mailMutedNote('Вопросы — на info@miraflores.ru.'),
   ].join('');
 
   return {
