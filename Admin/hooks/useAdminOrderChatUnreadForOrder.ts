@@ -16,7 +16,9 @@ export function useAdminOrderChatUnreadForOrder(orderId: string, enabled: boolea
       const data = await adminBackendJson<{ count?: number }>(
         `orders/admin/${encodeURIComponent(orderId)}/chat/unread-count`,
       );
-      const n = typeof data.count === 'number' && data.count > 0 ? Math.floor(data.count) : 0;
+      const raw = data.count;
+      const n =
+        typeof raw === 'number' && Number.isFinite(raw) ? Math.max(0, Math.floor(raw)) : 0;
       setCount(n);
     } catch {
       /* бейдж необязателен */

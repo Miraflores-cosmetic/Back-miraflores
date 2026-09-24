@@ -1566,11 +1566,21 @@
   }
 }
 
-.orderNumberCell {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+.orderChatColHead {
+  width: 72px;
+  padding: 0;
+}
+
+.orderChatCol {
+  width: 72px;
+  text-align: right;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.orderChatEmpty {
+  color: var(--admin-muted-fg, #6e6d67);
+  opacity: 0.45;
 }
 
 .orderChatLink {

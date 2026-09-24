@@ -246,7 +246,11 @@ export async function applyPaidInTx(
 
   await tx.order.update({
     where: { id: orderId },
-    data: { status: OrderStatus.PAID },
+    data: {
+      status: OrderStatus.PAID,
+      // Оплата через ЮKassa — снова «новый» заказ для бейджа, даже если карточку открывали до оплаты.
+      adminViewedAt: source.kind === 'admin' ? new Date() : null,
+    },
   });
 
   await ensurePromoRedemption(tx, order);

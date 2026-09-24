@@ -11,6 +11,8 @@ export type AdminOrderListItem = {
   createdAt: string;
   /** Непрочитанные сообщения клиента в чате заказа (для текущего staff). */
   chatUnreadCount?: number;
+  /** Всего сообщений в чате заказа (без удалённых). */
+  chatMessageCount?: number;
 };
 
 export type AdminOrderListResponse = {

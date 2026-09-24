@@ -25,6 +25,7 @@ import {
 import { parseJcosAddressMeta } from '@/lib/shipping/addressShippingMeta';
 import { GIFT_PARTIAL_REFUND_POLICY } from '@/lib/giftHoldCopy';
 import { useAdminOrderChatUnreadForOrder } from '@/hooks/useAdminOrderChatUnreadForOrder';
+import { dispatchAdminOrdersUnviewedRefresh } from '@/hooks/useAdminUnviewedOrdersCount';
 import { OrderAccordion, OrderIconBtn } from './OrderAccordion';
 import { AdminOrderChatModal } from './AdminOrderChatModal';
 import { OrderAddressEditModal } from './OrderAddressEditModal';
@@ -205,6 +206,12 @@ export function OrderDetailClient({
   useEffect(() => {
     void load();
   }, [load]);
+
+  const loadedOrderId = order?.id;
+  const loadedOrderStatus = order?.status;
+  useEffect(() => {
+    if (loadedOrderId) dispatchAdminOrdersUnviewedRefresh();
+  }, [loadedOrderId, loadedOrderStatus]);
 
   useEffect(() => {
     if (loading || typeof window === 'undefined') return;

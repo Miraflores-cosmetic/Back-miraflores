@@ -113,6 +113,17 @@ describe('OrderChatService', () => {
     expect(map).toEqual({ o1: 2, o2: 0 });
   });
 
+  it('orderChatMessageCountsForOrders maps orderId → total messages', async () => {
+    prisma.$queryRaw.mockResolvedValue([
+      { orderId: 'o1', count: BigInt(5) },
+      { orderId: 'o2', count: BigInt(1) },
+    ]);
+
+    const map = await svc.orderChatMessageCountsForOrders(['o1', 'o2', 'o3']);
+
+    expect(map).toEqual({ o1: 5, o2: 1, o3: 0 });
+  });
+
   it('applyRetentionForOrder sets purgesAt on delivered', async () => {
     prisma.chatConversation.findUnique.mockResolvedValue({
       id: 'c1',

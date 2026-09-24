@@ -185,18 +185,21 @@ export class OrdersAdminService {
     ]);
 
     const staffUserId = opts.staffUserId?.trim();
-    const chatUnreadByOrderId =
-      staffUserId && rows.length > 0
-        ? await this.orderChat.unreadOrderChatCountsForStaff(
-            staffUserId,
-            rows.map((r) => r.id),
-          )
-        : {};
+    const orderIds = rows.map((r) => r.id);
+    const [chatUnreadByOrderId, chatMessageCountByOrderId] = await Promise.all([
+      staffUserId && orderIds.length > 0
+        ? this.orderChat.unreadOrderChatCountsForStaff(staffUserId, orderIds)
+        : Promise.resolve({} as Record<string, number>),
+      orderIds.length > 0
+        ? this.orderChat.orderChatMessageCountsForOrders(orderIds)
+        : Promise.resolve({} as Record<string, number>),
+    ]);
 
     return {
       items: rows.map((r) => ({
         ...r,
         chatUnreadCount: chatUnreadByOrderId[r.id] ?? 0,
+        chatMessageCount: chatMessageCountByOrderId[r.id] ?? 0,
       })),
       total,
       page,
@@ -212,6 +215,14 @@ export class OrdersAdminService {
       },
     });
     return { count };
+  }
+
+  /** Первое открытие карточки сотрудником — снимает заказ с бейджа «новые оплаченные». */
+  async markViewed(id: string): Promise<void> {
+    await this.prisma.order.updateMany({
+      where: { id, adminViewedAt: null },
+      data: { adminViewedAt: new Date() },
+    });
   }
 
   async getById(id: string) {
@@ -344,13 +355,6 @@ export class OrdersAdminService {
           },
         })
       : [];
-
-    void this.prisma.order
-      .update({
-        where: { id },
-        data: { adminViewedAt: new Date() },
-      })
-      .catch(() => undefined);
 
     const snap = (order.shippingAddress ?? null) as ShippingAddressSnap | null;
     const paidSucceeded = sumSucceededPayments(order.payments);

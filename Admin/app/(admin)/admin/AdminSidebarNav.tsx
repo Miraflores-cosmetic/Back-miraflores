@@ -4,7 +4,6 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { StaffContext } from '@/lib/adminStaffTypes';
-import { adminBackendJson } from '@/lib/adminBackendFetch';
 import { DEFAULT_STAFF_AVATAR } from './settings/staff/StaffAvatarField';
 import {
   ADMIN_NAV,
@@ -15,6 +14,7 @@ import {
   type NavGroupItem,
 } from './adminNav';
 import { useAdminOrderChatUnreadCount } from '@/hooks/useAdminOrderChatUnreadCount';
+import { useAdminUnviewedOrdersCount } from '@/hooks/useAdminUnviewedOrdersCount';
 import { staffCanSeeOrdersNav } from '@miraflores/admin-sections';
 import styles from './layout.module.css';
 
@@ -193,29 +193,8 @@ export function AdminSidebarNav({
   const pathname = usePathname() ?? '';
   const router = useRouter();
   const [openGroups, setOpenGroups] = useState(() => initialOpenGroups(pathname));
-  const [unviewedOrdersCount, setUnviewedOrdersCount] = useState(0);
 
   const visibleNav = useMemo(() => filterAdminNav(ADMIN_NAV, staff), [staff]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadUnviewed = async () => {
-      try {
-        const res = await adminBackendJson<{ count: number }>('orders/admin/unviewed-count');
-        if (!cancelled) setUnviewedOrdersCount(Math.max(0, res.count ?? 0));
-      } catch {
-        if (!cancelled) setUnviewedOrdersCount(0);
-      }
-    };
-
-    void loadUnviewed();
-    const timer = window.setInterval(() => void loadUnviewed(), 30_000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [pathname]);
 
   useEffect(() => {
     // Sync open state to the current route so redirect stubs / foreign URLs
@@ -237,6 +216,7 @@ export function AdminSidebarNav({
   const ordersNavVisible =
     !!staff && staffCanSeeOrdersNav(staff.sections, staff.isSuperAdmin);
   const chatUnread = useAdminOrderChatUnreadCount(ordersNavVisible);
+  const unviewedOrdersCount = useAdminUnviewedOrdersCount(ordersNavVisible, pathname);
 
   return (
     <aside className={styles.sidebar}>

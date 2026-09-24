@@ -1142,6 +1142,29 @@ export class OrderChatService {
     return out;
   }
 
+  /** Все сообщения в чате заказа (не удалённые), для колонки в списке заказов. */
+  async orderChatMessageCountsForOrders(orderIds: string[]): Promise<Record<string, number>> {
+    const ids = [...new Set(orderIds.map((id) => id.trim()).filter(Boolean))];
+    const out: Record<string, number> = {};
+    if (!ids.length) return out;
+
+    const rows = await this.prisma.$queryRaw<Array<{ orderId: string; count: bigint }>>`
+      SELECT c."orderId", COUNT(m.id)::bigint AS count
+      FROM "ChatConversation" c
+      INNER JOIN "ChatMessage" m
+        ON m."conversationId" = c.id AND m."deletedAt" IS NULL
+      WHERE c."orderId" IN (${Prisma.join(ids)})
+        AND c.kind = ${ChatConversationKind.ORDER}::"ChatConversationKind"
+        AND (c."retentionPurgesAt" IS NULL OR c."retentionPurgesAt" > NOW())
+      GROUP BY c."orderId"
+    `;
+    for (const id of ids) out[id] = 0;
+    for (const row of rows) {
+      if (row.orderId) out[row.orderId] = Number(row.count);
+    }
+    return out;
+  }
+
   async unreadCountForStaff(staffUserId: string): Promise<StaffUnreadBreakdown> {
     return staffUnreadBreakdown(this.prisma, staffUserId);
   }

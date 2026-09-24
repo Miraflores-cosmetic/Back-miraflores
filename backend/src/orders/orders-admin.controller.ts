@@ -58,7 +58,8 @@ export class OrdersAdminController {
   }
 
   @Get(':id')
-  one(@Param('id') id: string) {
+  async one(@Param('id') id: string) {
+    await this.orders.markViewed(id);
     return this.orders.getById(id);
   }
 

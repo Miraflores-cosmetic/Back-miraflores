@@ -21,7 +21,7 @@ const LIMIT = 20;
 const AWAITING_SOFT_POLL_MS = 12_000;
 const CHAT_UNREAD_REFRESH_EVENT = 'admin-orders-chat-unread-refresh';
 
-function formatChatUnreadCount(n: number): string {
+function formatChatMessageCount(n: number): string {
   if (n > 99) return '99+';
   return String(Math.max(0, n));
 }
@@ -185,42 +185,17 @@ export function OrdersListClient() {
               <th>Телефон</th>
               <th>Сумма</th>
               <th>Дата</th>
-              <th className={styles.srOnly}>Чат</th>
+              <th className={styles.orderChatColHead} aria-label="Чат" />
             </tr>
           </thead>
           <tbody>
-            {items.map((o) => (
+            {items.map((o) => {
+              const messageCount = o.chatMessageCount ?? 0;
+              const unreadCount = o.chatUnreadCount ?? 0;
+              return (
               <tr key={o.id}>
                 <td>
-                  <span className={styles.orderNumberCell}>
-                    <Link href={`/admin/orders/${o.id}`}>{o.number}</Link>
-                    {o.userId ? (
-                      <Link
-                        href={`/admin/orders/${o.id}#order-chat`}
-                        className={styles.orderChatLink}
-                        title={
-                          (o.chatUnreadCount ?? 0) > 0
-                            ? `${o.chatUnreadCount} непрочитанных`
-                            : 'Чат по заказу'
-                        }
-                        aria-label={`Чат заказа ${o.number}: ${formatChatUnreadCount(o.chatUnreadCount ?? 0)} непрочитанных`}
-                      >
-                        <span className={styles.orderChatIcon} aria-hidden>
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                            <path
-                              d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8A2.5 2.5 0 0 1 17.5 16H9l-4.5 3.5V16H6.5A2.5 2.5 0 0 1 4 13.5v-8Z"
-                              stroke="currentColor"
-                              strokeWidth="1.6"
-                              strokeLinejoin="round"
-                            />
-                          </svg>
-                        </span>
-                        <span className={styles.orderChatCountGray}>
-                          {formatChatUnreadCount(o.chatUnreadCount ?? 0)}
-                        </span>
-                      </Link>
-                    ) : null}
-                  </span>
+                  <Link href={`/admin/orders/${o.id}`}>{o.number}</Link>
                 </td>
                 <td>
                   <span
@@ -249,8 +224,45 @@ export function OrdersListClient() {
                 <td className={styles.mutedInline}>
                   {formatAdminDateTime(o.createdAt)}
                 </td>
+                <td className={styles.orderChatCol}>
+                  {o.userId ? (
+                    <Link
+                      href={`/admin/orders/${o.id}#order-chat`}
+                      className={styles.orderChatLink}
+                      title={
+                        unreadCount > 0
+                          ? `${messageCount} сообщений, ${unreadCount} непрочитанных`
+                          : messageCount > 0
+                            ? `${messageCount} сообщений`
+                            : 'Чат по заказу'
+                      }
+                      aria-label={`Чат заказа ${o.number}: ${messageCount} сообщений${
+                        unreadCount > 0 ? `, ${unreadCount} непрочитанных` : ''
+                      }`}
+                    >
+                      <span className={styles.orderChatIcon} aria-hidden>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                          <path
+                            d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8A2.5 2.5 0 0 1 17.5 16H9l-4.5 3.5V16H6.5A2.5 2.5 0 0 1 4 13.5v-8Z"
+                            stroke="currentColor"
+                            strokeWidth="1.6"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      </span>
+                      <span className={styles.orderChatCountGray}>
+                        {formatChatMessageCount(messageCount)}
+                      </span>
+                    </Link>
+                  ) : (
+                    <span className={styles.orderChatEmpty} aria-hidden>
+                      —
+                    </span>
+                  )}
+                </td>
               </tr>
-            ))}
+            );
+            })}
           </tbody>
         </table>
       </AdminListShell>
