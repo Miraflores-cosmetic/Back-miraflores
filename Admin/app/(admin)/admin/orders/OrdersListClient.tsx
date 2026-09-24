@@ -21,6 +21,11 @@ const LIMIT = 20;
 const AWAITING_SOFT_POLL_MS = 12_000;
 const CHAT_UNREAD_REFRESH_EVENT = 'admin-orders-chat-unread-refresh';
 
+function formatChatUnreadCount(n: number): string {
+  if (n > 99) return '99+';
+  return String(Math.max(0, n));
+}
+
 const STATUS_FILTERS: Array<{ value: string; label: string }> = [
   { value: '', label: 'Все статусы' },
   { value: 'AWAITING_PAYMENT', label: 'Ожидает оплаты' },
@@ -189,14 +194,18 @@ export function OrdersListClient() {
                 <td>
                   <span className={styles.orderNumberCell}>
                     <Link href={`/admin/orders/${o.id}`}>{o.number}</Link>
-                    {o.userId && (o.chatUnreadCount ?? 0) > 0 ? (
+                    {o.userId ? (
                       <Link
                         href={`/admin/orders/${o.id}#order-chat`}
-                        className={styles.orderChatUnreadLink}
-                        title="Непрочитанные сообщения в чате"
-                        aria-label={`Чат заказа ${o.number}: ${o.chatUnreadCount} непрочитанных`}
+                        className={styles.orderChatLink}
+                        title={
+                          (o.chatUnreadCount ?? 0) > 0
+                            ? `${o.chatUnreadCount} непрочитанных`
+                            : 'Чат по заказу'
+                        }
+                        aria-label={`Чат заказа ${o.number}: ${formatChatUnreadCount(o.chatUnreadCount ?? 0)} непрочитанных`}
                       >
-                        <span className={styles.orderChatUnreadIcon} aria-hidden>
+                        <span className={styles.orderChatIcon} aria-hidden>
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
                             <path
                               d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8A2.5 2.5 0 0 1 17.5 16H9l-4.5 3.5V16H6.5A2.5 2.5 0 0 1 4 13.5v-8Z"
@@ -206,26 +215,8 @@ export function OrdersListClient() {
                             />
                           </svg>
                         </span>
-                        <span className={styles.orderChatUnreadBadge}>
-                          {(o.chatUnreadCount ?? 0) > 99 ? '99+' : o.chatUnreadCount}
-                        </span>
-                      </Link>
-                    ) : o.userId ? (
-                      <Link
-                        href={`/admin/orders/${o.id}#order-chat`}
-                        className={styles.orderChatLinkMuted}
-                        title="Чат по заказу"
-                        aria-label={`Чат заказа ${o.number}`}
-                      >
-                        <span className={styles.orderChatUnreadIcon} aria-hidden>
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                            <path
-                              d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8A2.5 2.5 0 0 1 17.5 16H9l-4.5 3.5V16H6.5A2.5 2.5 0 0 1 4 13.5v-8Z"
-                              stroke="currentColor"
-                              strokeWidth="1.6"
-                              strokeLinejoin="round"
-                            />
-                          </svg>
+                        <span className={styles.orderChatCountGray}>
+                          {formatChatUnreadCount(o.chatUnreadCount ?? 0)}
                         </span>
                       </Link>
                     ) : null}

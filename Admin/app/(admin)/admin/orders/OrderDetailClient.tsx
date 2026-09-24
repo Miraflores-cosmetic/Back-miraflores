@@ -24,6 +24,7 @@ import {
 } from '@/lib/orderStatusLabels';
 import { parseJcosAddressMeta } from '@/lib/shipping/addressShippingMeta';
 import { GIFT_PARTIAL_REFUND_POLICY } from '@/lib/giftHoldCopy';
+import { useAdminOrderChatUnreadForOrder } from '@/hooks/useAdminOrderChatUnreadForOrder';
 import { OrderAccordion, OrderIconBtn } from './OrderAccordion';
 import { AdminOrderChatModal } from './AdminOrderChatModal';
 import { OrderAddressEditModal } from './OrderAddressEditModal';
@@ -116,6 +117,7 @@ export function OrderDetailClient({
   const [confirm, setConfirm] = useState<ConfirmState>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [chatModalOpen, setChatModalOpen] = useState(false);
+  const chatUnread = useAdminOrderChatUnreadForOrder(orderId, Boolean(order?.userId));
 
   const setChatModalOpenWithHash = useCallback((open: boolean) => {
     setChatModalOpen(open);
@@ -557,6 +559,31 @@ export function OrderDetailClient({
 
   const events = order.events ?? [];
   const supportNotes = events.filter((e) => e.type === 'NOTE');
+
+  const submitNote = () => {
+    const message = noteDraft.trim();
+    if (!message || busy) return;
+    void (async () => {
+      setBusy(true);
+      setError(null);
+      try {
+        const row = await adminBackendJson<AdminOrderDetail>(`orders/admin/${orderId}/note`, {
+          method: 'POST',
+          body: JSON.stringify({ message }),
+        });
+        setOrder(row);
+        setNoteDraft('');
+        showFlash('Заметка добавлена');
+      } catch (e) {
+        setError(
+          e instanceof AdminBackendRequestError ? e.message : 'Не удалось сохранить заметку',
+        );
+      } finally {
+        setBusy(false);
+      }
+    })();
+  };
+
   const visibleEvents = historyOpen ? events : events.slice(0, HISTORY_PREVIEW);
 
   return (
@@ -1097,79 +1124,111 @@ export function OrderDetailClient({
 
         <div className={styles.orderDetailRight}>
         <aside className={styles.orderDetailAside} aria-label="Действия по заказу">
-          <div>
-            <p className={styles.orderAsideTitle}>Статус</p>
-            <div className={styles.orderStatusRow}>
-              <span
-                className={`${styles.badge} ${orderStatusBadgeClass(order.status, styles)}`}
-              >
-                {orderStatusLabel(order.status)}
-              </span>
+          <div className={styles.orderAsideHead}>
+            <div className={styles.orderAsideHeadMain}>
+              <p className={styles.orderAsideTitle}>Статус</p>
+              <div className={styles.orderStatusRow}>
+                <span
+                  className={`${styles.badge} ${orderStatusBadgeClass(order.status, styles)}`}
+                >
+                  {orderStatusLabel(order.status)}
+                </span>
+              </div>
             </div>
-            <AdminCompactBtn
+            <button
               type="button"
-              variant="outline"
+              className={`${styles.orderAsideChatBtn} ${
+                chatUnread > 0 ? styles.orderAsideChatBtnUnread : ''
+              }`}
               disabled={!order.userId}
               title={
                 order.userId
-                  ? undefined
+                  ? chatUnread > 0
+                    ? `Чат с клиентом: ${chatUnread} непрочитанных`
+                    : 'Чат с клиентом'
                   : 'Чат только для заказов с аккаунтом покупателя'
+              }
+              aria-label={
+                chatUnread > 0
+                  ? `Чат с клиентом, непрочитанных: ${chatUnread}`
+                  : 'Чат с клиентом'
               }
               onClick={() => setChatModalOpenWithHash(true)}
             >
-              Чат с клиентом
-            </AdminCompactBtn>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path
+                  d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8A2.5 2.5 0 0 1 17.5 16H9l-4.5 3.5V16H6.5A2.5 2.5 0 0 1 4 13.5v-8Z"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              <span>Чат</span>
+              {chatUnread > 0 ? (
+                <span className={styles.orderAsideChatBadge} aria-hidden>
+                  {chatUnread > 99 ? '99+' : chatUnread}
+                </span>
+              ) : null}
+            </button>
           </div>
 
           <div className={styles.orderTotalBlock}>
             <p className={styles.orderAsideTitle}>Сумма</p>
-            <dl className={styles.detailDl} style={{ margin: 0 }}>
-              <div className={styles.detailDlRow}>
+            <dl className={styles.orderTotalList}>
+              <div className={styles.orderTotalRow}>
                 <dt>Товары</dt>
                 <dd>{formatAdminMoney(order.subtotal)}</dd>
               </div>
               {order.discountTotal > 0 ? (
-                <div className={styles.detailDlRow}>
+                <div className={`${styles.orderTotalRow} ${styles.orderTotalRowMinus}`}>
                   <dt>Скидка</dt>
                   <dd>−{formatAdminMoney(order.discountTotal)}</dd>
                 </div>
               ) : null}
               {(order.giftCertificateAmount ?? 0) > 0 ? (
-                <div className={styles.detailDlRow}>
+                <div className={`${styles.orderTotalRow} ${styles.orderTotalRowMinus}`}>
                   <dt>Сертификат</dt>
                   <dd>−{formatAdminMoney(order.giftCertificateAmount ?? 0)}</dd>
                 </div>
               ) : null}
               {order.shippingCost > 0 ? (
-                <div className={styles.detailDlRow}>
+                <div className={styles.orderTotalRow}>
                   <dt>Доставка</dt>
                   <dd>{formatAdminMoney(order.shippingCost)}</dd>
                 </div>
               ) : null}
-              {order.refundedAmount > 0 ? (
-                <div className={styles.detailDlRow}>
-                  <dt>Возвращено</dt>
-                  <dd>
-                    {formatAdminMoney(order.refundedAmount)}
-                    {order.refundRemaining > 0
-                      ? ` (остаток ${formatAdminMoney(order.refundRemaining)})`
-                      : ''}
-                  </dd>
-                </div>
-              ) : null}
-              {(order.balanceDue ?? 0) > 0 ? (
-                <div className={styles.detailDlRow}>
-                  <dt>К доплате</dt>
-                  <dd>{formatAdminMoney(order.balanceDue ?? 0)}</dd>
-                </div>
-              ) : null}
+              <div className={`${styles.orderTotalRow} ${styles.orderTotalRowGrand}`}>
+                <dt>Итого</dt>
+                <dd>{formatAdminMoney(order.total)}</dd>
+              </div>
             </dl>
-            <p className={styles.orderTotalValue}>
-              {formatAdminMoney(order.total)}
-            </p>
+            {order.refundedAmount > 0 || (order.balanceDue ?? 0) > 0 ? (
+              <dl className={styles.orderTotalNotes}>
+                {order.refundedAmount > 0 ? (
+                  <div className={`${styles.orderTotalNote} ${styles.orderTotalNoteRefund}`}>
+                    <dt>
+                      Возвращено
+                      {order.refundRemaining > 0 ? (
+                        <span className={styles.orderTotalNoteSub}>
+                          остаток {formatAdminMoney(order.refundRemaining)}
+                        </span>
+                      ) : null}
+                    </dt>
+                    <dd>{formatAdminMoney(order.refundedAmount)}</dd>
+                  </div>
+                ) : null}
+                {(order.balanceDue ?? 0) > 0 ? (
+                  <div className={`${styles.orderTotalNote} ${styles.orderTotalNoteDue}`}>
+                    <dt>К доплате</dt>
+                    <dd>{formatAdminMoney(order.balanceDue ?? 0)}</dd>
+                  </div>
+                ) : null}
+              </dl>
+            ) : null}
             {order.actions.canCreateSurcharge ? (
               <AdminCompactBtn
                 type="button"
+                className={styles.orderTotalAction}
                 disabled={busy}
                 onClick={() =>
                   askConfirm({
@@ -1622,76 +1681,72 @@ export function OrderDetailClient({
 
           <OrderAccordion
             id="order-note"
-            title="Заметка"
+            title="Заметки"
+            count={supportNotes.length}
             open={openNote}
             onToggle={() => setOpenNote((v) => !v)}
           >
             <div className={styles.orderNoteForm}>
               {supportNotes.length === 0 ? (
-                <p className={styles.orderHint} style={{ marginTop: 0 }}>
-                  Внутренние заметки саппорта. Каждая запись также попадает в
-                  историю заказа.
-                </p>
+                <div className={styles.orderNoteEmpty}>
+                  <p className={styles.orderNoteEmptyTitle}>Заметок пока нет</p>
+                  <p className={styles.orderHint}>
+                    Видны только сотрудникам. Каждая запись также попадает в
+                    историю заказа.
+                  </p>
+                </div>
               ) : (
                 <ul className={styles.orderNoteList}>
-                  {supportNotes.map((ev) => (
-                    <li key={ev.id} className={styles.orderNoteItem}>
-                      <div className={styles.orderNoteMeta}>
-                        <span>{formatAdminDateTime(ev.createdAt)}</span>
-                        {ev.actor ? (
-                          <span>
-                            {ev.actor.displayName?.trim() || ev.actor.email}
-                          </span>
-                        ) : null}
-                      </div>
-                      <p className={styles.orderNoteText}>{ev.message}</p>
-                    </li>
-                  ))}
+                  {supportNotes.map((ev) => {
+                    const author = ev.actor
+                      ? ev.actor.displayName?.trim() || ev.actor.email
+                      : 'Система';
+                    return (
+                      <li key={ev.id} className={styles.orderNoteItem}>
+                        <div className={styles.orderNoteMeta}>
+                          <span className={styles.orderNoteAuthor}>{author}</span>
+                          <time dateTime={ev.createdAt}>
+                            {formatAdminDateTime(ev.createdAt)}
+                          </time>
+                        </div>
+                        <p className={styles.orderNoteText}>{ev.message}</p>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
-              <textarea
-                className={styles.orderNoteTextarea}
-                value={noteDraft}
-                onChange={(e) => setNoteDraft(e.target.value.slice(0, 2000))}
-                placeholder="Внутренняя заметка для саппорта…"
-                rows={3}
-                disabled={busy}
-                maxLength={2000}
-              />
-              <AdminCompactBtn
-                type="button"
-                disabled={busy || !noteDraft.trim()}
-                onClick={() => {
-                  const message = noteDraft.trim();
-                  if (!message) return;
-                  void (async () => {
-                    setBusy(true);
-                    setError(null);
-                    try {
-                      const row = await adminBackendJson<AdminOrderDetail>(
-                        `orders/admin/${orderId}/note`,
-                        {
-                          method: 'POST',
-                          body: JSON.stringify({ message }),
-                        },
-                      );
-                      setOrder(row);
-                      setNoteDraft('');
-                      showFlash('Заметка добавлена');
-                    } catch (e) {
-                      setError(
-                        e instanceof AdminBackendRequestError
-                          ? e.message
-                          : 'Не удалось сохранить заметку',
-                      );
-                    } finally {
-                      setBusy(false);
+              <div className={styles.orderNoteComposer}>
+                <textarea
+                  className={styles.orderNoteTextarea}
+                  value={noteDraft}
+                  onChange={(e) => setNoteDraft(e.target.value.slice(0, 2000))}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                      e.preventDefault();
+                      submitNote();
                     }
-                  })();
-                }}
-              >
-                Добавить заметку
-              </AdminCompactBtn>
+                  }}
+                  placeholder="Новая заметка для команды…"
+                  aria-label="Новая заметка"
+                  rows={3}
+                  disabled={busy}
+                  maxLength={2000}
+                />
+                <div className={styles.orderNoteComposerFoot}>
+                  <span className={styles.orderNoteCounter}>
+                    {noteDraft.length > 0 ? `${noteDraft.length} / 2000 · ` : ''}
+                    ⌘/Ctrl + Enter
+                  </span>
+                  <AdminCompactBtn
+                    type="button"
+                    variant="accent"
+                    disabled={busy || !noteDraft.trim()}
+                    onClick={submitNote}
+                  >
+                    Добавить
+                  </AdminCompactBtn>
+                </div>
+              </div>
             </div>
           </OrderAccordion>
         </aside>

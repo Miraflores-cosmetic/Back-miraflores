@@ -476,10 +476,17 @@
 
 .orderAccordionChevron {
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 1.1rem;
+  height: 1.1rem;
   color: var(--color-gray, #888);
-  font-size: 0.85rem;
   flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.orderAccordion[data-open='true'] .orderAccordionChevron {
+  transform: rotate(90deg);
 }
 
 .orderAccordionTitle {
@@ -487,6 +494,21 @@
   font-size: 0.95rem;
   font-weight: 600;
   color: var(--color-black, #111);
+}
+
+.orderAccordionCount {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #eef1f2;
+  color: var(--color-gray, #6e6d67);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 20px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  box-sizing: border-box;
 }
 
 .orderAccordionActions {
@@ -736,7 +758,26 @@
 .orderNoteForm {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+  padding-top: 12px;
+}
+
+.orderNoteEmpty {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1px dashed var(--account-hairline-color, #dfe3e5);
+  border-radius: 8px;
+  background: #fcfcfc;
+  text-align: center;
+}
+
+.orderNoteEmptyTitle {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-ink-black, #1d1c1b);
 }
 
 .orderNoteList {
@@ -745,49 +786,109 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
+  max-height: 320px;
+  overflow-y: auto;
 }
 
 .orderNoteItem {
   margin: 0;
-  padding: 10px 12px;
-  border: 1px solid var(--account-hairline-color, #e2e6e8);
-  border-radius: 8px;
-  background: #fafbfb;
+  padding: 10px 12px 10px 14px;
+  border: 1px solid #efe6c8;
+  border-left: 3px solid #e3c766;
+  border-radius: 6px;
+  background: #fffcf2;
 }
 
 .orderNoteMeta {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-  margin-bottom: 6px;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
   font-size: 0.75rem;
   color: var(--color-gray, #6e6d67);
 }
 
+.orderNoteMeta time {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.orderNoteAuthor {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--color-ink-black, #1d1c1b);
+}
+
 .orderNoteItem .orderNoteText {
   margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  color: var(--color-ink-black, #1d1c1b);
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-.orderNoteTextarea {
-  width: 100%;
-  min-height: 72px;
-  padding: 10px 12px;
+.orderNoteComposer {
+  display: flex;
+  flex-direction: column;
   border: 1px solid var(--account-hairline-color, #e2e6e8);
   border-radius: 8px;
+  background: #fff;
+  overflow: hidden;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.orderNoteComposer:focus-within {
+  border-color: var(--color-primary, #297c3b);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary, #297c3b) 12%, transparent);
+}
+
+.orderNoteTextarea {
+  display: block;
+  width: 100%;
+  min-height: 72px;
+  max-height: 240px;
+  padding: 10px 12px;
+  border: none;
   font: inherit;
   font-size: 0.875rem;
-  line-height: 1.4;
+  line-height: 1.45;
   resize: vertical;
   box-sizing: border-box;
-  background: #fff;
+  background: transparent;
 }
 
 .orderNoteTextarea:focus {
   outline: none;
-  border-color: var(--color-primary, #297c3b);
+}
+
+.orderNoteTextarea:disabled {
+  opacity: 0.6;
+}
+
+.orderNoteComposerFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 6px 6px 12px;
+  border-top: 1px solid #f0f2f3;
+  background: #fafbfb;
+}
+
+.orderNoteCounter {
+  min-width: 0;
+  font-size: 0.72rem;
+  color: var(--color-gray, #9d9d9d);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .orderIconBtn {
@@ -1011,16 +1112,207 @@
   font-size: 0.8rem;
 }
 
-.orderTotalBlock {
-  margin-top: 4px;
-  padding-top: 12px;
-  border-top: 1px solid var(--account-hairline-color, #e2e6e8);
+.orderAsideHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
 }
 
-.orderTotalValue {
-  margin: 4px 0 0;
-  font-size: 1.25rem;
+.orderAsideHeadMain {
+  min-width: 0;
+}
+
+.orderAsideChatBtn {
+  position: relative;
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  height: 32px;
+  margin: 0;
+  padding: 0 12px 0 10px;
+  border: 1px solid var(--account-hairline-color, #e2e6e8);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--color-ink-black, #1d1c1b);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+
+.orderAsideChatBtn svg {
+  flex-shrink: 0;
+  color: var(--color-gray, #6e6d67);
+}
+
+.orderAsideChatBtn:hover:not(:disabled) {
+  border-color: #c8d9cc;
+  background: #f4faf5;
+  color: var(--color-brand-green, #297230);
+}
+
+.orderAsideChatBtn:hover:not(:disabled) svg {
+  color: inherit;
+}
+
+.orderAsideChatBtn:focus-visible {
+  outline: 2px solid var(--color-brand-green, #297230);
+  outline-offset: 2px;
+}
+
+.orderAsideChatBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.orderAsideChatBtnUnread {
+  border-color: color-mix(in srgb, var(--color-brand-green, #297230) 45%, #e2e6e8);
+  background: #f4faf5;
+  color: var(--color-brand-green, #297230);
+}
+
+.orderAsideChatBtnUnread svg {
+  color: inherit;
+}
+
+.orderAsideChatBadge {
+  min-width: 18px;
+  height: 18px;
+  margin-right: -4px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--color-brand-green, #297230);
+  color: #fff;
+  font-size: 10px;
   font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  box-sizing: border-box;
+}
+
+.orderTotalBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px 16px;
+  border: 1px solid var(--account-hairline-color, #e2e6e8);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.orderTotalList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+}
+
+.orderTotalRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+
+.orderTotalRow dt {
+  margin: 0;
+  color: var(--color-gray, #6e6d67);
+}
+
+.orderTotalRow dd {
+  margin: 0;
+  color: var(--color-ink-black, #1d1c1b);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.orderTotalRowMinus dd {
+  color: var(--color-brand-green, #297230);
+}
+
+.orderTotalRowGrand {
+  align-items: center;
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px dashed #dfe3e5;
+}
+
+.orderTotalRowGrand dt {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-ink-black, #1d1c1b);
+}
+
+.orderTotalRowGrand dd {
+  font-size: 1.375rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.orderTotalNotes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+}
+
+.orderTotalNote {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+}
+
+.orderTotalNote dt {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  font-weight: 500;
+}
+
+.orderTotalNote dd {
+  margin: 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.orderTotalNoteSub {
+  font-size: 0.72rem;
+  font-weight: 400;
+  opacity: 0.8;
+}
+
+.orderTotalNoteRefund {
+  background: #f3f4f6;
+  color: #4b5563;
+}
+
+.orderTotalNoteDue {
+  background: #fffbeb;
+  color: #8a5a00;
+  box-shadow: inset 0 0 0 1px #f3e2b3;
+}
+
+.orderTotalAction {
+  width: 100%;
+  justify-content: center;
 }
 
 .orderEventList,
@@ -1281,22 +1573,39 @@
   flex-wrap: wrap;
 }
 
-.orderChatUnreadLink {
+.orderChatLink {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   text-decoration: none;
   line-height: 1;
+  color: var(--admin-muted-fg, #6e6d67);
 }
 
-.orderChatUnreadIcon {
+.orderChatLink:hover {
+  color: #051826;
+}
+
+.orderChatIcon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  opacity: 0.85;
+  opacity: 0.75;
   color: inherit;
 }
 
+.orderChatCountGray {
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--admin-muted-fg, #6e6d67);
+}
+
+.orderChatLink:hover .orderChatCountGray {
+  color: inherit;
+}
+
+/* Support chat inbox — зелёный бейдж в списке потоков */
 .orderChatUnreadBadge {
   min-width: 18px;
   height: 18px;
@@ -1308,16 +1617,4 @@
   font-weight: 600;
   line-height: 18px;
   text-align: center;
-}
-
-.orderChatLinkMuted {
-  display: inline-flex;
-  opacity: 0.35;
-  text-decoration: none;
-  font-size: 14px;
-  line-height: 1;
-}
-
-.orderChatLinkMuted:hover {
-  opacity: 0.65;
 }

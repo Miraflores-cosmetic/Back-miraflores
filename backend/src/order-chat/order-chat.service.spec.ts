@@ -70,6 +70,26 @@ describe('OrderChatService', () => {
     );
   });
 
+  it('unreadCountForStaff splits support and order chats', async () => {
+    prisma.$queryRaw.mockResolvedValue([{ support: BigInt(3), orders: BigInt(5) }]);
+    await expect(svc.unreadCountForStaff('s1')).resolves.toEqual({ support: 3, orders: 5 });
+  });
+
+  it('read state never lags behind the latest message (DB clock ahead of app clock)', async () => {
+    const future = new Date(Date.now() + 60_000);
+    prisma.chatMessage.findFirst.mockResolvedValue({ createdAt: future });
+    await (svc as unknown as { upsertReadState(c: string, u: string): Promise<void> }).upsertReadState(
+      'c1',
+      's1',
+    );
+    expect(prisma.chatReadState.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: { conversationId: 'c1', userId: 's1', lastReadAt: future },
+        update: { lastReadAt: future },
+      }),
+    );
+  });
+
   it('unreadOrderChatCountsForStaff maps orderId → count', async () => {
     prisma.chatConversation.findMany.mockResolvedValue([
       { id: 'c1', orderId: 'o1' },

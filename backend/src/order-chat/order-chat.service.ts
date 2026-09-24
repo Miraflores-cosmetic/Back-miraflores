@@ -61,7 +61,8 @@ import {
   decodeSupportThreadCursor,
   encodeSupportThreadCursor,
   querySupportThreadsPage,
-  staffTotalUnreadCount,
+  staffUnreadBreakdown,
+  type StaffUnreadBreakdown,
 } from './order-chat-unread.util';
 
 const CUSTOMER_ORDER_THREADS_MAX = 50;
@@ -969,11 +970,19 @@ export class OrderChatService {
   }
 
   private async upsertReadState(conversationId: string, userId: string): Promise<void> {
+    // createdAt сообщений ставит БД, а now — часы приложения: при расхождении часов
+    // свежее сообщение осталось бы «непрочитанным», поэтому не опускаемся ниже последнего.
+    const latest = await this.prisma.chatMessage.findFirst({
+      where: { conversationId },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
+    });
     const now = new Date();
+    const lastReadAt = latest && latest.createdAt > now ? latest.createdAt : now;
     await this.prisma.chatReadState.upsert({
       where: { conversationId_userId: { conversationId, userId } },
-      create: { conversationId, userId, lastReadAt: now },
-      update: { lastReadAt: now },
+      create: { conversationId, userId, lastReadAt },
+      update: { lastReadAt },
     });
   }
 
@@ -1133,8 +1142,8 @@ export class OrderChatService {
     return out;
   }
 
-  async unreadCountForStaff(staffUserId: string): Promise<number> {
-    return staffTotalUnreadCount(this.prisma, staffUserId);
+  async unreadCountForStaff(staffUserId: string): Promise<StaffUnreadBreakdown> {
+    return staffUnreadBreakdown(this.prisma, staffUserId);
   }
 
   /**

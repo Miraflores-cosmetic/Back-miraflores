@@ -926,14 +926,133 @@ a.docChip:hover {
   border-radius: 0 !important;
 }
 
+/* Admin: мессенджер — клиент слева, сотрудники справа; пузырь по ширине текста. */
+.panelAdminPlain .messagesList {
+  gap: 14px;
+}
+
+.panelAdminPlain .dividerWrap {
+  display: none;
+}
+
+.messageStaff {
+  --oc-bubble-indent: 36px;
+  align-items: flex-end;
+}
+
+.messageCustomer {
+  --oc-bubble-indent: 36px;
+}
+
+.messageStaff .senderInfo {
+  flex-direction: row-reverse;
+  justify-content: flex-start;
+}
+
+.messageStaff .senderLeft {
+  flex: 0 1 auto;
+  flex-direction: row-reverse;
+}
+
+.messageStaff .senderLeft,
+.messageCustomer .senderLeft {
+  gap: 8px;
+}
+
+.messageStaff .senderName,
+.messageCustomer .senderName {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-ink-black);
+}
+
+.messageStaff .messageTime,
+.messageCustomer .messageTime {
+  font-size: 12px;
+}
+
+.messageStaff .messageBody,
+.messageCustomer .messageBody {
+  width: auto;
+  max-width: min(640px, calc(100% - var(--oc-bubble-indent)));
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  box-sizing: border-box;
+}
+
 .messageStaff .messageBody {
-  background: #f4faf5;
-  border: 1px solid color-mix(in srgb, var(--color-brand-green, #297230) 25%, #e2e6e8);
+  margin-right: var(--oc-bubble-indent);
+  border-top-right-radius: 4px;
+  background: #eef6ef;
+  border: 1px solid color-mix(in srgb, var(--color-brand-green, #297230) 22%, #e2e6e8);
 }
 
 .messageCustomer .messageBody {
+  margin-left: var(--oc-bubble-indent);
+  border-top-left-radius: 4px;
   background: #f5f7fa;
   border: 1px solid #e2e6e8;
+}
+
+.messageStaff .messageAttachments,
+.messageCustomer .messageAttachments,
+.messageStaff .messageDeleted,
+.messageCustomer .messageDeleted,
+.messageStaff .messageFooter,
+.messageCustomer .messageFooter {
+  box-sizing: border-box;
+  max-width: calc(100% - var(--oc-bubble-indent));
+}
+
+.messageCustomer .messageAttachments,
+.messageCustomer .messageDeleted,
+.messageCustomer .messageFooter {
+  margin-left: var(--oc-bubble-indent);
+}
+
+.messageStaff .messageAttachments,
+.messageStaff .messageDeleted,
+.messageStaff .messageFooter {
+  margin-right: var(--oc-bubble-indent);
+}
+
+.messageStaff .messageAttachments {
+  align-items: flex-end;
+}
+
+.messageStaff .docRow,
+.messageStaff .imgRow {
+  justify-content: flex-end;
+}
+
+.messageStaff .imgRowSingle .imgThumbBtn {
+  justify-content: flex-end;
+}
+
+.messageStaff .imgThumbSingle {
+  object-position: right center;
+}
+
+.messageStaff .messageDeleted,
+.messageCustomer .messageDeleted {
+  padding: 6px 12px;
+  border: 1px dashed #e2e6e8;
+  border-radius: 12px;
+  font-size: 13px;
+}
+
+.messageStaff .messageBody a {
+  color: var(--color-brand-green, #297230);
+}
+
+@media (max-width: 600px) {
+  .messageStaff,
+  .messageCustomer {
+    --oc-bubble-indent: 16px;
+  }
 }
 
 .avatarCustomer {

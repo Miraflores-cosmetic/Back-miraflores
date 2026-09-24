@@ -66,7 +66,7 @@ describe('filterAdminNav', () => {
       if (item.type === 'group') return item.children.map((c) => c.label);
       return [];
     });
-    expect(labels).toContain('Список');
+    expect(labels).toContain('Заказы');
     expect(labels).toContain('Чаты поддержки');
     expect(labels).not.toContain('Товары');
     expect(labels).not.toContain('Сотрудники');
@@ -110,12 +110,13 @@ describe('isGroupPathActive', () => {
     expect(isGroupPathActive(settingsGroup, '/admin/settings/seo')).toBe(true);
   });
 
-  it('чаты поддержки не раскрывают группу «Заказы»', () => {
-    const ordersGroup = ADMIN_NAV.find((i) => i.type === 'group' && i.id === 'orders');
-    expect(ordersGroup?.type).toBe('group');
-    if (ordersGroup?.type !== 'group') return;
-    expect(isGroupPathActive(ordersGroup, '/admin/orders/chat')).toBe(false);
-    expect(isGroupPathActive(ordersGroup, '/admin/orders/abc')).toBe(true);
+  it('«Заказы» active только на списке', () => {
+    const ordersLink = ADMIN_NAV.find((i) => i.type === 'link' && i.href === '/admin/orders');
+    expect(ordersLink?.type).toBe('link');
+    if (ordersLink?.type !== 'link') return;
+    expect(isNavLinkActive('/admin/orders', ordersLink.href, ordersLink.exact)).toBe(true);
+    expect(isNavLinkActive('/admin/orders/abc', ordersLink.href, ordersLink.exact)).toBe(false);
+    expect(isNavLinkActive('/admin/orders/chat', ordersLink.href, ordersLink.exact)).toBe(false);
   });
 
   it('user-groups открывает Settings, не Users link', () => {

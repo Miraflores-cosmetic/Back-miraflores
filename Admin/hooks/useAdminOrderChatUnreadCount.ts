@@ -3,18 +3,39 @@
 import { useCallback, useEffect, useState } from 'react';
 import { adminBackendJson } from '@/lib/adminBackendFetch';
 
-/** Счётчик непрочитанных реплик клиента в чатах заказов (глобально для staff). */
-export function useAdminOrderChatUnreadCount(enabled: boolean) {
-  const [count, setCount] = useState(0);
+export type AdminChatUnreadCounts = {
+  /** Чаты поддержки (инбокс /admin/orders/chat). */
+  support: number;
+  /** Чаты заказов (карточки заказов). */
+  orders: number;
+};
+
+const EMPTY: AdminChatUnreadCounts = { support: 0, orders: 0 };
+
+function positive(n: unknown): number {
+  return typeof n === 'number' && Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
+/** Счётчики непрочитанных реплик клиентов для staff: отдельно поддержка и чаты заказов. */
+export function useAdminOrderChatUnreadCount(enabled: boolean): AdminChatUnreadCounts {
+  const [counts, setCounts] = useState<AdminChatUnreadCounts>(EMPTY);
 
   const refresh = useCallback(async () => {
     if (!enabled) {
-      setCount(0);
+      setCounts(EMPTY);
       return;
     }
     try {
-      const data = await adminBackendJson<{ count?: number }>('orders/admin/chat/unread-count');
-      setCount(typeof data.count === 'number' && data.count > 0 ? data.count : 0);
+      const data = await adminBackendJson<{ count?: number; support?: number; orders?: number }>(
+        'orders/admin/chat/unread-count',
+      );
+      const next =
+        typeof data.support === 'number' || typeof data.orders === 'number'
+          ? { support: positive(data.support), orders: positive(data.orders) }
+          : { support: positive(data.count), orders: 0 };
+      setCounts((prev) =>
+        prev.support === next.support && prev.orders === next.orders ? prev : next,
+      );
     } catch {
       /* sidebar badge optional */
     }
@@ -42,5 +63,5 @@ export function useAdminOrderChatUnreadCount(enabled: boolean) {
     };
   }, [enabled, refresh]);
 
-  return count;
+  return counts;
 }

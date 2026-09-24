@@ -153,7 +153,7 @@ export function useAdminOrderChat(opts: {
     if (markReadTimerRef.current != null) clearTimeout(markReadTimerRef.current);
     markReadTimerRef.current = setTimeout(() => {
       markReadTimerRef.current = null;
-      void markReadIfVisible(false);
+      void markReadIfVisible();
     }, 450);
   }, [markReadIfVisible]);
 

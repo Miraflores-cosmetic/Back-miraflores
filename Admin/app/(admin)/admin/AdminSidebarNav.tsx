@@ -236,7 +236,7 @@ export function AdminSidebarNav({
   const roleLabel = staff?.isSuperAdmin ? 'Администратор' : 'Модератор';
   const ordersNavVisible =
     !!staff && staffCanSeeOrdersNav(staff.sections, staff.isSuperAdmin);
-  const chatUnreadCount = useAdminOrderChatUnreadCount(ordersNavVisible);
+  const chatUnread = useAdminOrderChatUnreadCount(ordersNavVisible);
 
   return (
     <aside className={styles.sidebar}>
@@ -260,8 +260,10 @@ export function AdminSidebarNav({
             const active = isNavLinkActive(pathname, item.href, item.exact);
             const showOrdersBadge =
               item.href === '/admin/orders' && unviewedOrdersCount > 0;
+            const showOrderChatsBadge =
+              item.href === '/admin/orders' && chatUnread.orders > 0;
             const showChatBadge =
-              item.href === '/admin/orders/chat' && chatUnreadCount > 0;
+              item.href === '/admin/orders/chat' && chatUnread.support > 0;
             return (
               <Link
                 key={item.href}
@@ -276,12 +278,21 @@ export function AdminSidebarNav({
                     {unviewedOrdersCount > 99 ? '99+' : unviewedOrdersCount}
                   </span>
                 ) : null}
+                {showOrderChatsBadge ? (
+                  <span
+                    className={`${styles.navBadge} ${styles.navBadgeOutline}`}
+                    title="Непрочитанные сообщения в чатах заказов"
+                    aria-label={`Непрочитанных в чатах заказов: ${chatUnread.orders}`}
+                  >
+                    {chatUnread.orders > 99 ? '99+' : chatUnread.orders}
+                  </span>
+                ) : null}
                 {showChatBadge ? (
                   <span
                     className={styles.navBadge}
-                    aria-label={`Непрочитанных в чатах: ${chatUnreadCount}`}
+                    aria-label={`Непрочитанных в чатах поддержки: ${chatUnread.support}`}
                   >
-                    {chatUnreadCount > 99 ? '99+' : chatUnreadCount}
+                    {chatUnread.support > 99 ? '99+' : chatUnread.support}
                   </span>
                 ) : null}
               </Link>

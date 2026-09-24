@@ -30,13 +30,20 @@ export async function batchUnreadCounts(
   return out;
 }
 
-/** Суммарный unread staff по всем беседам (без IN по всем conversationId). */
-export async function staffTotalUnreadCount(
+export type StaffUnreadBreakdown = { support: number; orders: number };
+
+/**
+ * Непрочитанные staff'ом сообщения клиентов раздельно: чаты поддержки (инбокс /admin/orders/chat)
+ * и чаты заказов (карточки заказов). Без IN по всем conversationId.
+ */
+export async function staffUnreadBreakdown(
   prisma: PrismaService,
   staffUserId: string,
-): Promise<number> {
-  const rows = await prisma.$queryRaw<Array<{ count: bigint }>>`
-    SELECT COUNT(*)::bigint AS count
+): Promise<StaffUnreadBreakdown> {
+  const rows = await prisma.$queryRaw<Array<{ support: bigint | null; orders: bigint | null }>>`
+    SELECT
+      COUNT(*) FILTER (WHERE c.kind = 'SUPPORT'::"ChatConversationKind")::bigint AS support,
+      COUNT(*) FILTER (WHERE c.kind = 'ORDER'::"ChatConversationKind")::bigint AS orders
     FROM "ChatMessage" m
     INNER JOIN "ChatConversation" c ON c.id = m."conversationId"
     LEFT JOIN "ChatReadState" rs
@@ -47,7 +54,10 @@ export async function staffTotalUnreadCount(
       AND m."deletedAt" IS NULL
       AND m."createdAt" > COALESCE(rs."lastReadAt", to_timestamp(0))
   `;
-  return Number(rows[0]?.count ?? 0n);
+  return {
+    support: Number(rows[0]?.support ?? 0n),
+    orders: Number(rows[0]?.orders ?? 0n),
+  };
 }
 
 /** Keyset-курсор инбокса поддержки: (есть unread, время последней активности, id). */

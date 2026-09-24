@@ -57,8 +57,8 @@ export class OrderChatAdminController {
 
   @Get('chat/unread-count')
   async unreadStaff(@CurrentUser('sub') staffId: string) {
-    const count = await this.chat.unreadCountForStaff(staffId);
-    return { count };
+    const { support, orders } = await this.chat.unreadCountForStaff(staffId);
+    return { count: support + orders, support, orders };
   }
 
   @Get('chat/ws-token')
@@ -196,6 +196,13 @@ export class OrderChatAdminController {
   ) {
     await this.chat.assertStaffCanAccessOrder(orderId, user.sub, user.role);
     return this.chat.postOrderMessage(orderId, user.sub, user.role, dto);
+  }
+
+  @Get(':orderId/chat/unread-count')
+  async orderUnread(@CurrentUser() user: JwtPayload, @Param('orderId') orderId: string) {
+    await this.chat.assertStaffCanAccessOrder(orderId, user.sub, user.role);
+    const map = await this.chat.unreadOrderChatCountsForStaff(user.sub, [orderId]);
+    return { count: map[orderId] ?? 0 };
   }
 
   @Post(':orderId/chat/read')

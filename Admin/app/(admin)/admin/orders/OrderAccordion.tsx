@@ -8,6 +8,7 @@ const styles = { ...catalogStyles, ...orderStyles };
 export function OrderAccordion({
   id,
   title,
+  count,
   open,
   onToggle,
   actions,
@@ -15,6 +16,7 @@ export function OrderAccordion({
 }: {
   id: string;
   title: string;
+  count?: number;
   open: boolean;
   onToggle: () => void;
   actions?: React.ReactNode;
@@ -32,9 +34,18 @@ export function OrderAccordion({
           onClick={onToggle}
         >
           <span className={styles.orderAccordionChevron} aria-hidden>
-            {open ? '▾' : '▸'}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+              <path
+                d="m9 6 6 6-6 6"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
           </span>
           <span className={styles.orderAccordionTitle}>{title}</span>
+          {count ? <span className={styles.orderAccordionCount}>{count}</span> : null}
         </button>
         {actions ? (
           <div className={styles.orderAccordionActions} onClick={(e) => e.stopPropagation()}>
