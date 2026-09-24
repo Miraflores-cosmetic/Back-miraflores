@@ -89,6 +89,13 @@ fi
 SHA="$(git -C "$FRONT_DIR" rev-parse HEAD)"
 log "deploy front $SHA → $DEPLOY_HOST"
 
+log "rsync packages (order-chat-*) → $DEPLOY_HOST:$DEPLOY_PATH/packages"
+"${RSYNC[@]}" \
+  --exclude node_modules \
+  --exclude dist \
+  "$MONO_ROOT/packages/" \
+  "$DEPLOY_HOST:$DEPLOY_PATH/packages/"
+
 if [[ "$DO_RSYNC" -eq 1 ]]; then
   "${SSH[@]}" "$DEPLOY_HOST" bash -s <<REMOTE
 set -euo pipefail
