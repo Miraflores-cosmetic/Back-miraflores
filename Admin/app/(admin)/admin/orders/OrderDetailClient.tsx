@@ -25,6 +25,7 @@ import {
 import { parseJcosAddressMeta } from '@/lib/shipping/addressShippingMeta';
 import { GIFT_PARTIAL_REFUND_POLICY } from '@/lib/giftHoldCopy';
 import { OrderAccordion, OrderIconBtn } from './OrderAccordion';
+import { AdminOrderSideChat } from './AdminOrderSideChat';
 import { OrderAddressEditModal } from './OrderAddressEditModal';
 import { OrderItemsEditModal } from './OrderItemsEditModal';
 import { OrderShippingCostEditModal } from './OrderShippingCostEditModal';
@@ -93,9 +94,13 @@ const SOFT_POLL_FAIL_BANNER_AFTER = 3;
 export function OrderDetailClient({
   orderId,
   canOrdersFinance = false,
+  staffUserId,
+  staffAvatarUrl,
 }: {
   orderId: string;
   canOrdersFinance?: boolean;
+  staffUserId?: string | null;
+  staffAvatarUrl?: string | null;
 }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -110,6 +115,7 @@ export function OrderDetailClient({
   const [providerRefund, setProviderRefund] = useState(true);
   const [confirm, setConfirm] = useState<ConfirmState>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [orderRightTab, setOrderRightTab] = useState<'actions' | 'chat'>('actions');
   const [copied, setCopied] = useState(false);
   const [addressModalOpen, setAddressModalOpen] = useState(false);
   const [shippingCostModalOpen, setShippingCostModalOpen] = useState(false);
@@ -184,6 +190,13 @@ export function OrderDetailClient({
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || window.location.hash !== '#order-chat') return;
+    window.requestAnimationFrame(() => {
+      document.getElementById('order-chat')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+  }, [orderId, loading]);
 
   const editModalOpen =
     itemsModalOpen || addressModalOpen || shippingCostModalOpen;
@@ -1069,7 +1082,34 @@ export function OrderDetailClient({
           )}
         </div>
 
-        <aside className={styles.orderDetailAside}>
+        <div className={styles.orderDetailRight}>
+        <div className={styles.orderDetailRightTabs} role="tablist" aria-label="Панель заказа">
+          <button
+            type="button"
+            role="tab"
+            className={styles.orderDetailRightTab}
+            aria-selected={orderRightTab === 'actions'}
+            onClick={() => setOrderRightTab('actions')}
+          >
+            Действия
+          </button>
+          <button
+            type="button"
+            role="tab"
+            className={styles.orderDetailRightTab}
+            aria-selected={orderRightTab === 'chat'}
+            onClick={() => setOrderRightTab('chat')}
+          >
+            Чат
+          </button>
+        </div>
+        <aside
+          className={`${styles.orderDetailAside} ${
+            orderRightTab !== 'actions' ? styles.orderDetailRightPaneHidden : ''
+          }`}
+          role="tabpanel"
+          aria-label="Действия по заказу"
+        >
           <div>
             <p className={styles.orderAsideTitle}>Статус</p>
             <div className={styles.orderStatusRow}>
@@ -1655,6 +1695,21 @@ export function OrderDetailClient({
             </div>
           </OrderAccordion>
         </aside>
+        <section
+          id="order-chat"
+          className={`${styles.orderDetailChatAside} ${
+            orderRightTab !== 'chat' ? styles.orderDetailRightPaneHidden : ''
+          }`}
+          role="tabpanel"
+          aria-label="Чат с клиентом"
+        >
+          <AdminOrderSideChat
+            orderId={orderId}
+            staffUserId={staffUserId}
+            staffAvatarUrl={staffAvatarUrl}
+          />
+        </section>
+        </div>
       </div>
 
       <ConfirmDialog

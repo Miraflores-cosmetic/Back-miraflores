@@ -153,6 +153,10 @@ describe('OrdersAdminService.cancel', () => {
         register: vi.fn(),
       } as never,
       { get: vi.fn().mockReturnValue('http://localhost:5173') } as never,
+      {
+        applyRetentionForOrder: vi.fn(),
+        seedCustomerNoteFromOrder: vi.fn(),
+      } as never,
     );
   });
 
@@ -285,6 +289,10 @@ describe('OrdersAdminService.refund + gift RELEASE', () => {
         register: vi.fn(),
       } as never,
       { get: vi.fn().mockReturnValue('http://localhost:5173') } as never,
+      {
+        applyRetentionForOrder: vi.fn(),
+        seedCustomerNoteFromOrder: vi.fn(),
+      } as never,
     );
   });
 
@@ -503,6 +511,10 @@ describe('OrdersAdminService.updateShippingAddress', () => {
         register: vi.fn(),
       } as never,
       { get: vi.fn().mockReturnValue('http://localhost:5173') } as never,
+      {
+        applyRetentionForOrder: vi.fn(),
+        seedCustomerNoteFromOrder: vi.fn(),
+      } as never,
     );
   });
 
@@ -675,6 +687,10 @@ describe('OrdersAdminService.updateItems', () => {
         register: vi.fn(),
       } as never,
       { get: vi.fn().mockReturnValue('http://localhost:5173') } as never,
+      {
+        applyRetentionForOrder: vi.fn(),
+        seedCustomerNoteFromOrder: vi.fn(),
+      } as never,
     );
   });
 

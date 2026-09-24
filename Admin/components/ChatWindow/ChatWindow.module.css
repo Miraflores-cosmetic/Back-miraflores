@@ -1,0 +1,953 @@
+/**
+ * Glass (Figma): Light −45° / 80%, Refraction 55, Depth 46, Dispersion 39, Frost 32, Splay 7
+ * В CSS: световой слой −45° @ 80%, saturate ≈ refraction, слои тени ≈ depth + splay,
+ * лёгкий хроматический слой ≈ dispersion, backdrop blur ≈ frost.
+ */
+.root {
+  position: fixed;
+  right: 8px;
+  bottom: 8px;
+  z-index: 45;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.rootVisible {
+  pointer-events: auto;
+}
+
+/* Встроенный «угол»: абсолютно в родителе (модалка ЛК), визуально как .root без портала */
+.embedOverlayAnchor {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 3;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.embedOverlayAnchorVisible {
+  pointer-events: auto;
+}
+
+.root.rootVisible > .panel,
+.embedOverlayAnchor.embedOverlayAnchorVisible > .panel,
+.embedShell.embedShellVisible > .panel {
+  transform: translate3d(0, 0, 0);
+  transition: transform 0.38s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Встроенный режим (колонка админки): без fixed, на всю высоту контейнера */
+.embedShell {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.embedShellVisible {
+  pointer-events: auto;
+}
+
+.panel {
+  --chat-stroke: color-mix(in srgb, var(--color-black) 16%, transparent);
+
+  /**
+   * Родитель `.root` держит `pointer-events: none` до конца анимации появления —
+   * иначе клики «пробивают» стекло на фон. По спецификации потомок с `auto`
+   * снова принимает события, и скрепка/отправка работают сразу после открытия.
+   */
+  pointer-events: auto;
+
+  position: relative;
+  isolation: isolate;
+  transform: translate3d(calc(100% + 16px), 0, 0);
+  width: min(520px, calc(100vw - 16px));
+  height: min(760px, calc(100vh - 24px));
+  max-height: calc(100vh - 24px);
+  overflow: hidden;
+  border-radius: 8px;
+  box-sizing: border-box;
+  /* Базовая матовая подложка под blur */
+  background: linear-gradient(152deg, rgba(246, 246, 246, 0.9) 0%, rgba(255, 255, 255, 0.9) 100%);
+  /* Frost 32 → blur ~12.5px (масштаб от Frost 28 ≈ 11px); Refraction 55 → saturate */
+  backdrop-filter: blur(12.5px) saturate(1.55) contrast(1.06) brightness(1.02);
+  -webkit-backdrop-filter: blur(12.5px) saturate(1.55) contrast(1.06) brightness(1.02);
+  /* Внешняя тень: x:-2 y:2 blur, 12% --color-black; внутренние блики без лишних «тяжёлых» теней */
+  box-shadow:
+    0 0 0 0.5px rgba(255, 255, 255, 0.35) inset,
+    -2px 2px 8px color-mix(in srgb, var(--color-black) 12%, transparent),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.72),
+    inset 0 -0.5px 0 rgba(0, 0, 0, 0.04);
+  outline: 0.5px solid var(--chat-stroke);
+  outline-offset: -0.5px;
+}
+
+.panelEmbedded {
+  width: 100% !important;
+  height: 100% !important;
+  /* В колонке админки ограничены родителем; без этого панель тянула страницу по высоте ленты */
+  min-height: 0 !important;
+  max-height: 100% !important;
+  flex: 1;
+  transform: none !important;
+}
+
+/* Light −45° / 80% */
+.panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.88;
+  background: linear-gradient(-45deg, rgba(255, 255, 255, 0.8) 0%, rgba(255, 255, 255, 0) 55%);
+}
+
+/* Dispersion 39 — едва заметный перелив (имитация дисперсии) */
+.panel::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.4;
+  background: linear-gradient(
+    118deg,
+    rgba(255, 255, 255, 0.14) 0%,
+    transparent 38%,
+    rgba(215, 230, 255, 0.1) 72%,
+    rgba(255, 245, 235, 0.08) 100%
+  );
+  mix-blend-mode: soft-light;
+}
+
+.panelInner {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+}
+
+.header {
+  flex-shrink: 0;
+  height: 60px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  box-sizing: border-box;
+}
+
+.headerCompact {
+  display: none;
+}
+
+.headerMain {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  gap: 12px;
+  box-sizing: border-box;
+}
+
+.title {
+  margin: 0;
+  font-family: var(--font-commissioner);
+  font-size: var(--text-card-20-400);
+  font-weight: 400;
+  text-transform: uppercase;
+  color: var(--color-ink-black);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.titleNormalCase {
+  text-transform: none;
+}
+
+.closeBtn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-ink-black);
+  cursor: pointer;
+}
+
+.closeBtn:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.closeBtn:focus-visible {
+  outline: 2px solid var(--color-blue);
+  outline-offset: 2px;
+}
+
+/* Под headerMain / над footerMain: визуально 0.5px (1px + scaleY), градиент без --chat-stroke */
+.headerMainRule,
+.footerMainTopRule {
+  align-self: stretch;
+  width: 100%;
+  height: 1px;
+  flex-shrink: 0;
+  transform: scaleY(0.5);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-black) 20%, transparent) 0%,
+    transparent 100%
+  );
+}
+
+.headerMainRule {
+  transform-origin: top center;
+}
+
+.footerMainTopRule {
+  transform-origin: bottom center;
+}
+
+.messagesScroll {
+  /* flex-basis 0 — иначе лента тянет колонку по intrinsic высоте и футер оказывается обрезан при overflow родителя */
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+.messagesList {
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.loadOlderWrap {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  padding: 4px 0 12px;
+  box-sizing: border-box;
+}
+
+.loadOlderBtn {
+  font-family: var(--font-commissioner);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-blue);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.loadOlderBtn:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.loadOlderBtn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.loadOlderBtn:focus-visible {
+  outline: 2px solid var(--color-blue);
+  outline-offset: 2px;
+}
+
+.message {
+  position: relative;
+  align-self: stretch;
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 6px;
+  box-sizing: border-box;
+}
+
+.senderInfo {
+  display: inline-flex;
+  flex-direction: row;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  max-width: 100%;
+  width: 100%;
+}
+
+.senderLeft {
+  display: inline-flex;
+  flex-direction: row;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1 1 0;
+}
+
+.avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: var(--color-bright-snow);
+}
+
+.senderName {
+  font-family: var(--font-commissioner);
+  font-size: var(--text-body);
+  font-weight: 400;
+  color: var(--color-black);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.messageHeadExtra {
+  flex-shrink: 0;
+}
+
+.messageFooter {
+  margin-top: 8px;
+}
+
+.messageTime {
+  font-family: var(--font-commissioner);
+  font-size: 13px;
+  font-weight: var(--text-caption-weight);
+  color: var(--color-gray);
+  flex-shrink: 0;
+}
+
+.editedBadge {
+  font-family: var(--font-commissioner);
+  font-size: 11px;
+  font-weight: var(--text-caption-weight);
+  color: var(--color-gray);
+  flex-shrink: 0;
+}
+
+.messageBody {
+  margin: 0;
+  font-family: var(--font-commissioner);
+  font-size: var(--text-body);
+  font-weight: var(--text-body-weight);
+  color: var(--color-black);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  width: 100%;
+}
+
+.messageBody a {
+  color: var(--color-blue, #3d83f6);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.messagePending {
+  opacity: 0.72;
+}
+
+.imgThumbFallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 4rem;
+  min-height: 4rem;
+  padding: 0.5rem;
+  font-size: 12px;
+  color: var(--color-gray);
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 8px;
+}
+
+.messageAttachments {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  width: 100%;
+  margin-top: 0.125rem;
+}
+
+.docRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.docChip {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.375rem;
+  max-width: 100%;
+  padding: 0.375rem 0.625rem;
+  border-radius: 0.375rem;
+  background: rgba(255, 255, 255, 0.55);
+  outline: 0.5px solid var(--chat-stroke);
+  outline-offset: -0.5px;
+  box-sizing: border-box;
+}
+
+a.docChip {
+  text-decoration: none;
+  color: inherit;
+}
+
+a.docChip:hover {
+  background: rgba(255, 255, 255, 0.75);
+}
+
+.docChipIcon {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  display: block;
+}
+
+.docChipName {
+  font-family: var(--font-commissioner);
+  font-size: var(--text-caption);
+  font-weight: var(--text-caption-weight);
+  color: var(--color-black);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.imgRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.imgRowSingle {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  gap: 0.5rem;
+}
+
+.imgThumbBtn {
+  display: block;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  cursor: zoom-in;
+  border-radius: 0.375rem;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.imgRowSingle .imgThumbBtn {
+  width: 100%;
+  flex-shrink: 1;
+  align-self: stretch;
+  display: flex;
+  justify-content: flex-start;
+  align-items: flex-start;
+}
+
+.imgThumb {
+  width: 7.5rem;
+  height: 5.625rem;
+  border-radius: 0.375rem;
+  object-fit: cover;
+  display: block;
+  background: var(--color-bright-snow);
+}
+
+/* Одно фото: во всю ширину ленты, лимит по высоте на 25% выше базового min(36vh, 13rem) */
+.imgThumbSingle {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: min(45vh, 16.25rem);
+  object-fit: contain;
+  object-position: left center;
+  background: var(--color-bright-snow);
+  border-radius: 0.375rem;
+}
+
+.imgThumbBtn:focus-visible {
+  outline: 2px solid var(--color-blue);
+  outline-offset: 2px;
+}
+
+.imgThumbBtn:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Горизонтальная засечка между днями (не время у каждой реплики). */
+.daySeparatorWrap {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  padding: 10px 16px 4px;
+  box-sizing: border-box;
+}
+
+.daySeparatorText {
+  margin: 0;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-family: var(--font-commissioner);
+  font-size: var(--text-caption);
+  font-weight: var(--text-caption-weight);
+  line-height: 1.35;
+  color: var(--color-gray);
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.dividerWrap {
+  width: 24px;
+  height: 16px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  align-self: flex-start;
+  box-sizing: border-box;
+}
+
+/* Вертикальная полоса 0.5 × 16px */
+.dividerLine {
+  width: 1px;
+  height: 16px;
+  transform: scaleX(0.5);
+  background: var(--chat-stroke);
+  flex-shrink: 0;
+}
+
+.emptyHint {
+  margin: 0;
+  font-family: var(--font-commissioner);
+  font-size: var(--text-caption);
+  font-weight: var(--text-caption-weight);
+  color: var(--color-gray);
+  padding: 8px 0;
+}
+
+.footer {
+  flex-shrink: 0;
+  min-height: 0;
+  height: auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  box-sizing: border-box;
+}
+
+.footerMain {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: row;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 8px 12px 8px 16px;
+  box-sizing: border-box;
+  min-height: 2.75rem;
+}
+
+.input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 2.25rem;
+  max-height: 12rem;
+  padding: 0.35rem 0.5rem;
+  border: none;
+  border-radius: 0.375rem;
+  background: transparent;
+  font-family: var(--font-commissioner);
+  font-size: var(--text-body);
+  font-weight: var(--text-body-weight);
+  color: var(--color-black);
+  box-sizing: border-box;
+  line-height: 1.45;
+  resize: none;
+  overflow-y: auto;
+}
+
+.input::placeholder {
+  color: var(--color-gray);
+}
+
+.input:focus {
+  outline: none;
+}
+
+.sendBtn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-black);
+  cursor: pointer;
+}
+
+.sendBtn:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.sendBtn:focus-visible {
+  outline: 2px solid var(--color-blue);
+  outline-offset: 2px;
+}
+
+.sendIcon {
+  width: 2rem;
+  height: 2rem;
+  display: block;
+  flex-shrink: 0;
+  color: var(--color-black);
+}
+
+.chatErrorBanner {
+  margin: 0 12px 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-family: var(--font-commissioner);
+  font-size: var(--text-caption);
+  color: #b42318;
+  background: rgba(180, 35, 24, 0.08);
+  box-sizing: border-box;
+}
+
+.messageDeleted {
+  margin: 0;
+  font-family: var(--font-commissioner);
+  font-size: var(--text-caption);
+  font-weight: var(--text-caption-weight);
+  font-style: italic;
+  color: var(--color-gray);
+}
+
+.messageDeleteBtn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  margin: 0 4px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-gray);
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.message:hover .messageDeleteBtn,
+.messageDeleteBtn:focus-visible {
+  opacity: 1;
+}
+
+.messageDeleteBtn:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--color-black);
+}
+
+.footerPendingHint {
+  margin: 0;
+  padding: 6px 16px 0;
+  font-family: var(--font-commissioner);
+  font-size: var(--text-caption);
+  font-weight: var(--text-caption-weight);
+  color: var(--color-gray);
+  white-space: pre-line;
+}
+
+.composerBanner {
+  margin: 0;
+  padding: 8px 16px 0;
+  font-family: var(--font-commissioner);
+  font-size: var(--h5-size, 0.75rem);
+  font-weight: var(--h5-weight, 600);
+  text-transform: uppercase;
+  color: var(--color-text-muted, rgba(0, 0, 0, 0.55));
+  line-height: 1.35;
+}
+
+.pendingOutgoingStrip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px 4px;
+  box-sizing: border-box;
+}
+
+.pendingOutgoingImageChip {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 4px 8px 4px 4px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.05);
+  border: 1px solid color-mix(in srgb, var(--color-black) 8%, transparent);
+  box-sizing: border-box;
+}
+
+.pendingOutgoingThumbWrap {
+  flex-shrink: 0;
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.06);
+  border: 1px solid color-mix(in srgb, var(--color-black) 10%, transparent);
+}
+
+.pendingOutgoingRemoveIcon {
+  font-size: 16px;
+  line-height: 1;
+  font-weight: 500;
+  margin-top: -1px;
+}
+
+.pendingOutgoingThumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  pointer-events: none;
+  user-select: none;
+}
+
+.pendingOutgoingUploadingOverlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.pendingOutgoingSpinner {
+  width: 22px;
+  height: 22px;
+  border: 2px solid color-mix(in srgb, var(--color-black) 25%, transparent);
+  border-top-color: var(--color-black);
+  border-radius: 50%;
+  animation: chatPendingSpin 0.7s linear infinite;
+}
+
+.pendingOutgoingDocSpinner {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin-left: 4px;
+  border: 2px solid color-mix(in srgb, var(--color-black) 25%, transparent);
+  border-top-color: var(--color-black);
+  border-radius: 50%;
+  animation: chatPendingSpin 0.7s linear infinite;
+}
+
+@keyframes chatPendingSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.pendingOutgoingDoc {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.05);
+  border: 1px solid color-mix(in srgb, var(--color-black) 8%, transparent);
+  box-sizing: border-box;
+}
+
+.pendingOutgoingDocRemoveBtn {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  margin: 0 0 0 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.12);
+  color: var(--color-ink-black);
+  cursor: pointer;
+}
+
+.pendingOutgoingDocRemoveBtn:hover {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.pendingOutgoingDocRemoveBtn:focus-visible {
+  outline: 2px solid var(--color-blue);
+  outline-offset: 1px;
+}
+
+.pendingOutgoingDocName {
+  font-family: var(--font-commissioner);
+  font-size: var(--text-caption);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* Не display:none — WebKit может не отдавать файлы в change при активации через <label> */
+.fileInputHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+  bottom: 0;
+  left: 0;
+}
+
+.attachBtn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-black);
+  cursor: pointer;
+}
+
+.attachBtn:hover:not(.attachBtnBlocked) {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.attachBtnBlocked,
+.attachBtn:disabled,
+.sendBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.attachIcon {
+  width: 1.375rem;
+  height: 1.375rem;
+  display: block;
+  flex-shrink: 0;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.panelAdminPlain {
+  background: #fff !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
+  outline: 1px solid var(--account-hairline-color, #e2e6e8) !important;
+}
+
+.panelAdminPlain::before,
+.panelAdminPlain::after {
+  display: none !important;
+}
+
+.messageStaff .messageBody {
+  background: #f4faf5;
+  border: 1px solid color-mix(in srgb, var(--color-brand-green, #297230) 25%, #e2e6e8);
+}
+
+.messageCustomer .messageBody {
+  background: #f5f7fa;
+  border: 1px solid #e2e6e8;
+}
+
+.avatarCustomer {
+  background: linear-gradient(135deg, #d8dee6 0%, #eef1f5 100%);
+}
+
+.newMessagesBar {
+  position: sticky;
+  top: 8px;
+  z-index: 2;
+  display: flex;
+  justify-content: center;
+  padding: 4px 0 8px;
+  pointer-events: none;
+}
+
+.newMessagesBtn {
+  pointer-events: auto;
+  appearance: none;
+  border: 1px solid var(--account-hairline-color, #e2e6e8);
+  border-radius: 999px;
+  background: #fff;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}

@@ -13,17 +13,15 @@ export function isStaffDisplayNameDirty(
 
 export function formatStaffLastLogin(iso: string | null): string {
   if (!iso) return 'никогда';
-  try {
-    return new Date(iso).toLocaleString('ru-RU', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  } catch {
-    return '—';
-  }
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 export function staffAvatarAltText(displayName: string | null | undefined, email: string | null | undefined): string {

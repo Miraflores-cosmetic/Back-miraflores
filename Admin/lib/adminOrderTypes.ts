@@ -9,6 +9,8 @@ export type AdminOrderListItem = {
   refundedAmount?: number;
   userId: string | null;
   createdAt: string;
+  /** Непрочитанные сообщения клиента в чате заказа (для текущего staff). */
+  chatUnreadCount?: number;
 };
 
 export type AdminOrderListResponse = {

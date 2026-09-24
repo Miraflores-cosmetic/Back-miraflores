@@ -8,6 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { OrderStatus, PaymentStatus, Prisma, ShipmentProvider } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { scheduleAfterRlsCommitWithBypass } from '../rls/rls-after-commit';
 import { CatalogPublicService } from '../catalog/catalog.public.service';
 import { PromoPublicService } from '../promo/promo.service';
 import { promoConsumingRedemptionWhere } from '../promo/promo-redemption.util';
@@ -34,6 +35,7 @@ import { applyPaidInTx } from './mark-order-paid';
 import { YooKassaService } from './yookassa.service';
 import { OrderPayTokenService } from './order-pay-token.service';
 import { OrderLifecycleService } from './order-lifecycle.service';
+import { OrderChatService } from '../order-chat/order-chat.service';
 import { formatPhoneE164, isValidPhone } from '../common/phone.util';
 import {
   GIFT_PURCHASE_SKU,
@@ -96,6 +98,7 @@ export class OrdersPublicService {
     private readonly shippingQuotes: ShippingQuoteService,
     private readonly shippingServerEstimate: ShippingServerEstimateService,
     private readonly lifecycle: OrderLifecycleService,
+    private readonly orderChat: OrderChatService,
   ) {}
 
   /**
@@ -725,6 +728,10 @@ export class OrdersPublicService {
 
     this.assertIdempotentGuest(order, guestId);
 
+    scheduleAfterRlsCommitWithBypass(this.prisma, () =>
+      this.orderChat.seedCustomerNoteFromOrder(order.id),
+    );
+
     if (
       order.status === OrderStatus.AWAITING_PAYMENT &&
       order.total > 0 &&
@@ -789,6 +796,11 @@ export class OrdersPublicService {
     if (result.abandoned && result.pendingExternalIds.length) {
       await this.yookassa.cancelPaymentsBestEffort(result.pendingExternalIds);
     }
+    if (result.abandoned) {
+      scheduleAfterRlsCommitWithBypass(this.prisma, () =>
+        this.orderChat.applyRetentionForOrder(result.id, OrderStatus.CANCELLED),
+      );
+    }
     return {
       id: result.id,
       status: result.status,
@@ -846,6 +858,9 @@ export class OrdersPublicService {
       if (pendingExternalIds.length) {
         await this.yookassa.cancelPaymentsBestEffort(pendingExternalIds);
       }
+      scheduleAfterRlsCommitWithBypass(this.prisma, () =>
+        this.orderChat.applyRetentionForOrder(order.id, OrderStatus.CANCELLED),
+      );
       cancelled += 1;
     }
     return cancelled;

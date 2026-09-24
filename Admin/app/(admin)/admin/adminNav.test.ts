@@ -66,7 +66,8 @@ describe('filterAdminNav', () => {
       if (item.type === 'group') return item.children.map((c) => c.label);
       return [];
     });
-    expect(labels).toContain('Заказы');
+    expect(labels).toContain('Список');
+    expect(labels).toContain('Чаты поддержки');
     expect(labels).not.toContain('Товары');
     expect(labels).not.toContain('Сотрудники');
   });

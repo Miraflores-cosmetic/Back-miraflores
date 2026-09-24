@@ -131,6 +131,7 @@ function makeService() {
       shippingQuotes,
       shippingServerEstimate as never,
       lifecycle as never,
+      { seedCustomerNoteFromOrder: vi.fn() } as never,
     ),
     lifecycle,
     payTokens,

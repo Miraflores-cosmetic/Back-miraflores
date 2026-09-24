@@ -2,7 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { ConfigService } from '@nestjs/config';
-import { json, raw, urlencoded } from 'express';
+import { json, raw, urlencoded, type NextFunction, type Request, type Response } from 'express';
 import { mkdirSync } from 'fs';
 import { join } from 'path';
 import { AppModule } from './app.module';
@@ -41,7 +41,15 @@ async function bootstrap() {
     config.get<string>('LOCAL_UPLOADS_DIR')?.trim() ||
     join(backendRootDir(), '.data', 'local-uploads');
   mkdirSync(localDir, { recursive: true });
-  /** Файлы с диска: http://host:3001/uploads/... (не под /api/v1) */
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const path = req.path ?? '';
+    if (path.startsWith('/uploads/chat')) {
+      res.status(404).end();
+      return;
+    }
+    next();
+  });
+  /** Файлы с диска: http://host:3001/uploads/... (не под /api/v1; chat/ — только signed API) */
   app.useStaticAssets(localDir, { prefix: '/uploads/' });
 
   app.setGlobalPrefix('api/v1');

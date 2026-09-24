@@ -86,6 +86,32 @@ export function accountOrdersUrl(siteUrl: string): string {
   return `${site}/profile?tab=orders`;
 }
 
+/** Deep-link чата по заказу в ЛК (Front открывает модалку по `chatOrder`). */
+export function accountOrderChatUrl(siteUrl: string, orderId: string): string {
+  const site = siteUrl.replace(/\/+$/, '') || 'https://miraflores-shop.com';
+  const id = orderId.trim();
+  return `${site}/profile?tab=orders&chatOrder=${encodeURIComponent(id)}`;
+}
+
+/** Deep-link общего чата поддержки (Front: `chatSupport=1`). */
+export function accountSupportChatUrl(siteUrl: string): string {
+  const site = siteUrl.replace(/\/+$/, '') || 'https://miraflores-shop.com';
+  return `${site}/profile?chatSupport=1`;
+}
+
+/** Превью текста сообщения чата для email. */
+export function chatMessageSnippet(body: string, attachmentCount: number): string {
+  const t = body.trim();
+  if (t) return t.slice(0, 280);
+  if (attachmentCount > 0) return '(вложение)';
+  return '…';
+}
+
+export function customerEmailGreeting(displayName: string | null | undefined): string {
+  const n = displayName?.trim();
+  return n ? `${n}, ` : '';
+}
+
 /**
  * Deep-link оплаты из письма: Front `/order/pay` кладёт payToken в sessionStorage
  * и сразу стартует ЮKassa (осознанный exception к «payToken не в URL»).

@@ -25,6 +25,7 @@ import { AssistantModule } from './assistant/assistant.module';
 import { OnecModule } from './onec/onec.module';
 import { UserGroupsModule } from './user-groups/user-groups.module';
 import { NewsletterModule } from './newsletter/newsletter.module';
+import { OrderChatModule } from './order-chat/order-chat.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RlsInterceptor } from './rls/rls.interceptor';
 
@@ -66,6 +67,7 @@ import { RlsInterceptor } from './rls/rls.interceptor';
     OnecModule,
     UserGroupsModule,
     NewsletterModule,
+    OrderChatModule,
   ],
   controllers: [HealthController],
   providers: [

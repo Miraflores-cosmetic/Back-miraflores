@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { ADMIN_ACCESS_TOKEN_COOKIE } from '@/lib/adminAuth';
 import { isAllowedAdminBackendPath } from '@/lib/adminBackendAllowlist';
 import { getServerApiBase } from '@/lib/serverApiBase';
+import { rejectForeignOriginMutations } from '@/lib/adminMutatingOrigin';
 
 export const runtime = 'nodejs';
 
@@ -43,6 +44,9 @@ async function fetchUpstream(
 }
 
 async function proxy(request: NextRequest, segments: string[], method: string) {
+  const originBlock = rejectForeignOriginMutations(request);
+  if (originBlock) return originBlock;
+
   if (!isAllowedAdminBackendPath(segments)) {
     return NextResponse.json({ message: 'Forbidden' }, { status: 403 });
   }
@@ -63,20 +67,21 @@ async function proxy(request: NextRequest, segments: string[], method: string) {
   if (!['GET', 'HEAD'].includes(method)) {
     const ct = request.headers.get('content-type') ?? '';
     if (ct.includes('multipart/form-data')) {
-      const buf = await request.arrayBuffer();
-      if (buf.byteLength === 0) {
+      if (!request.body) {
         return NextResponse.json({ message: 'Пустое тело запроса' }, { status: 400 });
       }
-      headers['Content-Type'] = ct;
-      headers['Content-Length'] = String(buf.byteLength);
-      init.body = buf;
-      bodyBackup = buf.slice(0);
+      if (ct) headers['Content-Type'] = ct;
+      const cl = request.headers.get('content-length');
+      if (cl) headers['Content-Length'] = cl;
+      init.body = request.body;
+      (init as RequestInit & { duplex?: 'half' }).duplex = 'half';
+      bodyBackup = null;
     } else {
       const body = await request.arrayBuffer();
       if (body.byteLength > 0) {
         if (ct) headers['Content-Type'] = ct;
         init.body = body;
-        bodyBackup = body.slice(0);
+        bodyBackup = body;
       }
     }
   }

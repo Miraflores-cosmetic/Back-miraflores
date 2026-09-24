@@ -8,9 +8,13 @@ import { JwtStrategy } from './jwt.strategy';
 import { RegistrationService } from './registration.service';
 import { RegistrationCleanupWorker } from './registration-cleanup.worker';
 import { resolveJwtSecret } from './jwt-secret';
+import { PrismaModule } from '../prisma/prisma.module';
+import { OrderChatModule } from '../order-chat/order-chat.module';
 
 @Module({
   imports: [
+    PrismaModule,
+    OrderChatModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports: [ConfigModule],

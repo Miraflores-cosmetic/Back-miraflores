@@ -14,6 +14,8 @@ import {
   isNavLinkActive,
   type NavGroupItem,
 } from './adminNav';
+import { useAdminOrderChatUnreadCount } from '@/hooks/useAdminOrderChatUnreadCount';
+import { staffCanSeeOrdersNav } from '@miraflores/admin-sections';
 import styles from './layout.module.css';
 
 function NavChevron({ open }: { open: boolean }) {
@@ -37,11 +39,13 @@ function NavGroup({
   pathname,
   open,
   onToggle,
+  chatUnreadCount = 0,
 }: {
   item: NavGroupItem;
   pathname: string;
   open: boolean;
   onToggle: () => void;
+  chatUnreadCount?: number;
 }) {
   return (
     <div className={styles.navGroup}>
@@ -57,11 +61,21 @@ function NavGroup({
           <NavChevron open={open} />
         </span>
         <span className={styles.navLinkLabel}>{item.label}</span>
+        {item.id === 'orders' && chatUnreadCount > 0 ? (
+          <span
+            className={styles.navBadge}
+            aria-label={`Непрочитанных в чатах: ${chatUnreadCount}`}
+          >
+            {chatUnreadCount > 99 ? '99+' : chatUnreadCount}
+          </span>
+        ) : null}
       </button>
       {open ? (
         <div className={styles.navSub}>
           {item.children.map((child) => {
             const active = isNavLinkActive(pathname, child.href);
+            const showChatBadge =
+              child.href === '/admin/orders/chat' && chatUnreadCount > 0;
             return (
               <Link
                 key={child.href}
@@ -73,6 +87,14 @@ function NavGroup({
               >
                 <span className={styles.navLinkLeading} />
                 <span className={styles.navLinkLabel}>{child.label}</span>
+                {showChatBadge ? (
+                  <span
+                    className={styles.navBadge}
+                    aria-label={`Непрочитанных в чатах: ${chatUnreadCount}`}
+                  >
+                    {chatUnreadCount > 99 ? '99+' : chatUnreadCount}
+                  </span>
+                ) : null}
               </Link>
             );
           })}
@@ -222,6 +244,8 @@ export function AdminSidebarNav({
   }, [pathname]);
 
   async function logout() {
+    const { teardownOrderChatWsForLogout } = await import('@/lib/orderChat/orderChatWsShared');
+    teardownOrderChatWsForLogout('admin');
     await fetch('/api/admin/logout', { method: 'POST', credentials: 'same-origin' });
     router.replace('/admin/login');
     router.refresh();
@@ -230,6 +254,9 @@ export function AdminSidebarNav({
   const profileName = staff?.staffDisplayName?.trim() || email || 'Админ';
   const avatarSrc = staff?.staffAvatarUrl?.trim() || DEFAULT_STAFF_AVATAR;
   const roleLabel = staff?.isSuperAdmin ? 'Администратор' : 'Модератор';
+  const ordersNavVisible =
+    !!staff && staffCanSeeOrdersNav(staff.sections, staff.isSuperAdmin);
+  const chatUnreadCount = useAdminOrderChatUnreadCount(ordersNavVisible);
 
   return (
     <aside className={styles.sidebar}>
@@ -276,6 +303,7 @@ export function AdminSidebarNav({
               item={item}
               pathname={pathname}
               open={Boolean(openGroups[item.id])}
+              chatUnreadCount={item.id === 'orders' ? chatUnreadCount : 0}
               onToggle={() =>
                 setOpenGroups((prev) => ({
                   ...prev,

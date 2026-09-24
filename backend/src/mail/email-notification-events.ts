@@ -31,6 +31,8 @@ export const EMAIL_NOTIFICATION_EVENT_KEYS = [
   'gift_purchase_paid',
   'gift_issued',
   'gift_buyer_copy',
+  'order_chat_reply',
+  'order_chat_support_reply',
 ] as const;
 
 export type EmailNotificationEventKey =
@@ -391,6 +393,52 @@ export const EMAIL_NOTIFICATION_EVENTS: readonly EmailNotificationEventDef[] = [
       'Код сертификата отправлен на {{gift.recipient_email}}.',
       '',
       'Если адрес получателя указан неверно — напишите на info@miraflores.ru.',
+      '',
+      '{{cta.site}}',
+    ].join('\n'),
+  },
+  {
+    key: 'order_chat_reply',
+    label: 'Чат: ответ по заказу',
+    description:
+      'Покупателю, когда сотрудник ответил в чате заказа. Письма staff при сообщении клиента не отправляются.',
+    variables: [
+      ...ORDER_COMMON_VARS,
+      { key: 'chat.snippet', label: 'Фрагмент ответа (до ~280 символов)' },
+      { key: 'chat.url', label: 'Ссылка открыть чат в ЛК' },
+      { key: 'customer.greeting', label: 'Обращение («Анна, » или пусто)' },
+      SNIPPET_CTA_ORDER,
+    ],
+    defaultSubject: `Новый ответ по заказу {{order.number}} — ${MAIL_BRAND.name}`,
+    defaultBody: [
+      '{{customer.greeting}}вам ответили в чате по заказу {{order.number}}.',
+      '',
+      '{{chat.snippet}}',
+      '',
+      'Откройте личный кабинет, чтобы прочитать переписку и ответить.',
+      '',
+      '{{cta.order}}',
+    ].join('\n'),
+  },
+  {
+    key: 'order_chat_support_reply',
+    label: 'Чат: ответ в общем диалоге',
+    description: 'Покупателю, когда сотрудник ответил в общем чате поддержки (без привязки к заказу).',
+    variables: [
+      { key: 'site.url', label: 'URL витрины' },
+      { key: 'site.name', label: 'Название бренда' },
+      { key: 'chat.snippet', label: 'Фрагмент ответа' },
+      { key: 'chat.url', label: 'Ссылка открыть чат' },
+      { key: 'customer.greeting', label: 'Обращение («Анна, » или пусто)' },
+      SNIPPET_CTA_SITE,
+    ],
+    defaultSubject: `Новый ответ в чате — ${MAIL_BRAND.name}`,
+    defaultBody: [
+      '{{customer.greeting}}вам ответили в чате поддержки {{site.name}}.',
+      '',
+      '{{chat.snippet}}',
+      '',
+      'Откройте сайт и чат в личном кабинете, чтобы продолжить диалог.',
       '',
       '{{cta.site}}',
     ].join('\n'),

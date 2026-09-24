@@ -8,12 +8,17 @@ import {
   type EmailNotificationEventKey,
 } from './email-notification-events';
 import {
+  accountOrderChatUrl,
+  accountOrdersUrl,
+  accountSupportChatUrl,
   baseOrderVars,
+  customerEmailGreeting,
   formatGiftItemsHtml,
   formatGiftItemsText,
   guestOrderPayUrl,
   rubLabel,
 } from './email-notification-format';
+import { MAIL_BRAND } from './email-layout';
 import {
   renderEditableEmail,
   type EmailTemplateVars,
@@ -33,6 +38,8 @@ import {
   buildOrderShippedEmail,
   buildOrderSurchargeEmail,
   buildOrderUpdatedEmail,
+  buildOrderChatReplyEmail,
+  buildOrderChatSupportReplyEmail,
   buildPasswordResetEmail,
   buildRegistrationOtpEmail,
   buildStaffAdminPasswordResetEmail,
@@ -512,6 +519,67 @@ export class MailService {
         buildGiftBuyerCopyEmail({
           orderNumber: params.orderNumber,
           recipientEmail: params.recipientEmail,
+          siteUrl: site,
+        }),
+    );
+  }
+
+  async sendOrderChatReply(params: {
+    to: string;
+    orderId: string;
+    orderNumber: string;
+    snippet: string;
+    customerGreeting?: string | null;
+  }): Promise<void> {
+    const site = this.frontendPublicUrl();
+    const chatUrl = accountOrderChatUrl(site, params.orderId);
+    const vars: EmailTemplateVars = {
+      ...baseOrderVars({
+        orderNumber: params.orderNumber,
+        siteUrl: site,
+      }),
+      'chat.snippet': params.snippet.trim(),
+      'chat.url': chatUrl,
+      'customer.greeting': customerEmailGreeting(params.customerGreeting),
+    };
+    await this.sendNotification(
+      params.to,
+      'order_chat_reply',
+      vars,
+      `order=${params.orderNumber}`,
+      () =>
+        buildOrderChatReplyEmail({
+          orderId: params.orderId,
+          orderNumber: params.orderNumber,
+          snippet: params.snippet,
+          customerGreeting: params.customerGreeting,
+          siteUrl: site,
+        }),
+    );
+  }
+
+  async sendOrderChatSupportReply(params: {
+    to: string;
+    snippet: string;
+    customerGreeting?: string | null;
+  }): Promise<void> {
+    const site = this.frontendPublicUrl();
+    const vars: EmailTemplateVars = {
+      'site.url': site,
+      'site.name': MAIL_BRAND.name,
+      'chat.snippet': params.snippet.trim(),
+      'chat.url': accountSupportChatUrl(site),
+      'customer.greeting': customerEmailGreeting(params.customerGreeting),
+    };
+    await this.sendNotification(
+      params.to,
+      'order_chat_support_reply',
+      vars,
+      'support',
+      () =>
+        buildOrderChatSupportReplyEmail({
+          snippet: params.snippet,
+          customerGreeting: params.customerGreeting,
           siteUrl: site,
         }),
     );

@@ -6,6 +6,7 @@ import { staffCanAssistant } from '@/lib/adminSections';
 import { ToastProvider } from '@/components/Toast/ToastProvider';
 import { AdminSidebarNav } from './AdminSidebarNav';
 import { AdminAssistantHost } from './AdminAssistantPanel';
+import { useAdminOrderChatStaffUnreadEvents } from '@/hooks/useAdminOrderChatStaffUnreadEvents';
 import styles from './layout.module.css';
 
 export function AdminChrome({
@@ -21,6 +22,7 @@ export function AdminChrome({
   const isLogin = pathname === '/admin/login';
   const showAssistant =
     !!staff && staffCanAssistant(staff.sections, staff.isSuperAdmin);
+  useAdminOrderChatStaffUnreadEvents(isLogin);
 
   if (isLogin) {
     return <>{children}</>;

@@ -3,6 +3,7 @@ import type { Prisma } from '@prisma/client';
 
 export type RlsStore = {
   tx: Prisma.TransactionClient;
+  afterCommit?: Array<() => void | Promise<void>>;
 };
 
 export const rlsAls = new AsyncLocalStorage<RlsStore>();

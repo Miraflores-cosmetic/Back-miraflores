@@ -28,7 +28,12 @@ describe('AuthService.registerBuyer', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    svc = new AuthService(prisma as never, jwt as never, mail as never);
+    svc = new AuthService(
+      prisma as never,
+      jwt as never,
+      mail as never,
+      { seedCustomerNotesForUser: vi.fn() } as never,
+    );
   });
 
   it('отклоняет без согласия на ПДн', async () => {
@@ -180,7 +185,12 @@ describe('AuthService (base)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     prisma.order.updateMany.mockResolvedValue({ count: 0 });
-    svc = new AuthService(prisma as never, jwt as never, mail as never);
+    svc = new AuthService(
+      prisma as never,
+      jwt as never,
+      mail as never,
+      { seedCustomerNotesForUser: vi.fn() } as never,
+    );
   });
 
   it('validateAdmin возвращает null при неверном пароле', async () => {

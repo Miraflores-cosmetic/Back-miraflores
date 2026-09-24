@@ -12,6 +12,7 @@ import {
   ShipmentProvider,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { scheduleAfterRlsCommitWithBypass } from '../rls/rls-after-commit';
 import {
   releaseStockReserve,
   reserveStockForLines,
@@ -62,6 +63,7 @@ import type {
   OrderItemsUpdateDto,
   OrderShippingAddressUpdateDto,
 } from './dto/order-admin-actions.dto';
+import { OrderChatService } from '../order-chat/order-chat.service';
 
 const LIST_MAX = 100;
 const LIST_DEFAULT = 20;
@@ -99,6 +101,7 @@ export class OrdersAdminService {
     private readonly yookassa: YooKassaService,
     private readonly carrier: CarrierShipmentService,
     private readonly config: ConfigService,
+    private readonly orderChat: OrderChatService,
   ) {}
 
   private async enrichEvents(
@@ -152,6 +155,7 @@ export class OrdersAdminService {
       status?: string;
       page?: number;
       limit?: number;
+      staffUserId?: string;
     } = {},
   ) {
     const page = Math.max(1, opts.page ?? 1);
@@ -180,7 +184,24 @@ export class OrdersAdminService {
       }),
     ]);
 
-    return { items: rows, total, page, limit };
+    const staffUserId = opts.staffUserId?.trim();
+    const chatUnreadByOrderId =
+      staffUserId && rows.length > 0
+        ? await this.orderChat.unreadOrderChatCountsForStaff(
+            staffUserId,
+            rows.map((r) => r.id),
+          )
+        : {};
+
+    return {
+      items: rows.map((r) => ({
+        ...r,
+        chatUnreadCount: chatUnreadByOrderId[r.id] ?? 0,
+      })),
+      total,
+      page,
+      limit,
+    };
   }
 
   async unviewedCount() {
@@ -1166,6 +1187,10 @@ export class OrdersAdminService {
       await this.lifecycle.notifyOrderCancelled(result.email, result.number);
     }
 
+    scheduleAfterRlsCommitWithBypass(this.prisma, () =>
+      this.orderChat.applyRetentionForOrder(id, OrderStatus.CANCELLED),
+    );
+
     // Полный detail (как packing/ship) — UI делает setOrder(row), slim ломает items/actions.
     const detail = await this.getById(id);
     return { ...detail, promoReleased: result.promoReleased };
@@ -1406,6 +1431,12 @@ export class OrdersAdminService {
       full: outcome.full,
       kind: 'admin',
     });
+
+    if (outcome.full) {
+      scheduleAfterRlsCommitWithBypass(this.prisma, () =>
+        this.orderChat.applyRetentionForOrder(id, OrderStatus.REFUNDED),
+      );
+    }
 
     return this.getById(id);
   }
@@ -2110,6 +2141,10 @@ export class OrdersAdminService {
         meta: { from: order.status, to },
       });
     });
+
+    scheduleAfterRlsCommitWithBypass(this.prisma, () =>
+      this.orderChat.applyRetentionForOrder(id, to),
+    );
   }
 
   private listWhere(q?: string, statusRaw?: string): Prisma.OrderWhereInput {

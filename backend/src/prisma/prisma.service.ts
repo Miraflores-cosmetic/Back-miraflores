@@ -1,8 +1,8 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
+import { flushAfterRlsCommit } from '../rls/rls-after-commit';
+import type { RlsCtx } from '../rls/rls-after-commit';
 import { rlsAls } from '../rls/rls-context';
-
-type RlsCtx = { userId: string; bypass: boolean };
 
 /**
  * Prisma + PostgreSQL RLS.
@@ -74,15 +74,18 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
       return fn();
     }
 
-    return this.$transaction(
+    const afterCommit: Array<() => void | Promise<void>> = [];
+    const result = await this.$transaction(
       async (tx) => {
         await tx.$executeRaw`SELECT set_config('app.user_id', ${ctx.userId}, true)`;
         await tx.$executeRaw`
           SELECT set_config('app.rls_bypass', ${ctx.bypass ? 'on' : 'off'}, true)
         `;
-        return rlsAls.run({ tx }, fn);
+        return rlsAls.run({ tx, afterCommit }, fn);
       },
       { maxWait: 15_000, timeout: 120_000 },
     );
+    await flushAfterRlsCommit(afterCommit);
+    return result;
   }
 }

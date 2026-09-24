@@ -7,6 +7,8 @@ import {
 import { OrderStatus, GiftCertificateSource } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
+import { OrderChatService } from '../order-chat/order-chat.service';
+import { scheduleAfterRlsCommitWithBypass } from '../rls/rls-after-commit';
 import { CommerceContextService } from '../user-groups/commerce-context.service';
 import { MARKETING_CONSENT_VERSION } from '../auth/consent-versions';
 import { firstPasswordError, isPasswordValid } from '../auth/password-policy';
@@ -90,6 +92,7 @@ export class AccountService {
     private readonly payTokens: OrderPayTokenService,
     private readonly yookassa: YooKassaService,
     private readonly commerceContext: CommerceContextService,
+    private readonly orderChat: OrderChatService,
   ) {}
 
   async getProfile(userId: string) {
@@ -757,6 +760,10 @@ export class AccountService {
     if (result.pendingExternalIds.length) {
       await this.yookassa.cancelPaymentsBestEffort(result.pendingExternalIds);
     }
+
+    scheduleAfterRlsCommitWithBypass(this.prisma, () =>
+      this.orderChat.applyRetentionForOrder(result.id, OrderStatus.CANCELLED),
+    );
 
     return this.getOrder(userId, result.id);
   }

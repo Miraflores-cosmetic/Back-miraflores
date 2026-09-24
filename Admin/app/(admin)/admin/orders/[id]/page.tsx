@@ -14,6 +14,11 @@ export default async function AdminOrderDetailPage({
       : false;
 
   return (
-    <OrderDetailClient orderId={params.id} canOrdersFinance={canOrdersFinance} />
+    <OrderDetailClient
+      orderId={params.id}
+      canOrdersFinance={canOrdersFinance}
+      staffUserId={session.authenticated ? session.user.id : null}
+      staffAvatarUrl={session.authenticated ? session.staff?.staffAvatarUrl : null}
+    />
   );
 }

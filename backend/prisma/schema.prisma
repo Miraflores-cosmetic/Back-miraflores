@@ -50,6 +50,22 @@ enum OrderStatus {
   REFUNDED
 }
 
+/// Чат покупатель ↔ staff (заказ или общая поддержка).
+enum ChatConversationKind {
+  ORDER
+  SUPPORT
+}
+
+enum ChatMessageAuthorRole {
+  CUSTOMER
+  STAFF
+}
+
+enum ChatAttachmentKind {
+  FILE
+  IMAGE
+}
+
 /// Админ / модератор / покупатель (гость checkout без User)
 model User {
   id               String    @id @default(cuid())
@@ -94,6 +110,9 @@ model User {
   /// Кастомная группа покупателя; null → default registered group
   groupId          String?
   group            UserGroup? @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  chatMessages     ChatMessage[]
+  chatReadStates   ChatReadState[]
+  supportChat      ChatConversation? @relation("UserSupportChat")
 
   @@index([staffDeletedAt])
   @@index([groupId])
@@ -759,10 +778,72 @@ model Order {
   pricingContext   String?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
+  chatConversation ChatConversation?
 
   @@index([giftCertificateId])
   @@index([giftPurchaseDenominationId])
   @@index([onecExportedAt, status])
+}
+
+model ChatConversation {
+  id                String               @id @default(cuid())
+  kind              ChatConversationKind @default(ORDER)
+  orderId           String?              @unique
+  order             Order?               @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  /// Общий диалог поддержки (1 на пользователя).
+  userId            String?              @unique
+  user              User?                @relation("UserSupportChat", fields: [userId], references: [id], onDelete: Cascade)
+  retentionPurgesAt DateTime?
+  lastStaffReplyEmailAt DateTime?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  messages   ChatMessage[]
+  readStates ChatReadState[]
+
+  @@index([retentionPurgesAt])
+  @@index([kind, updatedAt(sort: Desc)])
+}
+
+model ChatMessage {
+  id                  String                @id @default(cuid())
+  conversationId      String
+  conversation        ChatConversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  authorUserId        String?
+  author              User?                 @relation(fields: [authorUserId], references: [id], onDelete: SetNull)
+  authorRole          ChatMessageAuthorRole
+  authorLabelSnapshot String                @default("")
+  body                String                @default("") @db.Text
+  deletedAt           DateTime?
+  clientMessageId     String?
+  createdAt           DateTime              @default(now())
+
+  attachments ChatAttachment[]
+
+  @@unique([conversationId, clientMessageId])
+  @@index([conversationId, createdAt(sort: Desc)])
+}
+
+model ChatAttachment {
+  id        String             @id @default(cuid())
+  messageId String
+  message   ChatMessage        @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  fileUrl   String
+  filename  String
+  mimeType  String?
+  kind      ChatAttachmentKind @default(FILE)
+
+  @@index([messageId])
+}
+
+model ChatReadState {
+  conversationId String
+  conversation   ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lastReadAt     DateTime         @default(now())
+
+  @@id([conversationId, userId])
 }
 
 model OrderItem {

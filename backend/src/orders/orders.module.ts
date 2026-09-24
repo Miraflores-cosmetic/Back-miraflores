@@ -17,6 +17,7 @@ import { OrdersPublicService } from './orders.public.service';
 import { YooKassaService } from './yookassa.service';
 import { MailModule } from '../mail/mail.module';
 import { UserGroupsModule } from '../user-groups/user-groups.module';
+import { OrderChatModule } from '../order-chat/order-chat.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { UserGroupsModule } from '../user-groups/user-groups.module';
     GiftCertificatesModule,
     SettingsModule,
     MailModule,
+    OrderChatModule,
   ],
   controllers: [OrdersPublicController, OrdersAdminController],
   providers: [

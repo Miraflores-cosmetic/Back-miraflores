@@ -18,20 +18,25 @@
     "@fontsource-variable/open-sans": "^5.3.0",
     "@miraflores/admin-sections": "*",
     "@miraflores/admin-types": "*",
+    "@miraflores/order-chat-core": "*",
     "animejs": "^4.5.0",
     "isomorphic-dompurify": "^3.19.0",
     "next": "14.2.35",
+    "photoswipe": "^5.4.4",
     "quill": "^1.3.7",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-quill": "^2.0.0",
+    "socket.io-client": "^4.8.3",
     "zod": "3.22.4"
   },
   "devDependencies": {
     "@playwright/test": "^1.51.0",
+    "@testing-library/react": "^16.3.3",
     "@types/node": "^20.0.0",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
+    "jsdom": "^26.1.0",
     "typescript": "^5.0.0",
     "vitest": "^4.1.10"
   }

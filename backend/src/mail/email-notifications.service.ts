@@ -14,6 +14,9 @@ import {
   type EmailNotificationEventKey,
 } from './email-notification-events';
 import {
+  accountOrderChatUrl,
+  accountOrdersUrl,
+  accountSupportChatUrl,
   baseOrderVars,
   formatGiftItemsHtml,
   formatGiftItemsText,
@@ -21,6 +24,7 @@ import {
   formatOrderItemsText,
   rubLabel,
 } from './email-notification-format';
+import { MAIL_BRAND } from './email-layout';
 import {
   extractIfConditionKeys,
   extractTemplatePlaceholders,
@@ -644,6 +648,26 @@ function sampleVarsForEvent(
         'order.shipping_label': '',
         'order.discount_label': '',
         'order.gift_label': '',
+      };
+    case 'order_chat_reply':
+      return {
+        ...base,
+        'chat.snippet': sparse
+          ? ''
+          : 'Добрый день! Ваш заказ уже собираем, доставка завтра.',
+        'chat.url': accountOrderChatUrl(site, 'preview-order-id'),
+        'customer.greeting': sparse ? '' : 'Анна, ',
+        'order.items_text': '',
+        'order.items_html': '',
+        'order.totals_block': '',
+      };
+    case 'order_chat_support_reply':
+      return {
+        'site.url': site,
+        'site.name': MAIL_BRAND.name,
+        'chat.snippet': sparse ? '' : 'Здравствуйте! Подскажите артикул или ссылку на товар.',
+        'chat.url': accountSupportChatUrl(site),
+        'customer.greeting': sparse ? '' : 'Анна, ',
       };
     default: {
       const _exhaustive: never = eventKey;

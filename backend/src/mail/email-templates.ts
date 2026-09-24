@@ -877,3 +877,83 @@ export function buildStaffAdminPasswordResetEmail(params: {
     }),
   };
 }
+
+/** Ответ staff в чате заказа. */
+export function buildOrderChatReplyEmail(params: {
+  orderId: string;
+  orderNumber: string;
+  snippet: string;
+  customerGreeting?: string | null;
+  siteUrl?: string | null;
+}): BuiltEmail {
+  const number = params.orderNumber.trim();
+  const site = siteUrl(params.siteUrl);
+  const hello = (params.customerGreeting || '').trim();
+  const snippet = params.snippet.trim() || '(вложение)';
+  const chatUrl = profileUrl(
+    site,
+    `/profile?tab=orders&chatOrder=${encodeURIComponent(params.orderId.trim())}`,
+  );
+  const subject = `Новый ответ по заказу ${number} — ${MAIL_BRAND.name}`;
+  const text = [
+    `${hello}вам ответили в чате по заказу ${number}.`,
+    '',
+    snippet,
+    '',
+    `Открыть чат: ${chatUrl}`,
+    site,
+  ].join('\n');
+  const bodyHtml = [
+    eyebrow('Чат по заказу'),
+    title('Новый ответ'),
+    `<p style="margin:0 0 12px;">${escapeHtml(hello)}вам ответили в чате по заказу <strong>${escapeHtml(number)}</strong>.</p>`,
+    `<blockquote style="margin:12px 0;padding:10px 14px;border-left:3px solid ${MAIL_BRAND.line};color:${MAIL_BRAND.ink};font-size:14px;line-height:1.5;">${escapeHtml(snippet)}</blockquote>`,
+    mailCtaButton(chatUrl, 'Открыть чат'),
+  ].join('');
+  return {
+    subject,
+    text,
+    html: renderMirafloresEmailLayout({
+      preheader: `Ответ по заказу ${number}`,
+      bodyHtml,
+      siteUrl: site,
+    }),
+  };
+}
+
+/** Ответ staff в общем чате поддержки. */
+export function buildOrderChatSupportReplyEmail(params: {
+  snippet: string;
+  customerGreeting?: string | null;
+  siteUrl?: string | null;
+}): BuiltEmail {
+  const site = siteUrl(params.siteUrl);
+  const hello = (params.customerGreeting || '').trim();
+  const snippet = params.snippet.trim() || '(вложение)';
+  const chatUrl = profileUrl(site, '/profile?chatSupport=1');
+  const subject = `Новый ответ в чате — ${MAIL_BRAND.name}`;
+  const text = [
+    `${hello}вам ответили в чате поддержки ${MAIL_BRAND.name}.`,
+    '',
+    snippet,
+    '',
+    `Открыть чат: ${chatUrl}`,
+    site,
+  ].join('\n');
+  const bodyHtml = [
+    eyebrow('Чат поддержки'),
+    title('Новый ответ'),
+    `<p style="margin:0 0 12px;">${escapeHtml(hello)}вам ответили в чате поддержки <strong>${escapeHtml(MAIL_BRAND.name)}</strong>.</p>`,
+    `<blockquote style="margin:12px 0;padding:10px 14px;border-left:3px solid ${MAIL_BRAND.line};color:${MAIL_BRAND.ink};font-size:14px;line-height:1.5;">${escapeHtml(snippet)}</blockquote>`,
+    mailCtaButton(chatUrl, 'Открыть чат'),
+  ].join('');
+  return {
+    subject,
+    text,
+    html: renderMirafloresEmailLayout({
+      preheader: 'Новый ответ в чате поддержки',
+      bodyHtml,
+      siteUrl: site,
+    }),
+  };
+}

@@ -8,8 +8,10 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { UserRole, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { scheduleAfterRlsCommitWithBypass } from '../rls/rls-after-commit';
 import type { JwtPayload } from '../common/decorators/current-user.decorator';
 import { MailService } from '../mail/mail.service';
+import { OrderChatService } from '../order-chat/order-chat.service';
 import { firstPasswordError, isPasswordValid } from './password-policy';
 import {
   MARKETING_CONSENT_VERSION,
@@ -34,6 +36,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
     private readonly mail: MailService,
+    private readonly orderChat: OrderChatService,
   ) {}
 
   async validateAdmin(emailOrPhone: string, password: string) {
@@ -141,6 +144,9 @@ export class AuthService {
         `claimGuestOrders: user=${userId} claimed=${result.count}` +
           (email ? ` email=${email}` : '') +
           (guestId ? ` guestId=${guestId}` : ''),
+      );
+      scheduleAfterRlsCommitWithBypass(this.prisma, () =>
+        this.orderChat.seedCustomerNotesForUser(userId),
       );
     }
     return { claimed: result.count };

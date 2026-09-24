@@ -37,6 +37,7 @@ export class OrdersAdminController {
 
   @Get()
   list(
+    @CurrentUser('sub') staffUserId: string,
     @Query('q') q?: string,
     @Query('status') status?: string,
     @Query('page') page?: string,
@@ -47,6 +48,7 @@ export class OrdersAdminController {
       status,
       page: parseOptionalPositiveInt(page),
       limit: parseOptionalPositiveInt(limit),
+      staffUserId,
     });
   }
 

@@ -8,9 +8,10 @@ import { AccountController } from './account.controller';
 import { AccountService } from './account.service';
 import { FavoritesService } from './favorites.service';
 import { QuizResultService } from './quiz-result.service';
+import { OrderChatModule } from '../order-chat/order-chat.module';
 
 @Module({
-  imports: [PrismaModule, UserGroupsModule, DiscountsModule],
+  imports: [PrismaModule, UserGroupsModule, DiscountsModule, OrderChatModule],
   controllers: [AccountController],
   providers: [
     AccountService,

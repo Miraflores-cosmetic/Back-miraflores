@@ -1,13 +1,24 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { mkdir, unlink, writeFile } from 'fs/promises';
+import { mkdir, readdir, stat, unlink, writeFile } from 'fs/promises';
 import { join, extname } from 'path';
 import { randomBytes } from 'crypto';
+import type { ChatAttachmentKind } from '@prisma/client';
+import {
+  chatAttachmentKindFromMime,
+  normalizeChatStorageKey,
+  readChatUploadMeta,
+  inferChatUploadMetaFromFile,
+  writeChatUploadMetaFile,
+  type ChatUploadMeta,
+} from './chat-upload-meta';
 
 const IMAGE_ALLOWED = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const VIDEO_ALLOWED = new Set(['video/mp4', 'video/quicktime']);
 /** Лимит картинок (каталог, блог, аватар staff) — multer и storage должны совпадать. */
 export const IMAGE_MAX_BYTES = 6 * 1024 * 1024;
+/** Чат: фото и PDF (совпадает с ORDER_CHAT_UPLOAD_MAX_FILE_BYTES). */
+export const CHAT_FILE_MAX_BYTES = 35 * 1024 * 1024;
 const VIDEO_MAX_BYTES = 80 * 1024 * 1024;
 
 const MIME_EXT: Record<string, string> = {
@@ -17,7 +28,12 @@ const MIME_EXT: Record<string, string> = {
   'image/gif': '.gif',
   'video/mp4': '.mp4',
   'video/quicktime': '.mov',
+  'application/pdf': '.pdf',
 };
+
+export function detectPdfMime(buf: Buffer): boolean {
+  return buf.length >= 5 && buf.subarray(0, 5).toString('ascii') === '%PDF-';
+}
 
 /** Определяет MIME картинки по magic bytes (не по заголовку клиента). */
 export function detectImageMime(buf: Buffer): string | null {
@@ -162,7 +178,35 @@ export class LocalStorageService {
     const u = url.trim();
     const prefix = `${this.publicBase()}/uploads/`;
     if (!u.startsWith(prefix)) return null;
-    return decodeURIComponent(u.slice(prefix.length));
+    try {
+      return decodeURIComponent(u.slice(prefix.length));
+    } catch {
+      return null;
+    }
+  }
+
+  /** Validates chat attachment URL and returns stored metadata (sidecar or file probe). */
+  async resolveChatAttachmentFromUrl(
+    url: string,
+    expectedPrefix: string,
+  ): Promise<{ fileUrl: string; filename: string; mimeType: string; kind: ChatAttachmentKind }> {
+    const { extractChatStorageKeyFromRef } = await import('../order-chat/chat-file-url');
+    const rawKey =
+      extractChatStorageKeyFromRef(url, this.publicBase()) ?? this.tryPublicUrlToKey(url);
+    if (!rawKey) throw new BadRequestException('Недопустимый URL вложения');
+    const key = normalizeChatStorageKey(rawKey, expectedPrefix.replace(/\/$/, ''));
+    const fileUrl = this.getPublicUrlForKey(key);
+    let meta: ChatUploadMeta | null = await readChatUploadMeta(this.uploadRoot(), key);
+    if (!meta) {
+      meta = await inferChatUploadMetaFromFile(this.uploadRoot(), key);
+    }
+    if (!meta) throw new BadRequestException('Файл вложения не найден');
+    return {
+      fileUrl,
+      filename: meta.filename,
+      mimeType: meta.mimeType,
+      kind: meta.kind,
+    };
   }
 
   async saveImage(
@@ -171,6 +215,37 @@ export class LocalStorageService {
   ): Promise<{ key: string; url: string }> {
     const mime = this.assertImage(file);
     return this.writeFile(file.buffer, folder, mime);
+  }
+
+  /** Изображение или PDF для чата заказа / поддержки. */
+  assertChatFile(file: { size: number; buffer?: Buffer }): string {
+    if (file.size > CHAT_FILE_MAX_BYTES) {
+      throw new BadRequestException('Файл больше 35 МБ');
+    }
+    const buf = file.buffer;
+    if (!buf?.length) throw new BadRequestException('Пустой файл');
+    const img = detectImageMime(buf);
+    if (img) return img;
+    if (detectPdfMime(buf)) return 'application/pdf';
+    throw new BadRequestException('Допустимы изображения (JPEG, PNG, WebP, GIF) и PDF');
+  }
+
+  async saveChatFile(
+    file: { buffer: Buffer; size: number },
+    folder: string,
+    opts?: { originalFilename?: string },
+  ): Promise<{ key: string; url: string; mime: string }> {
+    const mime = this.assertChatFile(file);
+    const saved = await this.writeFile(file.buffer, folder, mime, { entropyBytes: 16 });
+    const filename = (opts?.originalFilename?.trim() || 'file').slice(0, 512);
+    const meta: ChatUploadMeta = {
+      filename,
+      mimeType: mime,
+      kind: chatAttachmentKindFromMime(mime),
+      size: file.size,
+    };
+    await writeChatUploadMetaFile(this.uploadRoot(), saved.key, meta);
+    return { ...saved, mime };
   }
 
   async saveGalleryMedia(
@@ -186,9 +261,11 @@ export class LocalStorageService {
     buffer: Buffer,
     folder: string,
     mime: string,
+    opts?: { entropyBytes?: number },
   ): Promise<{ key: string; url: string }> {
     const ext = MIME_EXT[mime] ?? '.bin';
-    const key = `${folder.replace(/^\/+|\/+$/g, '')}/${Date.now()}-${randomBytes(4).toString('hex')}${ext}`;
+    const entropyBytes = opts?.entropyBytes ?? 4;
+    const key = `${folder.replace(/^\/+|\/+$/g, '')}/${Date.now()}-${randomBytes(entropyBytes).toString('hex')}${ext}`;
     const abs = join(this.uploadRoot(), key);
     await mkdir(join(abs, '..'), { recursive: true });
     await writeFile(abs, buffer);
@@ -196,13 +273,66 @@ export class LocalStorageService {
   }
 
   async deleteByPublicUrl(url: string): Promise<boolean> {
-    const key = this.tryPublicUrlToKey(url);
+    const { extractChatStorageKeyFromRef } = await import('../order-chat/chat-file-url');
+    const key =
+      extractChatStorageKeyFromRef(url, this.publicBase()) ?? this.tryPublicUrlToKey(url);
     if (!key) return false;
+    return this.deleteByStorageKey(key);
+  }
+
+  async deleteByStorageKey(key: string): Promise<boolean> {
+    const root = this.uploadRoot();
+    let ok = false;
     try {
-      await unlink(join(this.uploadRoot(), key));
-      return true;
+      await unlink(join(root, key));
+      ok = true;
     } catch {
-      return false;
+      /* file may already be gone */
     }
+    try {
+      await unlink(join(root, key + '.chat-upload-meta.json'));
+    } catch {
+      /* ignore */
+    }
+    return ok;
+  }
+
+  /** Файлы chat/* старше minAgeMs без записи в БД (orphan uploads). */
+  async purgeUnreferencedChatFiles(
+    minAgeMs: number,
+    canDelete: (publicUrl: string) => Promise<boolean>,
+  ): Promise<number> {
+    const root = this.uploadRoot();
+    const chatRoot = join(root, 'chat');
+    let deleted = 0;
+
+    const walk = async (dir: string): Promise<void> => {
+      let entries;
+      try {
+        entries = await readdir(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const ent of entries) {
+        const abs = join(dir, ent.name);
+        if (ent.isDirectory()) {
+          await walk(abs);
+          continue;
+        }
+        if (ent.name.endsWith('.chat-upload-meta.json')) continue;
+        const st = await stat(abs).catch(() => null);
+        if (!st?.isFile()) continue;
+        if (Date.now() - st.mtimeMs < minAgeMs) continue;
+        const rel = abs.slice(root.length + 1).replace(/\\/g, '/');
+        if (!rel.startsWith('chat/')) continue;
+        const publicUrl = this.getPublicUrlForKey(rel);
+        if (await canDelete(publicUrl)) {
+          if (await this.deleteByStorageKey(rel)) deleted += 1;
+        }
+      }
+    };
+
+    await walk(chatRoot);
+    return deleted;
   }
 }
