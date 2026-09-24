@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AdminCompactBtn, AdminCompactBtnLink } from '@/components/AdminCompactBtn/AdminCompactBtn';
 import { AdminListPagination } from '@/components/admin/AdminListPagination/AdminListPagination';
+import { adminConfirm } from '@/components/admin/AdminModal/adminConfirm';
 import { AdminTextField } from '@/components/AdminTextField/AdminTextField';
 import {
   AdminBackendRequestError,
@@ -80,9 +81,13 @@ export function CertificateDetailClient({
   }
 
   async function onRevoke() {
-    if (!window.confirm('Отозвать сертификат? Баланс станет 0, использование невозможно.')) {
-      return;
-    }
+    const ok = await adminConfirm({
+      title: 'Отозвать сертификат',
+      message: 'Баланс станет 0, использование сертификата будет невозможно.',
+      confirmLabel: 'Отозвать',
+      danger: true,
+    });
+    if (!ok) return;
     setSaving(true);
     setError(null);
     try {

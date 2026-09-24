@@ -12,7 +12,7 @@ import {
   DragHandleCell,
 } from '@/components/admin/AdminSortableTable/AdminSortableTable';
 import { AdminTabs } from '@/components/AdminTabs/AdminTabs';
-import { ConfirmDialog } from '@/components/ConfirmDialog/ConfirmDialog';
+import { AdminConfirmDialog } from '@/components/admin/AdminModal/AdminConfirmDialog';
 import { AdminSearchBox } from '@/components/SearchBox/SearchBox';
 import { useToast } from '@/components/Toast/ToastProvider';
 import {
@@ -640,7 +640,7 @@ export function ReviewsListClient() {
         )}
       </AdminListShell>
 
-      <ConfirmDialog
+      <AdminConfirmDialog
         open={confirm != null}
         title={confirmCopy.title}
         message={confirmCopy.message}
@@ -667,7 +667,7 @@ export function ReviewsListClient() {
             />
           </label>
         ) : null}
-      </ConfirmDialog>
+      </AdminConfirmDialog>
     </>
   );
 }

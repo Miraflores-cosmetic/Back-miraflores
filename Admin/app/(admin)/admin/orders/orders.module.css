@@ -61,17 +61,19 @@
   }
 
   .orderDetailAside {
-    flex: 0 1 auto;
-    max-height: min(42vh, 380px);
-  }
-
-  .orderDetailChatAside {
     flex: 1 1 auto;
-    min-height: 320px;
+    max-height: none;
   }
 }
 
 .orderDetailChatWrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.orderDetailChatModalBody {
   flex: 1;
   min-height: 0;
   display: flex;
@@ -86,157 +88,321 @@
   color: var(--admin-muted-fg, #6b7280);
 }
 
-.supportChatPage {
-  max-width: 1200px;
-}
+/* ——— Чаты поддержки (/admin/orders/chat): инбокс + диалог в одной карточке ——— */
 
-.supportChatHeader {
-  margin-bottom: 16px;
-}
-
-.supportChatLayout {
+.supportChatShell {
   display: grid;
-  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
-  gap: 16px;
-  min-height: min(720px, calc(100vh - 180px));
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  height: max(520px, calc(100vh - 170px));
+  border: var(--account-hairline-width, 0.7px) solid var(--account-hairline-color, rgba(0, 0, 0, 0.2));
+  border-radius: 12px;
+  background: var(--color-white, #fff);
+  overflow: hidden;
 }
 
-.supportChatThreadList {
-  border: 1px solid var(--account-hairline-color, #e2e6e8);
-  border-radius: 10px;
-  background: #fafafa;
-  overflow: auto;
-  max-height: min(720px, calc(100vh - 180px));
-}
-
-.supportChatThreadToolbar {
-  position: sticky;
-  top: 0;
-  z-index: 1;
+.supportChatSidebar {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 8px 8px 10px;
-  background: #fafafa;
-  border-bottom: 1px solid var(--account-hairline-color, #e2e6e8);
+  min-height: 0;
+  border-right: var(--account-hairline-width, 0.7px) solid var(--account-hairline-color, rgba(0, 0, 0, 0.2));
 }
 
-.supportChatFilters {
+.supportChatSidebarHead {
+  flex-shrink: 0;
   display: flex;
-  gap: 4px;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 12px 10px;
+  border-bottom: var(--account-hairline-width, 0.7px) solid var(--account-hairline-color, rgba(0, 0, 0, 0.2));
 }
 
-.supportChatFilterBtn {
-  display: inline-flex;
+.supportChatTabs {
+  margin-bottom: 0;
+}
+
+.supportChatSidebarBody {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.supportChatNotice {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  padding: 5px 10px;
-  border: 1px solid var(--account-hairline-color, #e2e6e8);
-  border-radius: 999px;
-  background: #fff;
-  font: inherit;
-  font-size: 0.8125rem;
-  color: inherit;
-  cursor: pointer;
-}
-
-.supportChatFilterBtn:focus-visible {
-  outline: 2px solid var(--color-brand-green, #297230);
-  outline-offset: 1px;
-}
-
-.supportChatFilterBtnActive {
-  border-color: var(--color-black, #1a1a1a);
-  background: var(--color-black, #1a1a1a);
-  color: #fff;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 10px 12px 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fdf5f5;
+  color: #b3261e;
+  font-size: var(--text-caption, 14px);
 }
 
 .supportChatEmpty {
-  padding: 16px 12px;
-}
-
-.supportChatLoadMore {
-  display: flex;
-  justify-content: center;
-  padding: 4px 8px 12px;
+  margin: 0;
+  padding: 24px 16px;
+  text-align: center;
+  font-size: var(--text-caption, 14px);
+  color: var(--color-gray, #9d9d9d);
 }
 
 .supportChatThreads {
   list-style: none;
   margin: 0;
-  padding: 8px;
+  padding: 6px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
 .supportChatThreadBtn {
   width: 100%;
-  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
   border: none;
   border-radius: 8px;
-  padding: 10px 12px;
   background: transparent;
-  cursor: pointer;
   font: inherit;
   color: inherit;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
 }
 
-.supportChatThreadBtn:hover,
-.supportChatThreadBtnActive {
-  background: #fff;
-  box-shadow: inset 0 0 0 1px var(--account-hairline-color, #e2e6e8);
+.supportChatThreadBtn:hover {
+  background: #f3f3f3;
 }
 
-.supportChatThreadTitle {
+.supportChatThreadBtn:focus-visible {
+  outline: 2px solid var(--color-black, #000);
+  outline-offset: -2px;
+}
+
+.supportChatThreadBtnActive,
+.supportChatThreadBtnActive:hover {
+  background: #e6e6e6;
+}
+
+.supportChatAvatar {
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-weight: 600;
-  font-size: 0.875rem;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #ececec;
+  color: var(--color-black, #000);
+  font-family: var(--font-commissioner, system-ui);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
 }
 
-.supportChatThreadPreview {
-  font-size: 0.8125rem;
-  color: var(--color-gray, #9d9d9d);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.supportChatThreadTime {
-  font-size: 0.75rem;
-  color: var(--color-gray, #9d9d9d);
-}
-
-.supportChatPanel {
-  border: 1px solid var(--account-hairline-color, #e2e6e8);
-  border-radius: 10px;
+.supportChatThreadBtnActive .supportChatAvatar {
   background: #fff;
+}
+
+.supportChatThreadMain {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
+  gap: 2px;
 }
 
-.supportChatPanelHead {
+.supportChatThreadRow {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--account-hairline-color, #e2e6e8);
+  gap: 8px;
+  min-width: 0;
+}
+
+.supportChatThreadTitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-caption, 14px);
+  font-weight: 400;
+  color: var(--color-black, #000);
+}
+
+.supportChatThreadTime {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: var(--text-caption-weight, 300);
+  color: var(--color-gray, #9d9d9d);
+  font-variant-numeric: tabular-nums;
+}
+
+.supportChatThreadPreview {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: var(--text-caption-weight, 300);
+  color: var(--color-gray, #9d9d9d);
+}
+
+.supportChatThreadBtnUnread .supportChatThreadTitle {
+  font-weight: 600;
+}
+
+.supportChatThreadBtnUnread .supportChatThreadPreview {
+  color: var(--color-black, #000);
+}
+
+.supportChatThreadBtnUnread .supportChatThreadTime {
+  color: var(--color-brand-green, #297230);
+}
+
+.supportChatBadge {
+  display: inline-block;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+.supportChatLoadMore {
+  display: flex;
+  justify-content: center;
+  padding: 4px 12px 14px;
+}
+
+.supportChatMain {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.supportChatMainHead {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 60px;
+  padding: 10px 16px;
+  border-bottom: var(--account-hairline-width, 0.7px) solid var(--account-hairline-color, rgba(0, 0, 0, 0.2));
+  box-sizing: border-box;
+}
+
+.supportChatBackBtn {
+  display: none;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-left: -6px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.supportChatBackBtn:hover {
+  background: #e6e6e6;
+}
+
+.supportChatMainTitleWrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.supportChatMainTitle {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-commissioner, system-ui);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--color-black, #051826);
+}
+
+.supportChatMainSubtitle {
+  margin: 2px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: var(--text-caption-weight, 300);
+  color: var(--color-gray, #9d9d9d);
+}
+
+.supportChatMainAction {
   flex-shrink: 0;
 }
 
-.supportChatPanelBody {
+.supportChatMainBody {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+.supportChatPlaceholder {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 24px;
+  text-align: center;
+  color: var(--color-gray, #9d9d9d);
+}
+
+.supportChatPlaceholderTitle {
+  margin: 6px 0 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--color-black, #000);
+}
+
+.supportChatPlaceholderText {
+  margin: 0;
+  max-width: 280px;
+  font-size: var(--text-caption, 14px);
+  line-height: 1.45;
+}
+
+/* Узкий экран: одна колонка — список или открытый диалог */
+@media (max-width: 900px) {
+  .supportChatShell {
+    grid-template-columns: 1fr;
+    height: max(480px, calc(100vh - 140px));
+  }
+
+  .supportChatSidebar {
+    border-right: none;
+  }
+
+  .supportChatShell .supportChatMain {
+    display: none;
+  }
+
+  .supportChatShellChatOpen .supportChatSidebar {
+    display: none;
+  }
+
+  .supportChatShellChatOpen .supportChatMain {
+    display: flex;
+  }
+
+  .supportChatBackBtn {
+    display: inline-flex;
+  }
 }
 
 .orderDetailMain {
@@ -897,10 +1063,6 @@
 
   .orderDetailChatAside {
     min-height: 420px;
-  }
-
-  .supportChatLayout {
-    grid-template-columns: 1fr;
   }
 
   .orderDetailAside {

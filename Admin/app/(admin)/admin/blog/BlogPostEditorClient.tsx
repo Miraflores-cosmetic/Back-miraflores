@@ -11,7 +11,7 @@ import {
   AdminTextArea,
   AdminTextField,
 } from '@/components/AdminTextField/AdminTextField';
-import { ConfirmDialog } from '@/components/ConfirmDialog/ConfirmDialog';
+import { AdminConfirmDialog } from '@/components/admin/AdminModal/AdminConfirmDialog';
 import { useToast } from '@/components/Toast/ToastProvider';
 import {
   AdminBackendRequestError,
@@ -561,7 +561,7 @@ export function BlogPostEditorClient({ postId }: Props) {
         </label>
       </AdminAccordion>
 
-      <ConfirmDialog
+      <AdminConfirmDialog
         open={deleteConfirm}
         title="Удалить статью?"
         message={`«${titleText}» будет удалена безвозвратно.`}

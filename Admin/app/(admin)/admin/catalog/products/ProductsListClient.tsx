@@ -9,7 +9,7 @@ import { AdminListShell } from '@/components/admin/AdminListShell/AdminListShell
 import { AdminSearchBox } from '@/components/SearchBox/SearchBox';
 import { AdminSelect } from '@/components/AdminTextField/AdminTextField';
 import { AdminTabs } from '@/components/AdminTabs/AdminTabs';
-import { ConfirmDialog } from '@/components/ConfirmDialog/ConfirmDialog';
+import { AdminConfirmDialog } from '@/components/admin/AdminModal/AdminConfirmDialog';
 import {
   AdminBackendRequestError,
   adminBackendJson,
@@ -375,7 +375,7 @@ export function ProductsListClient() {
         </table>
       </AdminListShell>
 
-      <ConfirmDialog
+      <AdminConfirmDialog
         open={pendingDelete != null}
         title="Удалить товар?"
         message={

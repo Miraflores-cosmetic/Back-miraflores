@@ -1,3 +1,4 @@
+import { forwardRef } from 'react';
 import Link from 'next/link';
 import styles from './AdminCompactBtn.module.css';
 
@@ -21,19 +22,23 @@ function compactBtnClass(variant: AdminCompactBtnVariant, className?: string, as
 }
 
 /** Компактная кнопка админки: h-28, caption, заливка neutral, accent или danger. */
-export function AdminCompactBtn({
-  children,
-  className,
-  type = 'button',
-  variant = 'neutral',
-  ...rest
-}: AdminCompactBtnProps) {
-  return (
-    <button type={type} className={compactBtnClass(variant, className)} {...rest}>
-      {children}
-    </button>
-  );
-}
+export const AdminCompactBtn = forwardRef<HTMLButtonElement, AdminCompactBtnProps>(
+  function AdminCompactBtn(
+    { children, className, type = 'button', variant = 'neutral', ...rest },
+    ref,
+  ) {
+    return (
+      <button
+        ref={ref}
+        type={type}
+        className={compactBtnClass(variant, className)}
+        {...rest}
+      >
+        {children}
+      </button>
+    );
+  },
+);
 
 export type AdminCompactBtnLinkProps = React.ComponentProps<typeof Link> & {
   children: React.ReactNode;

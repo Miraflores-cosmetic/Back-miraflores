@@ -1,18 +1,19 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { useOrderChatPanelVisible } from '@/hooks/useOrderChatPanelVisible';
 import { adminChatTargetKey } from '@/lib/orderChat/adminChatPaths';
-import Link from 'next/link';
 import { ChatWindow } from '@/components/ChatWindow/ChatWindow';
-import { AdminListShell } from '@/components/admin/AdminListShell/AdminListShell';
+import { AdminCompactBtn, AdminCompactBtnLink } from '@/components/AdminCompactBtn/AdminCompactBtn';
+import { AdminTabs } from '@/components/AdminTabs/AdminTabs';
 import { AdminSearchBox } from '@/components/SearchBox/SearchBox';
 import { useAdminOrderChat } from '@/hooks/useAdminOrderChat';
 import {
   AdminBackendRequestError,
   adminBackendJson,
 } from '@/lib/adminBackendFetch';
-import { formatAdminDateTime } from '@/lib/adminFormat';
+import { formatAdminChatListTime, formatAdminDateTime } from '@/lib/adminFormat';
 import type { AdminSupportThread, AdminSupportThreadsResponse } from '@/lib/orderChat/types';
 import catalogStyles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
 import orderStyles from '../orders.module.css';
@@ -37,6 +38,42 @@ function supportThreadsPath(opts: {
   return `orders/admin/chat/support-threads?${p.toString()}`;
 }
 
+function threadLabel(t: Pick<AdminSupportThread, 'userDisplayName' | 'userEmail'>): string {
+  return t.userDisplayName?.trim() || t.userEmail;
+}
+
+function initialsOf(label: string): string {
+  const words = label.replace(/@.*/, '').split(/[\s._-]+/).filter(Boolean);
+  const letters = words.length >= 2 ? words[0]![0]! + words[1]![0]! : (words[0] ?? '?').slice(0, 2);
+  return letters.toUpperCase();
+}
+
+function unreadLabel(n: number): string {
+  return n > 99 ? '99+' : String(n);
+}
+
+function ChatBubbleIcon() {
+  return (
+    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+      <path d="M8.5 10.5h7M8.5 13.5h4.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function BackIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M15 18l-6-6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function OrderSupportChatClient({
   staffUserId,
   staffAvatarUrl,
@@ -44,13 +81,27 @@ export function OrderSupportChatClient({
   staffUserId?: string | null;
   staffAvatarUrl?: string | null;
 }) {
+  const pathname = usePathname() ?? '/admin/orders/chat';
+  const searchParams = useSearchParams();
+  /** `?user=` — источник истины: ссылка на диалог переживает перезагрузку и шаринг. */
+  const selectedUserId = searchParams.get('user')?.trim() || null;
+  const setSelectedUserId = useCallback(
+    (userId: string | null) => {
+      const next = new URLSearchParams(window.location.search);
+      if (userId) next.set('user', userId);
+      else next.delete('user');
+      const qs = next.toString();
+      window.history.replaceState(null, '', qs ? `${pathname}?${qs}` : pathname);
+    },
+    [pathname],
+  );
+
   const [threads, setThreads] = useState<AdminSupportThread[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [unreadThreadsTotal, setUnreadThreadsTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const [qDebounced, setQDebounced] = useState('');
   const [filter, setFilter] = useState<ThreadFilter>('all');
@@ -146,6 +197,19 @@ export function OrderSupportChatClient({
     setSelectedSnapshot(t);
   };
 
+  const threadListRef = useRef<HTMLUListElement>(null);
+  const onThreadListKeyDown = (e: KeyboardEvent<HTMLUListElement>) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    const buttons = Array.from(
+      threadListRef.current?.querySelectorAll<HTMLButtonElement>('button[data-thread]') ?? [],
+    );
+    const idx = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    if (idx === -1) return;
+    e.preventDefault();
+    const next = buttons[e.key === 'ArrowDown' ? idx + 1 : idx - 1];
+    next?.focus();
+  };
+
   const hasQuery = qDebounced.trim().length > 0;
   const emptyText = hasQuery
     ? 'Ничего не найдено'
@@ -170,123 +234,180 @@ export function OrderSupportChatClient({
   });
 
   const chatThreadKey = chatTarget ? adminChatTargetKey(chatTarget) : '';
-
-  const chatTitle = selected
-    ? selected.userDisplayName?.trim() || selected.userEmail
-    : 'Диалог';
+  const chatTitle = selected ? threadLabel(selected) : 'Клиент';
+  const showEmailLine = Boolean(selected?.userDisplayName?.trim());
 
   return (
-    <div className={styles.supportChatPage}>
-      <div className={styles.supportChatHeader}>
-        <h1 className={styles.sectionTitle}>Чаты поддержки</h1>
-        <p className={styles.muted}>
-          Общие диалоги без привязки к заказу. Чат по заказу — в карточке заказа.
-        </p>
-      </div>
-      {error ? (
-        <p className={styles.error} role="alert">
-          {error}
-        </p>
-      ) : null}
-      <div className={styles.supportChatLayout}>
-        <div className={styles.supportChatThreadList}>
-          <div className={styles.supportChatThreadToolbar}>
+    <>
+      <h1 className={styles.title}>Чаты поддержки</h1>
+      <p className={styles.lead}>
+        Общие диалоги с покупателями без привязки к заказу. Чат по заказу — в карточке заказа.
+      </p>
+
+      <div
+        className={`${styles.supportChatShell} ${selectedUserId ? styles.supportChatShellChatOpen : ''}`}
+      >
+        <aside className={styles.supportChatSidebar} aria-label="Диалоги">
+          <div className={styles.supportChatSidebarHead}>
             <AdminSearchBox
               placeholder="Email, имя, телефон, текст"
               ariaLabel="Поиск диалогов"
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
-            <div className={styles.supportChatFilters} role="group" aria-label="Фильтр диалогов">
-              <button
-                type="button"
-                className={`${styles.supportChatFilterBtn} ${filter === 'all' ? styles.supportChatFilterBtnActive : ''}`}
-                aria-pressed={filter === 'all'}
-                onClick={() => setFilter('all')}
-              >
-                Все
-              </button>
-              <button
-                type="button"
-                className={`${styles.supportChatFilterBtn} ${filter === 'unread' ? styles.supportChatFilterBtnActive : ''}`}
-                aria-pressed={filter === 'unread'}
-                onClick={() => setFilter('unread')}
-              >
-                Непрочитанные
-                {unreadThreadsTotal > 0 ? (
-                  <span className={styles.orderChatUnreadBadge} aria-label={`${unreadThreadsTotal} непрочитанных`}>
-                    {unreadThreadsTotal > 99 ? '99+' : unreadThreadsTotal}
-                  </span>
-                ) : null}
-              </button>
-            </div>
-          </div>
-          <AdminListShell
-            loading={loading}
-            error={null}
-            loadingLabel="Загрузка…"
-            isEmpty={!loading && threads.length === 0}
-            empty={<p className={`${styles.muted} ${styles.supportChatEmpty}`}>{emptyText}</p>}
-            wrapContent={false}
-            styles={styles}
-          >
-          <ul className={styles.supportChatThreads}>
-            {threads.map((t) => {
-              const active = t.userId === selectedUserId;
-              const label = t.userDisplayName?.trim() || t.userEmail;
-              return (
-                <li key={t.userId}>
-                  <button
-                    type="button"
-                    className={`${styles.supportChatThreadBtn} ${active ? styles.supportChatThreadBtnActive : ''}`}
-                    aria-current={active ? 'true' : undefined}
-                    onClick={() => selectThread(t)}
-                  >
-                    <span className={styles.supportChatThreadTitle}>
-                      {label}
-                      {t.unreadCount > 0 ? (
-                        <span className={styles.orderChatUnreadBadge} aria-hidden>
-                          {t.unreadCount > 99 ? '99+' : t.unreadCount}
+            <AdminTabs<ThreadFilter>
+              variant="pill"
+              ariaLabel="Фильтр диалогов"
+              className={styles.supportChatTabs}
+              activeId={filter}
+              onChange={setFilter}
+              items={[
+                { id: 'all', label: 'Все' },
+                {
+                  id: 'unread',
+                  label: (
+                    <>
+                      Непрочитанные
+                      {unreadThreadsTotal > 0 ? (
+                        <span className={`${styles.orderChatUnreadBadge} ${styles.supportChatBadge}`}>
+                          {unreadLabel(unreadThreadsTotal)}
                         </span>
                       ) : null}
-                    </span>
-                    {t.lastMessagePreview ? (
-                      <span className={styles.supportChatThreadPreview}>{t.lastMessagePreview}</span>
-                    ) : null}
-                    {t.lastMessageAt ? (
-                      <span className={styles.supportChatThreadTime}>
-                        {formatAdminDateTime(t.lastMessageAt)}
-                      </span>
-                    ) : null}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-          {nextCursor ? (
-            <div className={styles.supportChatLoadMore}>
-              <button
-                type="button"
-                className={styles.btn}
-                onClick={() => void loadMore()}
-                disabled={loadingMore}
-              >
-                {loadingMore ? 'Загрузка…' : 'Показать ещё'}
-              </button>
-            </div>
-          ) : null}
-          </AdminListShell>
-        </div>
-        <div className={styles.supportChatPanel}>
-          {selected ? (
-            <>
-              <div className={styles.supportChatPanelHead}>
-                <strong>{chatTitle}</strong>
-                <Link href={`/admin/users/${selected.userId}`} className={styles.orderInlineLink}>
-                  Профиль
-                </Link>
+                    </>
+                  ),
+                  'aria-label':
+                    unreadThreadsTotal > 0
+                      ? `Непрочитанные: ${unreadThreadsTotal}`
+                      : 'Непрочитанные',
+                },
+              ]}
+            />
+          </div>
+
+          <div className={styles.supportChatSidebarBody}>
+            {error ? (
+              <div className={styles.supportChatNotice} role="alert">
+                <span>{error}</span>
+                <AdminCompactBtn
+                  variant="outline"
+                  onClick={() => void loadThreads(threads.length ? 'refresh' : 'reset')}
+                >
+                  Повторить
+                </AdminCompactBtn>
               </div>
-              <div ref={chatPanelRef} className={styles.supportChatPanelBody}>
+            ) : null}
+
+            {loading ? (
+              <p className={styles.supportChatEmpty}>Загрузка…</p>
+            ) : threads.length === 0 ? (
+              error ? null : <p className={styles.supportChatEmpty}>{emptyText}</p>
+            ) : (
+              <ul
+                ref={threadListRef}
+                className={styles.supportChatThreads}
+                onKeyDown={onThreadListKeyDown}
+              >
+                {threads.map((t) => {
+                  const active = t.userId === selectedUserId;
+                  const unread = t.unreadCount > 0;
+                  const label = threadLabel(t);
+                  return (
+                    <li key={t.userId}>
+                      <button
+                        type="button"
+                        data-thread
+                        className={[
+                          styles.supportChatThreadBtn,
+                          active ? styles.supportChatThreadBtnActive : '',
+                          unread ? styles.supportChatThreadBtnUnread : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' ')}
+                        aria-current={active ? 'true' : undefined}
+                        title={t.userEmail}
+                        onClick={() => selectThread(t)}
+                      >
+                        <span className={styles.supportChatAvatar} aria-hidden>
+                          {initialsOf(label)}
+                        </span>
+                        <span className={styles.supportChatThreadMain}>
+                          <span className={styles.supportChatThreadRow}>
+                            <span className={styles.supportChatThreadTitle}>{label}</span>
+                            {t.lastMessageAt ? (
+                              <time
+                                className={styles.supportChatThreadTime}
+                                dateTime={t.lastMessageAt}
+                                title={formatAdminDateTime(t.lastMessageAt)}
+                              >
+                                {formatAdminChatListTime(t.lastMessageAt)}
+                              </time>
+                            ) : null}
+                          </span>
+                          <span className={styles.supportChatThreadRow}>
+                            <span className={styles.supportChatThreadPreview}>
+                              {t.lastMessagePreview || 'Нет сообщений'}
+                            </span>
+                            {unread ? (
+                              <span
+                                className={`${styles.orderChatUnreadBadge} ${styles.supportChatBadge}`}
+                                aria-label={`${t.unreadCount} непрочитанных`}
+                              >
+                                {unreadLabel(t.unreadCount)}
+                              </span>
+                            ) : null}
+                          </span>
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+
+            {nextCursor && !loading ? (
+              <div className={styles.supportChatLoadMore}>
+                <AdminCompactBtn
+                  variant="outline"
+                  onClick={() => void loadMore()}
+                  disabled={loadingMore}
+                >
+                  {loadingMore ? 'Загрузка…' : 'Показать ещё'}
+                </AdminCompactBtn>
+              </div>
+            ) : null}
+          </div>
+        </aside>
+
+        <section className={styles.supportChatMain} aria-label="Диалог">
+          {selectedUserId ? (
+            <>
+              <header className={styles.supportChatMainHead}>
+                <button
+                  type="button"
+                  className={styles.supportChatBackBtn}
+                  onClick={() => setSelectedUserId(null)}
+                  aria-label="К списку диалогов"
+                >
+                  <BackIcon />
+                </button>
+                <span className={styles.supportChatAvatar} aria-hidden>
+                  {initialsOf(chatTitle)}
+                </span>
+                <div className={styles.supportChatMainTitleWrap}>
+                  <h2 className={styles.supportChatMainTitle}>{chatTitle}</h2>
+                  {showEmailLine && selected ? (
+                    <p className={styles.supportChatMainSubtitle}>{selected.userEmail}</p>
+                  ) : null}
+                </div>
+                <AdminCompactBtnLink
+                  href={`/admin/users/${selectedUserId}`}
+                  variant="outline"
+                  className={styles.supportChatMainAction}
+                >
+                  Профиль клиента
+                </AdminCompactBtnLink>
+              </header>
+              <div ref={chatPanelRef} className={styles.supportChatMainBody}>
                 <ChatWindow
                   key={chatThreadKey}
                   threadKey={chatThreadKey}
@@ -294,13 +415,14 @@ export function OrderSupportChatClient({
                   embeddedLayout="fill"
                   open
                   hideCloseButton
-                  title={chatTitle}
+                  title=""
                   titleTransform="none"
                   messages={chat.chatMessages}
-                  messageEmptyHint={chat.chatLoading ? 'Загрузка…' : 'Напишите первым'}
+                  messageEmptyHint={chat.chatLoading ? 'Загрузка…' : 'Сообщений пока нет — напишите первым'}
                   inputPlaceholder="Ответ клиенту…"
                   errorText={chat.chatError}
                   uiVariant="admin"
+                  frameless
                   confirmBeforeDelete
                   composerDisabled={chat.chatComposerDisabled}
                   sendDisabled={chat.chatSendDisabled}
@@ -323,10 +445,16 @@ export function OrderSupportChatClient({
               </div>
             </>
           ) : (
-            <p className={styles.muted}>Выберите диалог слева</p>
+            <div className={styles.supportChatPlaceholder}>
+              <ChatBubbleIcon />
+              <p className={styles.supportChatPlaceholderTitle}>Выберите диалог</p>
+              <p className={styles.supportChatPlaceholderText}>
+                Сначала показаны диалоги с непрочитанными сообщениями.
+              </p>
+            </div>
           )}
-        </div>
+        </section>
       </div>
-    </div>
+    </>
   );
 }

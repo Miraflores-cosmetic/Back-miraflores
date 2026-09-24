@@ -12,6 +12,7 @@ import {
 } from 'react';
 import { AdminCompactBtn } from '@/components/AdminCompactBtn/AdminCompactBtn';
 import { AdminModal } from '@/components/admin/AdminModal/AdminModal';
+import { adminConfirm } from '@/components/admin/AdminModal/adminConfirm';
 import { adminBackendFetch, adminBackendJson } from '@/lib/adminBackendFetch';
 import catalogStyles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
 import styles from './AdminAssistantPanel.module.css';
@@ -241,13 +242,13 @@ function AssistantChatBody({
   }, [busy, persistThreadId, abortRef]);
 
   const clearHistory = useCallback(async () => {
-    if (
-      !window.confirm(
-        'Удалить всю историю диалогов с ассистентом? Это действие необратимо.',
-      )
-    ) {
-      return;
-    }
+    const ok = await adminConfirm({
+      title: 'Очистить историю',
+      message: 'Удалить всю историю диалогов с ассистентом? Это действие необратимо.',
+      confirmLabel: 'Удалить',
+      danger: true,
+    });
+    if (!ok) return;
     setError(null);
     try {
       await adminBackendJson('assistant/admin/threads', { method: 'DELETE' });

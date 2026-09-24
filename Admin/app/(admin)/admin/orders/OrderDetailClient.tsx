@@ -8,7 +8,7 @@ import {
 } from '@/components/AdminCompactBtn/AdminCompactBtn';
 import { AdminCheckbox } from '@/components/admin/AdminCheckbox/AdminCheckbox';
 import { AdminSelect, AdminTextField } from '@/components/AdminTextField/AdminTextField';
-import { ConfirmDialog } from '@/components/ConfirmDialog/ConfirmDialog';
+import { AdminConfirmDialog } from '@/components/admin/AdminModal/AdminConfirmDialog';
 import {
   AdminBackendRequestError,
   adminBackendJson,
@@ -25,7 +25,7 @@ import {
 import { parseJcosAddressMeta } from '@/lib/shipping/addressShippingMeta';
 import { GIFT_PARTIAL_REFUND_POLICY } from '@/lib/giftHoldCopy';
 import { OrderAccordion, OrderIconBtn } from './OrderAccordion';
-import { AdminOrderSideChat } from './AdminOrderSideChat';
+import { AdminOrderChatModal } from './AdminOrderChatModal';
 import { OrderAddressEditModal } from './OrderAddressEditModal';
 import { OrderItemsEditModal } from './OrderItemsEditModal';
 import { OrderShippingCostEditModal } from './OrderShippingCostEditModal';
@@ -115,10 +115,20 @@ export function OrderDetailClient({
   const [providerRefund, setProviderRefund] = useState(true);
   const [confirm, setConfirm] = useState<ConfirmState>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [orderRightTab, setOrderRightTab] = useState<'actions' | 'chat'>(() => {
-    if (typeof window === 'undefined') return 'actions';
-    return window.location.hash === '#order-chat' ? 'chat' : 'actions';
-  });
+  const [chatModalOpen, setChatModalOpen] = useState(false);
+
+  const setChatModalOpenWithHash = useCallback((open: boolean) => {
+    setChatModalOpen(open);
+    if (typeof window === 'undefined') return;
+    const base = `${window.location.pathname}${window.location.search}`;
+    if (open) {
+      if (window.location.hash !== '#order-chat') {
+        window.history.replaceState(null, '', `${base}#order-chat`);
+      }
+    } else if (window.location.hash === '#order-chat') {
+      window.history.replaceState(null, '', base);
+    }
+  }, []);
   const [copied, setCopied] = useState(false);
   const [addressModalOpen, setAddressModalOpen] = useState(false);
   const [shippingCostModalOpen, setShippingCostModalOpen] = useState(false);
@@ -195,11 +205,10 @@ export function OrderDetailClient({
   }, [load]);
 
   useEffect(() => {
-    if (typeof window === 'undefined' || window.location.hash !== '#order-chat') return;
-    setOrderRightTab('chat');
-    window.requestAnimationFrame(() => {
-      document.getElementById('order-chat')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    });
+    if (loading || typeof window === 'undefined') return;
+    if (window.location.hash === '#order-chat') {
+      setChatModalOpen(true);
+    }
   }, [orderId, loading]);
 
   const editModalOpen =
@@ -1087,37 +1096,7 @@ export function OrderDetailClient({
         </div>
 
         <div className={styles.orderDetailRight}>
-        <div className={styles.orderDetailRightTabs} role="tablist" aria-label="Панель заказа">
-          <button
-            type="button"
-            role="tab"
-            className={styles.orderDetailRightTab}
-            aria-selected={orderRightTab === 'actions'}
-            onClick={() => setOrderRightTab('actions')}
-          >
-            Действия
-          </button>
-          <button
-            type="button"
-            role="tab"
-            className={styles.orderDetailRightTab}
-            aria-selected={orderRightTab === 'chat'}
-            disabled={!order?.userId}
-            title={
-              order?.userId ? undefined : 'Чат только для заказов с аккаунтом покупателя'
-            }
-            onClick={() => setOrderRightTab('chat')}
-          >
-            Чат
-          </button>
-        </div>
-        <aside
-          className={`${styles.orderDetailAside} ${
-            orderRightTab !== 'actions' ? styles.orderDetailRightPaneHidden : ''
-          }`}
-          role="tabpanel"
-          aria-label="Действия по заказу"
-        >
+        <aside className={styles.orderDetailAside} aria-label="Действия по заказу">
           <div>
             <p className={styles.orderAsideTitle}>Статус</p>
             <div className={styles.orderStatusRow}>
@@ -1127,6 +1106,19 @@ export function OrderDetailClient({
                 {orderStatusLabel(order.status)}
               </span>
             </div>
+            <AdminCompactBtn
+              type="button"
+              variant="outline"
+              disabled={!order.userId}
+              title={
+                order.userId
+                  ? undefined
+                  : 'Чат только для заказов с аккаунтом покупателя'
+              }
+              onClick={() => setChatModalOpenWithHash(true)}
+            >
+              Чат с клиентом
+            </AdminCompactBtn>
           </div>
 
           <div className={styles.orderTotalBlock}>
@@ -1703,25 +1695,19 @@ export function OrderDetailClient({
             </div>
           </OrderAccordion>
         </aside>
-        <section
-          id="order-chat"
-          className={`${styles.orderDetailChatAside} ${
-            orderRightTab !== 'chat' ? styles.orderDetailRightPaneHidden : ''
-          }`}
-          role="tabpanel"
-          aria-label="Чат с клиентом"
-        >
-          <AdminOrderSideChat
-            orderId={orderId}
-            buyerUserId={order?.userId ?? null}
-            staffUserId={staffUserId}
-            staffAvatarUrl={staffAvatarUrl}
-          />
-        </section>
         </div>
       </div>
 
-      <ConfirmDialog
+      <AdminOrderChatModal
+        open={chatModalOpen}
+        onClose={() => setChatModalOpenWithHash(false)}
+        orderId={orderId}
+        buyerUserId={order?.userId ?? null}
+        staffUserId={staffUserId}
+        staffAvatarUrl={staffAvatarUrl}
+      />
+
+      <AdminConfirmDialog
         open={Boolean(confirm)}
         title={confirm?.title ?? ''}
         message={confirm?.message ?? ''}
@@ -1735,7 +1721,7 @@ export function OrderDetailClient({
       />
 
       {surchargeUrl ? (
-        <ConfirmDialog
+        <AdminConfirmDialog
           open
           title="Ссылка на доплату"
           message={surchargeUrl}

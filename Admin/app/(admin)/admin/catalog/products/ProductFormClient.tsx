@@ -9,7 +9,7 @@ import { AdminCompactBtn, AdminCompactBtnLink } from '@/components/AdminCompactB
 import { AdminPillChip, AdminPillChipList } from '@/components/AdminPillChip/AdminPillChip';
 import { AdminRichField } from '@/components/admin/AdminRichField/AdminRichField';
 import { AdminSelect, AdminTextArea, AdminTextField } from '@/components/AdminTextField/AdminTextField';
-import { ConfirmDialog } from '@/components/ConfirmDialog/ConfirmDialog';
+import { AdminConfirmDialog } from '@/components/admin/AdminModal/AdminConfirmDialog';
 import { useToast } from '@/components/Toast/ToastProvider';
 import {
   AdminBackendRequestError,
@@ -1081,7 +1081,7 @@ export function ProductFormClient({ productId }: { productId?: string }) {
         </section>
       ) : null}
 
-      <ConfirmDialog
+      <AdminConfirmDialog
         open={pendingDeleteVariant != null}
         title="Удалить вариант?"
         message={
@@ -1094,7 +1094,7 @@ export function ProductFormClient({ productId }: { productId?: string }) {
         onConfirm={() => void removeVariantConfirmed()}
         onCancel={() => setPendingDeleteVariant(null)}
       />
-      <ConfirmDialog
+      <AdminConfirmDialog
         open={pendingDeleteProduct}
         title="Удалить товар?"
         message={`Товар «${name || 'без названия'}» и все его варианты будут удалены. Если товар есть в заказах — удаление будет отклонено, скройте его.`}

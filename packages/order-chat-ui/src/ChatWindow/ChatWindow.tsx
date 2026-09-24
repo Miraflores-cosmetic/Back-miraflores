@@ -21,8 +21,10 @@ import {
 } from '@miraflores/order-chat-core';
 import { linkifyChatMessageContent } from '../lib/linkifyChatMessageContent';
 import { ORDER_CHAT_FILE_INPUT_ACCEPT } from '../lib/chatUploadAccept';
-import { ChatDeleteConfirm } from './ChatDeleteConfirm';
+import { ChatDeleteConfirm, type ChatDeleteConfirmRenderProps } from './ChatDeleteConfirm';
 import styles from './ChatWindow.module.css';
+
+export type { ChatDeleteConfirmRenderProps };
 
 export type ChatDocAttachment = { id: string; filename: string; url?: string };
 export type ChatImageAttachment = { id: string; src: string; alt?: string };
@@ -106,8 +108,12 @@ type Props = {
   titleTransform?: 'uppercase' | 'none';
   /** `admin` — плоская панель без glass; стили пузырей по роли автора. */
   uiVariant?: 'glass' | 'admin';
+  /** Без своей обводки и скругления — рамку даёт родительская карточка. */
+  frameless?: boolean;
   /** Подтверждение перед soft-delete. */
   confirmBeforeDelete?: boolean;
+  /** Своё окно подтверждения удаления (по умолчанию — `ChatDeleteConfirm`). */
+  renderDeleteConfirm?: (props: ChatDeleteConfirmRenderProps) => ReactNode;
   /** Блокировать только кнопку «Отправить» (не textarea). */
   sendDisabled?: boolean;
   /** Lightbox / PhotoSwipe для изображений в ленте (ЛК и админка). */
@@ -316,7 +322,9 @@ export function ChatWindow({
   messageDayLocale = 'ru-RU',
   titleTransform = 'uppercase',
   uiVariant = 'glass',
+  frameless = false,
   confirmBeforeDelete = false,
+  renderDeleteConfirm,
   sendDisabled = false,
   onOpenImageGallery,
 }: Props) {
@@ -566,7 +574,7 @@ export function ChatWindow({
     <section
       className={`${styles.panel} ${styles.ocUiTokens} ${fillEmbedded ? styles.panelEmbedded : ''} ${
         isAdminUi ? styles.panelAdminPlain : ''
-      }`}
+      } ${frameless ? styles.panelFrameless : ''}`}
       {...(embedded
         ? ({ role: 'region' as const } as const)
         : ({ role: 'dialog' as const, 'aria-modal': true as const } as const))}
@@ -852,18 +860,24 @@ export function ChatWindow({
     </section>
   );
 
+  const deleteConfirmProps: ChatDeleteConfirmRenderProps = {
+    open: Boolean(pendingDeleteId),
+    onCancel: () => setPendingDeleteId(null),
+    onConfirm: () => {
+      const id = pendingDeleteId;
+      setPendingDeleteId(null);
+      if (id) void onDeleteMessage?.(id);
+    },
+  };
+
   const tree = (
     <>
       {panelSection}
-      <ChatDeleteConfirm
-        open={Boolean(pendingDeleteId)}
-        onCancel={() => setPendingDeleteId(null)}
-        onConfirm={() => {
-          const id = pendingDeleteId;
-          setPendingDeleteId(null);
-          if (id) void onDeleteMessage?.(id);
-        }}
-      />
+      {renderDeleteConfirm ? (
+        renderDeleteConfirm(deleteConfirmProps)
+      ) : (
+        <ChatDeleteConfirm {...deleteConfirmProps} />
+      )}
     </>
   );
 

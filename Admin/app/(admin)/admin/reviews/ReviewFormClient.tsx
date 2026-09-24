@@ -11,7 +11,7 @@ import {
   AdminTextArea,
   AdminTextField,
 } from '@/components/AdminTextField/AdminTextField';
-import { ConfirmDialog } from '@/components/ConfirmDialog/ConfirmDialog';
+import { AdminConfirmDialog } from '@/components/admin/AdminModal/AdminConfirmDialog';
 import { useToast } from '@/components/Toast/ToastProvider';
 import {
   AdminBackendRequestError,
@@ -478,7 +478,7 @@ export function ReviewFormClient({ reviewId: reviewIdProp }: { reviewId?: string
         />
       ) : null}
 
-      <ConfirmDialog
+      <AdminConfirmDialog
         open={pendingDelete}
         title="Удалить отзыв?"
         message="Отзыв будет удалён безвозвратно."

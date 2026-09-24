@@ -2,6 +2,7 @@ import {
   AdminBackendRequestError,
   adminBackendJson,
 } from '@/lib/adminBackendFetch';
+import { adminConfirm } from '@/components/admin/AdminModal/adminConfirm';
 
 /**
  * confirm → DELETE → optional reload; alert on failure.
@@ -12,7 +13,13 @@ export async function adminConfirmDelete(opts: {
   url: string;
   onDone?: () => void | Promise<void>;
 }): Promise<boolean> {
-  if (!window.confirm(opts.message)) return false;
+  const ok = await adminConfirm({
+    title: 'Удаление',
+    message: opts.message,
+    confirmLabel: 'Удалить',
+    danger: true,
+  });
+  if (!ok) return false;
   try {
     await adminBackendJson(opts.url, { method: 'DELETE' });
     await opts.onDone?.();

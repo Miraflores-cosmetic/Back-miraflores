@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ConfirmDialog } from '@/components/ConfirmDialog/ConfirmDialog';
+import { AdminConfirmDialog } from '@/components/admin/AdminModal/AdminConfirmDialog';
+import { adminConfirm } from '@/components/admin/AdminModal/adminConfirm';
 import { AdminCheckbox } from '@/components/admin/AdminCheckbox/AdminCheckbox';
 import {
   AdminCompactBtn,
@@ -314,23 +315,33 @@ export function EmailNotificationEditClient({ eventKey }: { eventKey: string }) 
     }
   }
 
-  function resetDefaults() {
+  async function resetDefaults() {
     if (!detail) return;
     setMoreOpen(false);
-    if (
-      !window.confirm(
+    const ok = await adminConfirm({
+      title: 'Текст по умолчанию',
+      message:
         'Подставить текст по умолчанию? Несохранённые правки темы и сообщения будут заменены.',
-      )
-    ) {
-      return;
-    }
+      confirmLabel: 'Подставить',
+    });
+    if (!ok) return;
     setSubject(detail.defaultSubject);
     setBody(detail.defaultBody);
     markDirty();
   }
 
-  function onCancel() {
-    if (dirty && !window.confirm('Есть несохранённые изменения. Уйти?')) return;
+  async function confirmLeave(): Promise<boolean> {
+    if (!dirty) return true;
+    return adminConfirm({
+      title: 'Несохранённые изменения',
+      message: 'Есть несохранённые изменения. Уйти без сохранения?',
+      confirmLabel: 'Уйти',
+      danger: true,
+    });
+  }
+
+  async function onCancel() {
+    if (!(await confirmLeave())) return;
     router.push('/admin/settings/email-notifications');
   }
 
@@ -391,12 +402,9 @@ export function EmailNotificationEditClient({ eventKey }: { eventKey: string }) 
                 href="/admin/settings/email-notifications"
                 variant="outline"
                 onClick={(e) => {
-                  if (
-                    dirty &&
-                    !window.confirm('Есть несохранённые изменения. Уйти?')
-                  ) {
-                    e.preventDefault();
-                  }
+                  if (!dirty) return;
+                  e.preventDefault();
+                  void onCancel();
                 }}
               >
                 ← Email-уведомления
@@ -659,7 +667,7 @@ export function EmailNotificationEditClient({ eventKey }: { eventKey: string }) 
         </section>
       ) : null}
 
-      <ConfirmDialog
+      <AdminConfirmDialog
         open={disableConfirmOpen}
         title="Выключить письмо?"
         message="Покупатели больше не получат это уведомление. Legacy-fallback тоже не сработает — send полностью глушится. Текст шаблона сохранится."
@@ -674,7 +682,7 @@ export function EmailNotificationEditClient({ eventKey }: { eventKey: string }) 
         onCancel={() => setDisableConfirmOpen(false)}
       />
 
-      <ConfirmDialog
+      <AdminConfirmDialog
         open={testConfirmOpen}
         title="Отправить тест себе?"
         message={`На ваш email уйдёт письмо с префиксом [тест]. Подставляются demo-данные (${sampleVariant === 'sparse' ? 'без опциональных полей' : 'полный пример'}), флаг «Шлётся» игнорируется.`}

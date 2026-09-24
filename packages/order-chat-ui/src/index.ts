@@ -3,6 +3,7 @@ export {
   type ChatWindowMessage,
   type ChatDocAttachment,
   type ChatImageAttachment,
+  type ChatDeleteConfirmRenderProps,
 } from './ChatWindow/ChatWindow';
 export { useChatAttachments, type ChatPendingAttachmentRef } from './hooks/useChatAttachments';
 export { linkifyChatMessageContent } from './lib/linkifyChatMessageContent';

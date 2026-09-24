@@ -1,12 +1,12 @@
 import styles from './ChatWindow.module.css';
 
-type Props = {
+export type ChatDeleteConfirmRenderProps = {
   open: boolean;
   onCancel: () => void;
   onConfirm: () => void;
 };
 
-export function ChatDeleteConfirm({ open, onCancel, onConfirm }: Props) {
+export function ChatDeleteConfirm({ open, onCancel, onConfirm }: ChatDeleteConfirmRenderProps) {
   if (!open) return null;
   return (
     <div className={styles.deleteConfirmOverlay} role="presentation" onClick={onCancel}>

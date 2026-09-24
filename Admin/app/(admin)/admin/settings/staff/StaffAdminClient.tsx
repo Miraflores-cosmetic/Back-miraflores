@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AdminCompactBtn } from '@/components/AdminCompactBtn/AdminCompactBtn';
 import { AdminListShell } from '@/components/admin/AdminListShell/AdminListShell';
+import { adminConfirm } from '@/components/admin/AdminModal/adminConfirm';
 import {
   AdminBackendRequestError,
   adminBackendFetch,
@@ -173,7 +174,17 @@ export function StaffAdminClient({ currentUserId }: { currentUserId?: string | n
 
   async function handleToggleActive() {
     if (!selected || selected.role === 'ADMIN') return;
-    if (selected.isActive && !window.confirm('Деактивировать сотрудника?')) return;
+    if (
+      selected.isActive &&
+      !(await adminConfirm({
+        title: 'Деактивировать сотрудника',
+        message: 'Деактивировать сотрудника? Его можно будет активировать снова.',
+        confirmLabel: 'Деактивировать',
+        danger: true,
+      }))
+    ) {
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -192,7 +203,13 @@ export function StaffAdminClient({ currentUserId }: { currentUserId?: string | n
 
   async function handleDelete() {
     if (!selected || selected.role === 'ADMIN' || selected.id === currentUserId) return;
-    if (!window.confirm('Удалить сотрудника? Это действие необратимо.')) return;
+    const ok = await adminConfirm({
+      title: 'Удалить сотрудника',
+      message: 'Это действие необратимо.',
+      confirmLabel: 'Удалить',
+      danger: true,
+    });
+    if (!ok) return;
     setSaving(true);
     setError(null);
     try {
@@ -235,16 +252,14 @@ export function StaffAdminClient({ currentUserId }: { currentUserId?: string | n
   async function handleResetPassword() {
     if (!selected) return;
     const resettingSelf = selected.id === currentUserId;
-    if (resettingSelf) {
-      const ok = window.confirm(
-        'Сброс пароля завершит текущую сессию (потребуется новый вход). Продолжить?',
-      );
-      if (!ok) return;
-    } else if (
-      !window.confirm('Сгенерировать новый пароль для этого сотрудника?')
-    ) {
-      return;
-    }
+    const ok = await adminConfirm({
+      title: 'Сбросить пароль',
+      message: resettingSelf
+        ? 'Сброс пароля завершит текущую сессию (потребуется новый вход). Продолжить?'
+        : 'Сгенерировать новый пароль для этого сотрудника?',
+      confirmLabel: 'Сбросить',
+    });
+    if (!ok) return;
     setSaving(true);
     setError(null);
     try {

@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { AdminCompactBtn } from '@/components/AdminCompactBtn/AdminCompactBtn';
 import { AdminListPagination } from '@/components/admin/AdminListPagination/AdminListPagination';
 import { AdminSearchBox } from '@/components/SearchBox/SearchBox';
-import { ConfirmDialog } from '@/components/ConfirmDialog/ConfirmDialog';
+import { AdminConfirmDialog } from '@/components/admin/AdminModal/AdminConfirmDialog';
 import { useToast } from '@/components/Toast/ToastProvider';
 import {
   AdminBackendRequestError,
@@ -208,7 +208,7 @@ export function UserGroupMembersTab({
         onClose={() => setPickerOpen(false)}
         onApply={(userId) => void addMember(userId)}
       />
-      <ConfirmDialog
+      <AdminConfirmDialog
         open={removeMember != null}
         title="Убрать из группы?"
         message={

@@ -9,7 +9,7 @@ import { AdminListPagination } from '@/components/admin/AdminListPagination/Admi
 import { AdminTextField } from '@/components/AdminTextField/AdminTextField';
 import { AdminTabs } from '@/components/AdminTabs/AdminTabs';
 import { AdminSearchBox } from '@/components/SearchBox/SearchBox';
-import { ConfirmDialog } from '@/components/ConfirmDialog/ConfirmDialog';
+import { AdminConfirmDialog } from '@/components/admin/AdminModal/AdminConfirmDialog';
 import { useToast } from '@/components/Toast/ToastProvider';
 import type { AdminProduct, AdminVariant } from '@/lib/adminCatalogTypes';
 import {
@@ -572,7 +572,7 @@ export function UserGroupProductPricesTab({
           void loadProduct(id, labels[id] ?? id);
         }}
       />
-      <ConfirmDialog
+      <AdminConfirmDialog
         open={deleteVariantId != null}
         title="Удалить групповую цену?"
         message={`Сбросить групповую цену для ${deleteLabel || 'этого SKU'}? Будет использоваться база или правило категории.`}

@@ -22,7 +22,7 @@ import { AdminCompactBtn, AdminCompactBtnLink } from '@/components/AdminCompactB
 import { AdminSettingsListErrors } from '@/components/admin/AdminSettingsListErrors/AdminSettingsListErrors';
 import { AdminTabs, AdminTabsLead } from '@/components/AdminTabs/AdminTabs';
 import { AdminTextField } from '@/components/AdminTextField/AdminTextField';
-import { ConfirmDialog } from '@/components/ConfirmDialog/ConfirmDialog';
+import { AdminConfirmDialog } from '@/components/admin/AdminModal/AdminConfirmDialog';
 import { AdminSearchBox } from '@/components/SearchBox/SearchBox';
 import { useToast } from '@/components/Toast/ToastProvider';
 import {
@@ -543,7 +543,7 @@ export function ProductAttributesAdminClient() {
         </>
       )}
 
-      <ConfirmDialog
+      <AdminConfirmDialog
         open={confirmEmptyWipe}
         title="Очистить все опции?"
         message={`Сейчас будет удалён весь словарь атрибутов (${loadedCountRef.current} шт.). Опции на товарах удалить нельзя — сервер отклонит запрос. Продолжить?`}
@@ -556,7 +556,7 @@ export function ProductAttributesAdminClient() {
         }}
       />
 
-      <ConfirmDialog
+      <AdminConfirmDialog
         open={pendingRemove != null}
         title="Удалить значение?"
         message={

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AdminCheckbox } from '@/components/admin/AdminCheckbox/AdminCheckbox';
+import { adminConfirm } from '@/components/admin/AdminModal/adminConfirm';
 import { AdminCompactBtn, AdminCompactBtnLink } from '@/components/AdminCompactBtn/AdminCompactBtn';
 import { AdminPillChip, AdminPillChipList } from '@/components/AdminPillChip/AdminPillChip';
 import {
@@ -199,22 +200,31 @@ export function DiscountFormClient({ discountId }: { discountId?: string }) {
     setRuleModalInitial(null);
   }
 
-  function removeRule(rule: RuleDraft) {
+  async function removeRule(rule: RuleDraft) {
     const label = rule.name.trim() || 'без названия';
-    if (!window.confirm(`Удалить правило «${label}»?`)) return;
+    const ok = await adminConfirm({
+      title: 'Удалить правило',
+      message: `Удалить правило «${label}»?`,
+      confirmLabel: 'Удалить',
+      danger: true,
+    });
+    if (!ok) return;
     setRules((prev) => prev.filter((r) => r.key !== rule.key));
   }
 
-  function changeScope(next: DiscountScope) {
+  async function changeScope(next: DiscountScope) {
     if (next === scope) return;
     const clearingProducts = next === 'CATEGORY' && productIds.length > 0;
     const clearingCategories = next === 'PRODUCTS' && categoryIds.length > 0;
     if (clearingProducts || clearingCategories) {
-      const ok = window.confirm(
-        next === 'CATEGORY'
-          ? 'Сменить область на категории? Выбор товаров будет очищен.'
-          : 'Сменить область на товары? Выбор категорий будет очищен.',
-      );
+      const ok = await adminConfirm({
+        title: 'Сменить область',
+        message:
+          next === 'CATEGORY'
+            ? 'Сменить область на категории? Выбор товаров будет очищен.'
+            : 'Сменить область на товары? Выбор категорий будет очищен.',
+        confirmLabel: 'Сменить',
+      });
       if (!ok) return;
     }
     if (next === 'CATEGORY') {
@@ -373,7 +383,7 @@ export function DiscountFormClient({ discountId }: { discountId?: string }) {
             variant="underline"
             compact
             activeId={scope}
-            onChange={(id) => changeScope(id as DiscountScope)}
+            onChange={(id) => void changeScope(id as DiscountScope)}
             items={[
               { id: 'CATEGORY', label: 'Категория / подкатегория' },
               { id: 'PRODUCTS', label: 'Конкретные товары' },
@@ -585,7 +595,7 @@ export function DiscountFormClient({ discountId }: { discountId?: string }) {
                       <AdminCompactBtn
                         type="button"
                         variant="danger"
-                        onClick={() => removeRule(rule)}
+                        onClick={() => void removeRule(rule)}
                       >
                         Удалить
                       </AdminCompactBtn>

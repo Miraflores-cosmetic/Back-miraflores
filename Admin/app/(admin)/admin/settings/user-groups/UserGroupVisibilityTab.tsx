@@ -7,7 +7,7 @@ import {
 } from '@/app/(admin)/admin/discounts/DiscountScopePickerModal';
 import { VariantPickerModal } from '@/app/(admin)/admin/settings/gratitude/VariantPickerModal';
 import { AdminCompactBtn } from '@/components/AdminCompactBtn/AdminCompactBtn';
-import { ConfirmDialog } from '@/components/ConfirmDialog/ConfirmDialog';
+import { AdminConfirmDialog } from '@/components/admin/AdminModal/AdminConfirmDialog';
 import { useToast } from '@/components/Toast/ToastProvider';
 import {
   AdminBackendRequestError,
@@ -312,7 +312,7 @@ export function UserGroupVisibilityTab({ groupId, groupName, onChanged }: Props)
           setVisTargetLabel(label);
         }}
       />
-      <ConfirmDialog
+      <AdminConfirmDialog
         open={deleteRule != null}
         title="Удалить правило видимости?"
         message={

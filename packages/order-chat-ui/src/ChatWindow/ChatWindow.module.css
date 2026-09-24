@@ -921,6 +921,11 @@ a.docChip:hover {
   display: none !important;
 }
 
+.panelFrameless {
+  outline: none !important;
+  border-radius: 0 !important;
+}
+
 .messageStaff .messageBody {
   background: #f4faf5;
   border: 1px solid color-mix(in srgb, var(--color-brand-green, #297230) 25%, #e2e6e8);

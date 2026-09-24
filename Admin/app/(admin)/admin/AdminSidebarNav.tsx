@@ -39,13 +39,11 @@ function NavGroup({
   pathname,
   open,
   onToggle,
-  chatUnreadCount = 0,
 }: {
   item: NavGroupItem;
   pathname: string;
   open: boolean;
   onToggle: () => void;
-  chatUnreadCount?: number;
 }) {
   return (
     <div className={styles.navGroup}>
@@ -61,21 +59,11 @@ function NavGroup({
           <NavChevron open={open} />
         </span>
         <span className={styles.navLinkLabel}>{item.label}</span>
-        {item.id === 'orders' && chatUnreadCount > 0 ? (
-          <span
-            className={styles.navBadge}
-            aria-label={`Непрочитанных в чатах: ${chatUnreadCount}`}
-          >
-            {chatUnreadCount > 99 ? '99+' : chatUnreadCount}
-          </span>
-        ) : null}
       </button>
       {open ? (
         <div className={styles.navSub}>
           {item.children.map((child) => {
-            const active = isNavLinkActive(pathname, child.href);
-            const showChatBadge =
-              child.href === '/admin/orders/chat' && chatUnreadCount > 0;
+            const active = isNavLinkActive(pathname, child.href, child.exact);
             return (
               <Link
                 key={child.href}
@@ -87,14 +75,6 @@ function NavGroup({
               >
                 <span className={styles.navLinkLeading} />
                 <span className={styles.navLinkLabel}>{child.label}</span>
-                {showChatBadge ? (
-                  <span
-                    className={styles.navBadge}
-                    aria-label={`Непрочитанных в чатах: ${chatUnreadCount}`}
-                  >
-                    {chatUnreadCount > 99 ? '99+' : chatUnreadCount}
-                  </span>
-                ) : null}
               </Link>
             );
           })}
@@ -280,6 +260,8 @@ export function AdminSidebarNav({
             const active = isNavLinkActive(pathname, item.href, item.exact);
             const showOrdersBadge =
               item.href === '/admin/orders' && unviewedOrdersCount > 0;
+            const showChatBadge =
+              item.href === '/admin/orders/chat' && chatUnreadCount > 0;
             return (
               <Link
                 key={item.href}
@@ -294,6 +276,14 @@ export function AdminSidebarNav({
                     {unviewedOrdersCount > 99 ? '99+' : unviewedOrdersCount}
                   </span>
                 ) : null}
+                {showChatBadge ? (
+                  <span
+                    className={styles.navBadge}
+                    aria-label={`Непрочитанных в чатах: ${chatUnreadCount}`}
+                  >
+                    {chatUnreadCount > 99 ? '99+' : chatUnreadCount}
+                  </span>
+                ) : null}
               </Link>
             );
           }
@@ -303,7 +293,6 @@ export function AdminSidebarNav({
               item={item}
               pathname={pathname}
               open={Boolean(openGroups[item.id])}
-              chatUnreadCount={item.id === 'orders' ? chatUnreadCount : 0}
               onToggle={() =>
                 setOpenGroups((prev) => ({
                   ...prev,

@@ -7,7 +7,7 @@ import {
   DragHandleCell,
 } from '@/components/admin/AdminSortableTable/AdminSortableTable';
 import { AdminTextField } from '@/components/AdminTextField/AdminTextField';
-import { ConfirmDialog } from '@/components/ConfirmDialog/ConfirmDialog';
+import { AdminConfirmDialog } from '@/components/admin/AdminModal/AdminConfirmDialog';
 import { useToast } from '@/components/Toast/ToastProvider';
 import {
   AdminBackendRequestError,
@@ -302,7 +302,7 @@ export function BlogCategoriesPanel({ categories, onChanged }: Props) {
         </>
       ) : null}
 
-      <ConfirmDialog
+      <AdminConfirmDialog
         open={pendingDelete != null}
         title="Удалить рубрику?"
         message={

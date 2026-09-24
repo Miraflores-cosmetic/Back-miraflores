@@ -13,7 +13,7 @@ import {
 } from '@/components/admin/AdminSortableTable/AdminSortableTable';
 import { AdminSearchBox } from '@/components/SearchBox/SearchBox';
 import { AdminSelect } from '@/components/AdminTextField/AdminTextField';
-import { ConfirmDialog } from '@/components/ConfirmDialog/ConfirmDialog';
+import { AdminConfirmDialog } from '@/components/admin/AdminModal/AdminConfirmDialog';
 import { useToast } from '@/components/Toast/ToastProvider';
 import {
   AdminBackendRequestError,
@@ -488,7 +488,7 @@ export function BlogListClient({ embedded = false }: { embedded?: boolean } = {}
         />
       </AdminListShell>
 
-      <ConfirmDialog
+      <AdminConfirmDialog
         open={confirm != null}
         title={confirmCopy.title}
         message={confirmCopy.message}

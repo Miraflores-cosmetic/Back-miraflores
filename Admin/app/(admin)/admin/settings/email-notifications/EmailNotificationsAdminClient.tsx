@@ -5,7 +5,7 @@ import { AdminCompactBtnLink } from '@/components/AdminCompactBtn/AdminCompactBt
 import { AdminCheckbox } from '@/components/admin/AdminCheckbox/AdminCheckbox';
 import { AdminListShell } from '@/components/admin/AdminListShell/AdminListShell';
 import { AdminTabs } from '@/components/AdminTabs/AdminTabs';
-import { ConfirmDialog } from '@/components/ConfirmDialog/ConfirmDialog';
+import { AdminConfirmDialog } from '@/components/admin/AdminModal/AdminConfirmDialog';
 import { useToast } from '@/components/Toast/ToastProvider';
 import {
   AdminBackendRequestError,
@@ -317,7 +317,7 @@ export function EmailNotificationsAdminClient() {
         </div>
       </AdminListShell>
 
-      <ConfirmDialog
+      <AdminConfirmDialog
         open={Boolean(disableTarget)}
         title="Выключить письмо?"
         message={

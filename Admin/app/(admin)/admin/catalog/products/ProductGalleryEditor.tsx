@@ -17,7 +17,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { useEffect, useRef, useState } from 'react';
 import { AdminCompactBtn } from '@/components/AdminCompactBtn/AdminCompactBtn';
-import { ConfirmDialog } from '@/components/ConfirmDialog/ConfirmDialog';
+import { AdminConfirmDialog } from '@/components/admin/AdminModal/AdminConfirmDialog';
 import {
   AdminBackendRequestError,
   adminBackendFetch,
@@ -400,7 +400,7 @@ export function ProductGalleryEditor({
         />
       ) : null}
 
-      <ConfirmDialog
+      <AdminConfirmDialog
         open={pendingDeleteId != null}
         title="Удалить кадр?"
         message="Кадр будет удалён из галереи товара. Это действие нельзя отменить."

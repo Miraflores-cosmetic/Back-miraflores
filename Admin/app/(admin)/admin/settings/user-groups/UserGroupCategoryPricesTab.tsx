@@ -6,7 +6,7 @@ import { AdminCompactBtn } from '@/components/AdminCompactBtn/AdminCompactBtn';
 import { AdminPillChip, AdminPillChipList } from '@/components/AdminPillChip/AdminPillChip';
 import { AdminTextField } from '@/components/AdminTextField/AdminTextField';
 import { AdminTabs } from '@/components/AdminTabs/AdminTabs';
-import { ConfirmDialog } from '@/components/ConfirmDialog/ConfirmDialog';
+import { AdminConfirmDialog } from '@/components/admin/AdminModal/AdminConfirmDialog';
 import { useToast } from '@/components/Toast/ToastProvider';
 import {
   AdminBackendRequestError,
@@ -430,7 +430,7 @@ export function UserGroupCategoryPricesTab({ groupId, onChanged }: Props) {
           setSelectedCategoryLabels(labels);
         }}
       />
-      <ConfirmDialog
+      <AdminConfirmDialog
         open={deleteRow != null}
         title="Удалить правило категории?"
         message={

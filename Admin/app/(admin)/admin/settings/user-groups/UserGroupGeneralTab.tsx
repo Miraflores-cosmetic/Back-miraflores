@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { AdminCheckbox } from '@/components/admin/AdminCheckbox/AdminCheckbox';
 import { AdminCompactBtn } from '@/components/AdminCompactBtn/AdminCompactBtn';
 import { AdminTextField } from '@/components/AdminTextField/AdminTextField';
-import { ConfirmDialog } from '@/components/ConfirmDialog/ConfirmDialog';
+import { AdminConfirmDialog } from '@/components/admin/AdminModal/AdminConfirmDialog';
 import { useToast } from '@/components/Toast/ToastProvider';
 import {
   AdminBackendRequestError,
@@ -217,7 +217,7 @@ export function UserGroupGeneralTab({
         </section>
       ) : null}
 
-      <ConfirmDialog
+      <AdminConfirmDialog
         open={deleteOpen}
         title="Удалить группу?"
         message={`Группа «${group.name}», все её SKU-цены, правила категорий и видимости будут удалены без восстановления.`}

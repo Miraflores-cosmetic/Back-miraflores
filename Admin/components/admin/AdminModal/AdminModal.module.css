@@ -23,6 +23,14 @@
   box-shadow: 0 12px 40px rgba(5, 24, 38, 0.12);
 }
 
+.panel:focus {
+  outline: none;
+}
+
+.panelSm {
+  --admin-modal-max-width: 420px;
+}
+
 .panelWide {
   --admin-modal-max-width: 960px;
 }
@@ -63,6 +71,27 @@
 
 .panelAssistant .body {
   overflow: hidden;
+}
+
+.bodyFlush {
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+}
+
+.confirmMessage {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: #051826;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.confirmExtra {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .panelFooter {

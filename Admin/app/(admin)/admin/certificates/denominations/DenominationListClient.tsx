@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { AdminCheckbox } from '@/components/admin/AdminCheckbox/AdminCheckbox';
 import { AdminCompactBtn } from '@/components/AdminCompactBtn/AdminCompactBtn';
 import { AdminListShell } from '@/components/admin/AdminListShell/AdminListShell';
+import { adminConfirm } from '@/components/admin/AdminModal/adminConfirm';
 import { AdminModal, AdminModalActions } from '@/components/admin/AdminModal/AdminModal';
 import {
   AdminSortableTable,
@@ -220,9 +221,11 @@ export function DenominationListClient({
     }
     const certCount = row._count?.certificates ?? 0;
     if (fv !== row.faceValue && certCount > 0) {
-      const ok = window.confirm(
-        `У номинала уже ${certCount} сертификат(ов). Их номинал не изменится — обновится только шаблон для новых выпусков и покупок. Продолжить?`,
-      );
+      const ok = await adminConfirm({
+        title: 'Изменить номинал',
+        message: `У номинала уже ${certCount} сертификат(ов). Их номинал не изменится — обновится только шаблон для новых выпусков и покупок. Продолжить?`,
+        confirmLabel: 'Продолжить',
+      });
       if (!ok) return;
     }
 
@@ -252,9 +255,13 @@ export function DenominationListClient({
   }
 
   async function remove(row: AdminGiftDenomination) {
-    if (!window.confirm(`Удалить номинал «${row.name}»? Если есть сертификаты — только выключится.`)) {
-      return;
-    }
+    const ok = await adminConfirm({
+      title: 'Удалить номинал',
+      message: `Удалить номинал «${row.name}»? Если есть сертификаты — только выключится.`,
+      confirmLabel: 'Удалить',
+      danger: true,
+    });
+    if (!ok) return;
     setSaving(true);
     setError(null);
     try {

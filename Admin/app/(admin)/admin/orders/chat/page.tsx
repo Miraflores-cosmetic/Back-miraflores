@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import { getAdminSession } from '@/lib/getAdminSession';
 import { redirect } from 'next/navigation';
 import { staffCanSeeOrdersNav } from '@miraflores/admin-sections';
@@ -14,9 +15,11 @@ export default async function AdminOrderSupportChatPage() {
   }
 
   return (
-    <OrderSupportChatClient
-      staffUserId={session.user?.id}
-      staffAvatarUrl={staff.staffAvatarUrl}
-    />
+    <Suspense fallback={<p>Загрузка…</p>}>
+      <OrderSupportChatClient
+        staffUserId={session.user?.id}
+        staffAvatarUrl={staff.staffAvatarUrl}
+      />
+    </Suspense>
   );
 }

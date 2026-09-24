@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation';
 import type { StaffContext } from '@/lib/adminStaffTypes';
 import { staffCanAssistant } from '@/lib/adminSections';
 import { ToastProvider } from '@/components/Toast/ToastProvider';
+import { AdminConfirmHost } from '@/components/admin/AdminModal/adminConfirm';
 import { AdminSidebarNav } from './AdminSidebarNav';
 import { AdminAssistantHost } from './AdminAssistantPanel';
 import { useAdminOrderChatStaffUnreadEvents } from '@/hooks/useAdminOrderChatStaffUnreadEvents';
@@ -39,6 +40,7 @@ export function AdminChrome({
           enabled={showAssistant}
           staffName={staff?.staffDisplayName?.trim() || email || null}
         />
+        <AdminConfirmHost />
       </div>
     </ToastProvider>
   );

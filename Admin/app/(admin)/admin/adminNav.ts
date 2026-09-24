@@ -9,6 +9,7 @@ export type NavChild = {
   href: string;
   label: string;
   section?: AdminSectionId | 'staff';
+  exact?: boolean;
 };
 
 export type NavLinkItem = {
@@ -109,12 +110,16 @@ export const ADMIN_NAV: NavItem[] = [
     label: 'Заказы',
     section: 'orders',
     prefixes: ['/admin/orders'],
-    children: [
-      { href: '/admin/orders', label: 'Список', section: 'orders' },
-      { href: '/admin/orders/chat', label: 'Чаты поддержки', section: 'orders' },
-    ],
+    excludePaths: ['/admin/orders/chat'],
+    children: [{ href: '/admin/orders', label: 'Список', section: 'orders', exact: true }],
   },
   { type: 'link', href: '/admin/users', label: 'Пользователи', section: 'users' },
+  {
+    type: 'link',
+    href: '/admin/orders/chat',
+    label: 'Чаты поддержки',
+    section: 'orders',
+  },
   { type: 'divider' },
   {
     type: 'group',

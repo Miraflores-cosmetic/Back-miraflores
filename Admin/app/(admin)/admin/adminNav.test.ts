@@ -110,6 +110,14 @@ describe('isGroupPathActive', () => {
     expect(isGroupPathActive(settingsGroup, '/admin/settings/seo')).toBe(true);
   });
 
+  it('чаты поддержки не раскрывают группу «Заказы»', () => {
+    const ordersGroup = ADMIN_NAV.find((i) => i.type === 'group' && i.id === 'orders');
+    expect(ordersGroup?.type).toBe('group');
+    if (ordersGroup?.type !== 'group') return;
+    expect(isGroupPathActive(ordersGroup, '/admin/orders/chat')).toBe(false);
+    expect(isGroupPathActive(ordersGroup, '/admin/orders/abc')).toBe(true);
+  });
+
   it('user-groups открывает Settings, не Users link', () => {
     const usersLink = ADMIN_NAV.find((i) => i.type === 'link' && i.href === '/admin/users');
     const settingsGroup = ADMIN_NAV.find((i) => i.type === 'group' && i.id === 'settings');

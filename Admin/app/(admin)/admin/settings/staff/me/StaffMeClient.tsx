@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AdminCompactBtn } from '@/components/AdminCompactBtn/AdminCompactBtn';
+import { adminConfirm } from '@/components/admin/AdminModal/adminConfirm';
 import {
   AdminBackendRequestError,
   adminBackendFetch,
@@ -124,9 +125,12 @@ export function StaffMeClient() {
 
   async function onResetPassword() {
     if (!row) return;
-    const ok = window.confirm(
-      'Сгенерировать новый пароль? Текущая сессия завершится — потребуется вход с новым паролем.',
-    );
+    const ok = await adminConfirm({
+      title: 'Сбросить пароль',
+      message:
+        'Сгенерировать новый пароль? Текущая сессия завершится — потребуется вход с новым паролем.',
+      confirmLabel: 'Сбросить',
+    });
     if (!ok) return;
     await requestPasswordReset();
   }

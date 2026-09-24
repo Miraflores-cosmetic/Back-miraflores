@@ -33,5 +33,8 @@ test.describe('Order chat — orders list', () => {
 
     await expect(firstChatLink).toBeVisible();
     await expect(firstChatLink).toHaveAttribute('href', /\/admin\/orders\/[^#]+#order-chat/);
+
+    await firstChatLink.click();
+    await expect(page.getByRole('dialog', { name: 'Чат с клиентом' })).toBeVisible();
   });
 });
