@@ -645,6 +645,16 @@ a.docChip:hover {
   display: block;
   flex-shrink: 0;
   color: var(--color-black);
+  transition: color 0.15s ease;
+}
+
+/* Хост может подсветить активную отправку: --oc-send-active-color / --oc-send-active-hover-bg */
+.sendBtn:not(:disabled) .sendIcon {
+  color: var(--oc-send-active-color, var(--color-black));
+}
+
+.sendBtn:hover:not(:disabled) {
+  background: var(--oc-send-active-hover-bg, rgba(0, 0, 0, 0.04));
 }
 
 .chatErrorBanner {
