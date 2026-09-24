@@ -29,6 +29,11 @@ export function roomSupportChat(userId: string): string {
   return `supportChat:${userId}`;
 }
 
+/** Все WS-сессии пользователя (logout / смена пароля → disconnect). */
+export function roomUserChatSessions(userId: string): string {
+  return `userChatSessions:${userId}`;
+}
+
 export function chatUploadKeyPrefixOrder(orderId: string): string {
   return `chat/orders/${orderId}/`;
 }

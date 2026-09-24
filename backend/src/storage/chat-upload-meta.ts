@@ -15,11 +15,21 @@ export type ChatUploadMeta = {
   mimeType: string;
   kind: ChatAttachmentKind;
   size: number;
+  /** Кто загрузил (revoke только владельцу). */
+  uploadedByUserId?: string;
 };
 
 /** Reject path traversal and require key under expected prefix (no trailing slash on prefix). */
+function decodeStorageKeySegment(key: string): string {
+  try {
+    return decodeURIComponent(key.trim());
+  } catch {
+    throw new BadRequestException('Недопустимый URL вложения');
+  }
+}
+
 export function normalizeChatStorageKey(key: string, expectedPrefix: string): string {
-  const decoded = decodeURIComponent(key.trim()).replace(/\\/g, '/');
+  const decoded = decodeStorageKeySegment(key).replace(/\\/g, '/');
   if (!decoded || decoded.includes('\0')) {
     throw new BadRequestException('Недопустимый URL вложения');
   }
@@ -64,11 +74,16 @@ export async function readChatUploadMeta(
     ) {
       return null;
     }
+    const uploadedByUserId =
+      typeof parsed.uploadedByUserId === 'string' && parsed.uploadedByUserId.trim()
+        ? parsed.uploadedByUserId.trim()
+        : undefined;
     return {
       filename: parsed.filename.slice(0, 512),
       mimeType: parsed.mimeType.slice(0, 128),
       kind: chatAttachmentKindFromMime(parsed.mimeType),
       size: parsed.size,
+      uploadedByUserId,
     };
   } catch {
     return null;

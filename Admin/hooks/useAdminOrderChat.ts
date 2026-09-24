@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Socket } from 'socket.io-client';
 import { useChatAttachments } from '@/hooks/useChatAttachments';
 import type { ChatWindowMessage } from '@/components/ChatWindow/ChatWindow';
 import { DEFAULT_STAFF_AVATAR } from '@/app/(admin)/admin/settings/staff/StaffAvatarField';
@@ -37,6 +36,7 @@ import {
   getOrCreateSharedOrderChatSocket,
   registerOrderChatWsSession,
   waitOrderChatSocketConnect,
+  type OrderChatSocket,
 } from '@/lib/orderChat/orderChatWsShared';
 import type { OrderChatApiMessage, OrderChatMessagesResponse } from '@/lib/orderChat/types';
 import { readUpstreamJsonErrorMessage } from '@/lib/readUpstreamJsonError';
@@ -135,7 +135,7 @@ export function useAdminOrderChat(opts: {
 
   viewerRef.current = staffUserId ?? viewerRef.current;
 
-  const markReadIfVisible = useCallback(async () => {
+  const markReadIfVisible = useCallback(async (refreshLists = true) => {
     if (!panelVisibleRef.current) return;
     const t = targetRef.current;
     if (!t) return;
@@ -145,7 +145,7 @@ export function useAdminOrderChat(opts: {
       headers: { 'Content-Type': 'application/json' },
       body: '{}',
     }).catch(() => undefined);
-    dispatchAdminChatUnreadRefresh();
+    if (refreshLists) dispatchAdminChatUnreadRefresh();
   }, [targetKey]);
 
   const scheduleMarkReadDebounced = useCallback(() => {
@@ -153,7 +153,7 @@ export function useAdminOrderChat(opts: {
     if (markReadTimerRef.current != null) clearTimeout(markReadTimerRef.current);
     markReadTimerRef.current = setTimeout(() => {
       markReadTimerRef.current = null;
-      void markReadIfVisible();
+      void markReadIfVisible(false);
     }, 450);
   }, [markReadIfVisible]);
 
@@ -228,20 +228,25 @@ export function useAdminOrderChat(opts: {
   const syncNewerMessages = useCallback(async () => {
     const t = targetRef.current;
     if (!t) return;
-    const lastId = messagesRef.current[messagesRef.current.length - 1]?.id;
-    if (!lastId) return;
-    const res = await fetch(
-      adminChatMessagesListUrl(t, { limit: CHAT_MESSAGES_PAGE_DEFAULT, after: lastId }),
-      { credentials: 'same-origin', cache: 'no-store' },
-    );
-    if (!res.ok) return;
-    const data = (await res.json()) as OrderChatMessagesResponse;
-    if (data.conversationId) conversationIdRef.current = data.conversationId;
-    const mapped = (data.messages ?? []).map((m) =>
-      mapApiToUi(m, viewerRef.current, timeLocaleRef.current, staffAvatarRef.current),
-    );
-    if (mapped.length) {
-      setMessages((prev) => mergeTailMessages(prev, mapped));
+    let tail = messagesRef.current;
+    for (;;) {
+      const lastId = tail[tail.length - 1]?.id;
+      if (!lastId) return;
+      const res = await fetch(
+        adminChatMessagesListUrl(t, { limit: CHAT_MESSAGES_PAGE_DEFAULT, after: lastId }),
+        { credentials: 'same-origin', cache: 'no-store' },
+      );
+      if (!res.ok) return;
+      const data = (await res.json()) as OrderChatMessagesResponse;
+      if (data.conversationId) conversationIdRef.current = data.conversationId;
+      const mapped = (data.messages ?? []).map((m) =>
+        mapApiToUi(m, viewerRef.current, timeLocaleRef.current, staffAvatarRef.current),
+      );
+      if (!mapped.length) return;
+      tail = mergeTailMessages(tail, mapped);
+      messagesRef.current = tail;
+      setMessages(tail);
+      if (mapped.length < CHAT_MESSAGES_PAGE_DEFAULT) return;
     }
   }, [targetKey]);
 
@@ -290,8 +295,16 @@ export function useAdminOrderChat(opts: {
       return undefined;
     }
 
+    clearPendingAttachments();
+    setMessages([]);
+    setError(null);
+    setHasOlderHistory(false);
+    setLoadingOlderHistory(false);
+    conversationIdRef.current = null;
+    setLoading(true);
+
     let disposed = false;
-    let activeSocket: Socket | null = null;
+    let activeSocket: OrderChatSocket | null = null;
     let unregisterSession: (() => void) | null = null;
     let socketListenersReady = false;
     let onSocketReconnect: (() => void) | null = null;
@@ -314,7 +327,6 @@ export function useAdminOrderChat(opts: {
         ];
       });
       if (payload.authorRole === 'CUSTOMER') {
-        dispatchAdminChatUnreadRefresh();
         scheduleMarkReadDebounced();
       }
     };
@@ -330,21 +342,28 @@ export function useAdminOrderChat(opts: {
       );
     };
 
+    const onCreatedSocket = (...args: unknown[]) => {
+      onCreated(args[0] as OrderChatApiMessage);
+    };
+    const onDeletedSocket = (...args: unknown[]) => {
+      onDeleted(args[0] as { id?: string });
+    };
+
     const detachSocketHandlers = () => {
       if (!activeSocket) return;
-      activeSocket.off('message_created', onCreated);
-      activeSocket.off('message_deleted', onDeleted);
+      activeSocket.off('message_created', onCreatedSocket);
+      activeSocket.off('message_deleted', onDeletedSocket);
       if (onSocketReconnect) {
         activeSocket.off('connect', onSocketReconnect);
         onSocketReconnect = null;
       }
     };
 
-    const bindSocketHandlers = (socket: Socket) => {
+    const bindSocketHandlers = (socket: OrderChatSocket) => {
       detachSocketHandlers();
       activeSocket = socket;
-      socket.on('message_created', onCreated);
-      socket.on('message_deleted', onDeleted);
+      socket.on('message_created', onCreatedSocket);
+      socket.on('message_deleted', onDeletedSocket);
       onSocketReconnect = () => {
         if (!socketListenersReady || disposed) return;
         void rejoinRoomAndSyncNewer(socket);
@@ -352,14 +371,14 @@ export function useAdminOrderChat(opts: {
       socket.on('connect', onSocketReconnect);
     };
 
-    const rejoinRoomAndSyncNewer = async (socket: Socket) => {
+    const rejoinRoomAndSyncNewer = async (socket: OrderChatSocket) => {
       await emitOrderChatRoomJoin(socket, joinEvent, joinPayload);
       if (disposed) return;
       await syncNewerMessages();
     };
 
     const onSocketLayerUpdated = ((ev: Event) => {
-      const ce = ev as CustomEvent<{ variant?: string; socket?: Socket }>;
+      const ce = ev as CustomEvent<{ variant?: string; socket?: OrderChatSocket }>;
       if (ce.detail?.variant !== 'admin' || disposed || !ce.detail.socket) return;
       bindSocketHandlers(ce.detail.socket);
       void rejoinRoomAndSyncNewer(ce.detail.socket);
@@ -403,14 +422,6 @@ export function useAdminOrderChat(opts: {
       }
 
       const socket = await getOrCreateSharedOrderChatSocket('admin', wsAuth);
-      await waitOrderChatSocketConnect(socket);
-      if (disposed) {
-        unregisterSession?.();
-        unregisterSession = null;
-        return;
-      }
-
-      await emitOrderChatRoomJoin(socket, joinEvent, joinPayload);
       if (disposed) {
         unregisterSession?.();
         unregisterSession = null;
@@ -419,11 +430,27 @@ export function useAdminOrderChat(opts: {
 
       bindSocketHandlers(socket);
       socketListenersReady = true;
-      if (panelVisibleRef.current) void markReadIfVisible();
+
+      const joinWhenConnected = async () => {
+        if (disposed || !socket.connected) return;
+        await emitOrderChatRoomJoin(socket, joinEvent, joinPayload);
+        if (disposed) return;
+        await syncNewerMessages();
+        if (disposed) return;
+        if (panelVisibleRef.current) void markReadIfVisible();
+      };
+
+      if (socket.connected) {
+        await joinWhenConnected();
+        return;
+      }
+
+      void waitOrderChatSocketConnect(socket)
+        .then(() => joinWhenConnected())
+        .catch(() => undefined);
     };
 
     void (async () => {
-      setLoading(true);
       setError(null);
       let historyOk = false;
       try {
@@ -551,7 +578,7 @@ export function useAdminOrderChat(opts: {
           ];
         });
         clearPendingAttachments();
-        await markReadIfVisible();
+        await markReadIfVisible(false);
         return true;
       } catch (e) {
         setMessages((prev) => prev.filter((m) => m.id !== optimisticId));

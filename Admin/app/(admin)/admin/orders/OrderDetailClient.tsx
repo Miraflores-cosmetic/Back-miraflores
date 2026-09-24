@@ -115,7 +115,10 @@ export function OrderDetailClient({
   const [providerRefund, setProviderRefund] = useState(true);
   const [confirm, setConfirm] = useState<ConfirmState>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [orderRightTab, setOrderRightTab] = useState<'actions' | 'chat'>('actions');
+  const [orderRightTab, setOrderRightTab] = useState<'actions' | 'chat'>(() => {
+    if (typeof window === 'undefined') return 'actions';
+    return window.location.hash === '#order-chat' ? 'chat' : 'actions';
+  });
   const [copied, setCopied] = useState(false);
   const [addressModalOpen, setAddressModalOpen] = useState(false);
   const [shippingCostModalOpen, setShippingCostModalOpen] = useState(false);
@@ -193,6 +196,7 @@ export function OrderDetailClient({
 
   useEffect(() => {
     if (typeof window === 'undefined' || window.location.hash !== '#order-chat') return;
+    setOrderRightTab('chat');
     window.requestAnimationFrame(() => {
       document.getElementById('order-chat')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
@@ -1098,6 +1102,10 @@ export function OrderDetailClient({
             role="tab"
             className={styles.orderDetailRightTab}
             aria-selected={orderRightTab === 'chat'}
+            disabled={!order?.userId}
+            title={
+              order?.userId ? undefined : 'Чат только для заказов с аккаунтом покупателя'
+            }
             onClick={() => setOrderRightTab('chat')}
           >
             Чат
@@ -1705,6 +1713,7 @@ export function OrderDetailClient({
         >
           <AdminOrderSideChat
             orderId={orderId}
+            buyerUserId={order?.userId ?? null}
             staffUserId={staffUserId}
             staffAvatarUrl={staffAvatarUrl}
           />

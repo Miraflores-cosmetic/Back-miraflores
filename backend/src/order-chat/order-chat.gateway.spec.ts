@@ -5,6 +5,14 @@ import { ORDER_CHAT_WS_JWT_AUD } from './order-chat-ws-token';
 
 describe('OrderChatGateway', () => {
   const jwt = { verify: vi.fn() };
+  const wsSecret = 'gateway-test-order-chat-ws-secret';
+  const config = {
+    get: vi.fn((key: string) => {
+      if (key === 'ORDER_CHAT_WS_JWT_SECRET') return wsSecret;
+      if (key === 'JWT_SECRET') return 'gateway-test-jwt-secret';
+      return undefined;
+    }),
+  };
   const chat = {
     registerGateway: vi.fn(),
     verifyJoinRoom: vi.fn(),
@@ -18,7 +26,7 @@ describe('OrderChatGateway', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    gateway = new OrderChatGateway(jwt as never, chat as never);
+    gateway = new OrderChatGateway(jwt as never, chat as never, config as never);
     join = vi.fn().mockResolvedValue(undefined);
     disconnect = vi.fn();
   });
@@ -41,9 +49,13 @@ describe('OrderChatGateway', () => {
 
     await gateway.handleConnection(client('tok') as never);
 
-    expect(jwt.verify).toHaveBeenCalledWith('tok', { audience: ORDER_CHAT_WS_JWT_AUD });
+    expect(jwt.verify).toHaveBeenCalledWith('tok', {
+      secret: wsSecret,
+      audience: ORDER_CHAT_WS_JWT_AUD,
+    });
     expect(chat.assertWsConnectionAllowed).toHaveBeenCalled();
     expect(join).toHaveBeenCalledWith('staffOrderChat');
+    expect(join).toHaveBeenCalledWith('userChatSessions:m1');
     expect(disconnect).not.toHaveBeenCalled();
   });
 
@@ -53,7 +65,8 @@ describe('OrderChatGateway', () => {
 
     await gateway.handleConnection(client('tok') as never);
 
-    expect(join).not.toHaveBeenCalled();
+    expect(join).toHaveBeenCalledWith('userChatSessions:u1');
+    expect(join).not.toHaveBeenCalledWith('staffOrderChat');
     expect(disconnect).not.toHaveBeenCalled();
   });
 

@@ -32,6 +32,33 @@ export type ChatThreadListItem = {
   lastMessageAt: string | null;
 };
 
+export type ChatStartableOrder = {
+  orderId: string;
+  orderNumber: string;
+  createdAt: string;
+};
+
+export type ChatCustomerThreadsOut = {
+  threads: ChatThreadListItem[];
+  startableOrders: ChatStartableOrder[];
+};
+
+export type AdminSupportThreadOut = {
+  userId: string;
+  userEmail: string;
+  userDisplayName: string | null;
+  conversationId: string;
+  unreadCount: number;
+  lastMessagePreview: string | null;
+  lastMessageAt: string | null;
+};
+
+export type AdminSupportThreadsOut = {
+  threads: AdminSupportThreadOut[];
+  nextCursor: string | null;
+  unreadThreadsTotal: number;
+};
+
 export type ChatCustomerPresenceContext =
   | { kind: 'ORDER'; orderId: string; customerUserId: string }
   | { kind: 'SUPPORT'; customerUserId: string };
@@ -43,4 +70,5 @@ export interface OrderChatRealtimeEmitter {
   broadcastSupportMessageDeleted(userId: string, payload: { id: string }): void;
   broadcastStaffInboxUpdated(): void;
   isCustomerChatOnline(ctx: ChatCustomerPresenceContext): Promise<boolean>;
+  disconnectUserSockets(userId: string): Promise<void>;
 }

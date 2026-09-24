@@ -74,6 +74,30 @@ export type OrderChatThread = {
   lastMessageAt: string | null;
 };
 
+export type OrderChatStartableOrder = {
+  orderId: string;
+  orderNumber: string;
+  createdAt: string;
+};
+
 export type OrderChatThreadsResponse = {
   threads: OrderChatThread[];
+  /** Последние заказы без переписки — для «Начать чат по заказу». */
+  startableOrders?: OrderChatStartableOrder[];
+};
+
+export type AdminSupportThread = {
+  userId: string;
+  userEmail: string;
+  userDisplayName: string | null;
+  conversationId: string;
+  unreadCount: number;
+  lastMessagePreview: string | null;
+  lastMessageAt: string | null;
+};
+
+export type AdminSupportThreadsResponse = {
+  threads: AdminSupportThread[];
+  nextCursor: string | null;
+  unreadThreadsTotal: number;
 };

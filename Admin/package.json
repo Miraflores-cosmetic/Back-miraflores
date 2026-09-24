@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start -p 3010",
     "lint": "next lint",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "test:e2e:install": "playwright install chromium"
@@ -19,6 +20,7 @@
     "@miraflores/admin-sections": "*",
     "@miraflores/admin-types": "*",
     "@miraflores/order-chat-core": "*",
+    "@miraflores/order-chat-ui": "*",
     "animejs": "^4.5.0",
     "isomorphic-dompurify": "^3.19.0",
     "next": "14.2.35",

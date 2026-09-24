@@ -81,7 +81,12 @@ export function createOrderChatSocketManager(
     account: false,
     admin: false,
   };
+  const authFetchFailuresByVariant: Record<OrderChatVariant, number> = {
+    account: 0,
+    admin: 0,
+  };
   const jwtRefreshInFlight: Partial<Record<OrderChatVariant, boolean>> = {};
+  const connectInFlight: Partial<Record<OrderChatVariant, Promise<OrderChatSocket>>> = {};
   let ioFactory: OrderChatIoFactory | null = null;
 
   const warn = deps.warn ?? ((msg: string) => {
@@ -152,19 +157,24 @@ export function createOrderChatSocketManager(
   }
 
   function wireRecovery(socket: OrderChatSocket, variant: OrderChatVariant) {
+    socket.on('connect', () => {
+      authFetchFailuresByVariant[variant] = 0;
+      authFailedByVariant[variant] = false;
+    });
     socket.on('connect_error', (err: unknown) => {
       const e = err instanceof Error ? err : new Error(String(err));
       if (isLikelyAuthConnectError(e)) {
-        handleWsAuthFailure(variant);
+        authFetchFailuresByVariant[variant]++;
+        if (authFetchFailuresByVariant[variant] >= 2) {
+          handleWsAuthFailure(variant);
+        }
       }
-      /* R1: транспортные ошибки — reconnection Socket.IO, без полного recreate + fetch storm */
+      /* R1: транспортные ошибки — reconnection + auth callback, без recreate storm */
     });
     socket.on('disconnect', (reason: unknown) => {
       const r = String(reason);
       if (r === 'io client disconnect') return;
-      if (r === 'io server disconnect') {
-        handleWsAuthFailure(variant);
-      }
+      /* io server disconnect / transport: Socket.IO reconnect; свежий JWT в auth callback */
     });
   }
 
@@ -203,15 +213,10 @@ export function createOrderChatSocketManager(
       const auth = await deps.fetchWsToken(variant);
       authFailedByVariant[variant] = false;
       const existing = sharedByVariant[variant];
-      if (!existing || existing.auth.token === auth.token) {
-        scheduleTtlRefresh(variant, auth);
-        return;
+      if (existing) {
+        existing.auth = auth;
       }
-      disposeSharedOrderChatSocket(variant);
-      const socket = await connectNewSharedSocket(variant, auth);
-      await waitOrderChatSocketConnect(socket);
       scheduleTtlRefresh(variant, auth);
-      emitSocketUpdated(variant, socket);
     } catch (e) {
       warn(`[order-chat-ws] jwt refresh failed: ${e instanceof Error ? e.message : String(e)}`);
       scheduleTtlRefresh(variant);
@@ -228,30 +233,51 @@ export function createOrderChatSocketManager(
     const origin = deps.getWsOrigin();
     const url = `${origin}${ORDER_CHAT_SOCKET_NAMESPACE}`;
     const socket = io(url, {
-      auth: { token: auth.token },
+      auth: (cb: (data: Record<string, string> | Error) => void) => {
+        void deps
+          .fetchWsToken(variant)
+          .then((fresh) => {
+            authFetchFailuresByVariant[variant] = 0;
+            authFailedByVariant[variant] = false;
+            const slice = sharedByVariant[variant];
+            if (slice) slice.auth = fresh;
+            cb({ token: fresh.token });
+          })
+          .catch((e) => {
+            authFetchFailuresByVariant[variant]++;
+            if (authFetchFailuresByVariant[variant] >= 2) {
+              handleWsAuthFailure(variant);
+            }
+            cb(e instanceof Error ? e : new Error(String(e)));
+          });
+      },
       transports: ['websocket', 'polling'],
       path: '/socket.io',
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 10_000,
     });
-    wireRecovery(socket, variant);
     sharedByVariant[variant] = { socket, auth };
+    wireRecovery(socket, variant);
     return socket;
   }
 
   function waitOrderChatSocketConnect(socket: OrderChatSocket, ms = 12000): Promise<void> {
     if (socket.connected) return Promise.resolve();
     return new Promise((resolve, reject) => {
-      const t = setTimeout(() => reject(new Error('Нет соединения с чатом')), ms);
-      socket.once('connect', () => {
-        clearTimeout(t);
+      const t = setTimeout(() => {
+        cleanup();
+        reject(new Error('Нет соединения с чатом'));
+      }, ms);
+      const onConnect = () => {
+        cleanup();
         resolve();
-      });
-      socket.once('connect_error', (err: unknown) => {
+      };
+      const cleanup = () => {
         clearTimeout(t);
-        reject(err instanceof Error ? err : new Error(String(err)));
-      });
+        socket.off('connect', onConnect);
+      };
+      socket.on('connect', onConnect);
     });
   }
 
@@ -281,20 +307,34 @@ export function createOrderChatSocketManager(
     }
 
     const existing = sharedByVariant[variant];
-    if (existing && existing.auth.token === auth.token) {
+    if (existing?.socket) {
+      existing.auth = auth;
       return existing.socket;
     }
 
-    disposeSharedOrderChatSocket(variant);
-    const socket = await connectNewSharedSocket(variant, auth);
-    void waitOrderChatSocketConnect(socket)
-      .then(() => {
-        if (sharedByVariant[variant]?.socket === socket) {
-          emitSocketUpdated(variant, socket);
-        }
-      })
-      .catch(() => undefined);
-    return socket;
+    const inFlight = connectInFlight[variant];
+    if (inFlight) return inFlight;
+
+    const promise = (async () => {
+      const socket = await connectNewSharedSocket(variant, auth);
+      void waitOrderChatSocketConnect(socket)
+        .then(() => {
+          if (sharedByVariant[variant]?.socket === socket) {
+            emitSocketUpdated(variant, socket);
+          }
+        })
+        .catch(() => undefined);
+      return socket;
+    })();
+
+    connectInFlight[variant] = promise;
+    try {
+      return await promise;
+    } finally {
+      if (connectInFlight[variant] === promise) {
+        delete connectInFlight[variant];
+      }
+    }
   }
 
   function registerOrderChatWsSession(variant: OrderChatVariant, auth: OrderChatWsAuth): () => void {
@@ -321,6 +361,8 @@ export function createOrderChatSocketManager(
       refCountByVariant[variant] = 0;
       jwtRefreshInFlight[variant] = false;
       authFailedByVariant[variant] = false;
+      authFetchFailuresByVariant[variant] = 0;
+      delete connectInFlight[variant];
       disposeSharedOrderChatSocket(variant);
     },
     fetchWsToken: deps.fetchWsToken,

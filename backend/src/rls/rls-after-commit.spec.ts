@@ -23,7 +23,7 @@ describe('scheduleAfterRlsCommit', () => {
         resolve();
       });
     });
-    await flushAfterRlsCommit(afterCommit);
-    expect(fn).toHaveBeenCalledOnce();
+    flushAfterRlsCommit(afterCommit);
+    await vi.waitFor(() => expect(fn).toHaveBeenCalledOnce());
   });
 });

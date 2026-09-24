@@ -1,6 +1,5 @@
 'use client';
 
-import type { Socket } from 'socket.io-client';
 import { useEffect } from 'react';
 import { ORDER_CHAT_SOCKET_UPDATED_EVENT } from '@/lib/orderChat/constants';
 import {
@@ -8,6 +7,7 @@ import {
   getOrCreateSharedOrderChatSocket,
   registerOrderChatWsSession,
   waitOrderChatSocketConnect,
+  type OrderChatSocket,
 } from '@/lib/orderChat/orderChatWsShared';
 
 const DOM_REFRESH_ORDERS = 'admin-orders-chat-unread-refresh';
@@ -44,17 +44,21 @@ export function useAdminOrderChatStaffUnreadEvents(isLoginRoute: boolean) {
       try {
         const wsAuth = await fetchOrderChatWsToken('admin');
         if (cancelled) return;
-        const socket = await getOrCreateSharedOrderChatSocket('admin', wsAuth);
-        await waitOrderChatSocketConnect(socket).catch(() => undefined);
-        if (cancelled) return;
         unregisterSession = registerOrderChatWsSession('admin', wsAuth);
         if (cancelled) {
           unregisterSession();
           unregisterSession = undefined;
           return;
         }
+        const socket = await getOrCreateSharedOrderChatSocket('admin', wsAuth);
+        await waitOrderChatSocketConnect(socket).catch(() => undefined);
+        if (cancelled) {
+          unregisterSession?.();
+          unregisterSession = undefined;
+          return;
+        }
 
-        const attach = (sock: Socket): void => {
+        const attach = (sock: OrderChatSocket): void => {
           detachSocketHandlers?.();
           const onWideStaff = (): void => {
             dispatchUnreadRefreshDebounced(debounceRef);
@@ -62,11 +66,9 @@ export function useAdminOrderChatStaffUnreadEvents(isLoginRoute: boolean) {
           const onSupport = (): void => {
             dispatchUnreadRefreshDebounced(debounceRef);
           };
-          sock.on('order_chat_updated', onWideStaff);
           sock.on('support_chat_updated', onSupport);
           sock.on('staff_inbox_updated', onWideStaff);
           detachSocketHandlers = () => {
-            sock.off('order_chat_updated', onWideStaff);
             sock.off('support_chat_updated', onSupport);
             sock.off('staff_inbox_updated', onWideStaff);
             detachSocketHandlers = undefined;
@@ -76,7 +78,7 @@ export function useAdminOrderChatStaffUnreadEvents(isLoginRoute: boolean) {
         attach(socket);
 
         const onSocketLayerUpdated = ((ev: Event) => {
-          const ce = ev as CustomEvent<{ variant?: string; socket?: Socket }>;
+          const ce = ev as CustomEvent<{ variant?: string; socket?: OrderChatSocket }>;
           if (ce.detail?.variant !== 'admin' || !ce.detail.socket) return;
           attach(ce.detail.socket);
         }) as EventListener;

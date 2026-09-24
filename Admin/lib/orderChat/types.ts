@@ -1,4 +1,6 @@
 export type {
+  AdminSupportThread,
+  AdminSupportThreadsResponse,
   OrderChatApiAttachment,
   OrderChatApiMessage,
   OrderChatMessagesResponse,

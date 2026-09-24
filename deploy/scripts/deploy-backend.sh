@@ -199,6 +199,22 @@ if [[ "\$DO_API" -eq 1 ]]; then
   npx prisma generate --schema backend/prisma/schema.prisma
   echo "==> build api"
   npm run build -w miraflores-api
+  if [[ -f backend/.env ]]; then
+    set -a
+    # shellcheck disable=SC1091
+    source backend/.env
+    set +a
+  fi
+  if [[ "\${NODE_ENV:-}" == "production" ]]; then
+    _oc_cors="\${ORDER_CHAT_SOCKET_CORS_ORIGINS// /}"
+    _oc_relaxed="\${ORDER_CHAT_SOCKET_CORS_RELAXED:-}"
+    if [[ -z "\$_oc_cors" && "\$_oc_relaxed" != "1" && "\${_oc_relaxed,,}" != "true" ]]; then
+      echo "ERROR: NODE_ENV=production requires ORDER_CHAT_SOCKET_CORS_ORIGINS in /opt/miraflores/backend/.env"
+      echo "  e.g. ORDER_CHAT_SOCKET_CORS_ORIGINS=https://miraflores-shop.com,https://www.miraflores-shop.com"
+      echo "  (emergency only: ORDER_CHAT_SOCKET_CORS_RELAXED=1)"
+      exit 1
+    fi
+  fi
   echo "==> restart miraflores-api"
   systemctl restart miraflores-api
   sleep 2

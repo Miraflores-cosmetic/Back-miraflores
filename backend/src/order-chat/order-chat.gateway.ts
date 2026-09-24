@@ -1,5 +1,7 @@
 import { Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { resolveOrderChatWsJwtSecret } from '../auth/jwt-secret';
 import {
   ConnectedSocket,
   MessageBody,
@@ -17,6 +19,7 @@ import {
   ROOM_STAFF_ORDER_CHAT,
   roomOrderChat,
   roomSupportChat,
+  roomUserChatSessions,
 } from './order-chat.constants';
 import { OrderChatService } from './order-chat.service';
 import type { ChatCustomerPresenceContext, OrderChatMessageOut } from './order-chat.types';
@@ -39,6 +42,7 @@ export class OrderChatGateway implements OnGatewayInit, OnGatewayConnection {
   constructor(
     private readonly jwt: JwtService,
     private readonly chat: OrderChatService,
+    private readonly config: ConfigService,
   ) {}
 
   afterInit(): void {
@@ -54,6 +58,7 @@ export class OrderChatGateway implements OnGatewayInit, OnGatewayConnection {
         (typeof headerAuth === 'string' ? headerAuth.replace(/^Bearer\s+/i, '').trim() : '');
       if (!raw) throw new Error('no token');
       const payload = this.jwt.verify<JwtPayload>(raw, {
+        secret: resolveOrderChatWsJwtSecret(this.config),
         audience: ORDER_CHAT_WS_JWT_AUD,
       });
       client.data.userId = payload.sub;
@@ -64,6 +69,7 @@ export class OrderChatGateway implements OnGatewayInit, OnGatewayConnection {
       if (ws.staffInbox) {
         await client.join(ROOM_STAFF_ORDER_CHAT);
       }
+      await client.join(roomUserChatSessions(String(payload.sub)));
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       this.logger.warn(`order-chat WS reject: ${msg}`);
@@ -135,26 +141,32 @@ export class OrderChatGateway implements OnGatewayInit, OnGatewayConnection {
 
   broadcastOrderMessage(orderId: string, payload: OrderChatMessageOut): void {
     this.server.to(roomOrderChat(orderId)).emit('message_created', payload);
-    this.server.to(ROOM_STAFF_ORDER_CHAT).emit('order_chat_updated', { orderId });
   }
 
   broadcastOrderMessageDeleted(orderId: string, payload: { id: string }): void {
     this.server.to(roomOrderChat(orderId)).emit('message_deleted', payload);
-    this.server.to(ROOM_STAFF_ORDER_CHAT).emit('order_chat_updated', { orderId });
   }
 
   broadcastSupportMessage(customerUserId: string, payload: OrderChatMessageOut): void {
     this.server.to(roomSupportChat(customerUserId)).emit('message_created', payload);
-    this.server.to(ROOM_STAFF_ORDER_CHAT).emit('support_chat_updated', { userId: customerUserId });
   }
 
   broadcastSupportMessageDeleted(customerUserId: string, payload: { id: string }): void {
     this.server.to(roomSupportChat(customerUserId)).emit('message_deleted', payload);
-    this.server.to(ROOM_STAFF_ORDER_CHAT).emit('support_chat_updated', { userId: customerUserId });
   }
 
   broadcastStaffInboxUpdated(): void {
     this.server.to(ROOM_STAFF_ORDER_CHAT).emit('staff_inbox_updated', {});
+  }
+
+  /** После logout / tokenVersion++ — закрыть все order-chat WS пользователя. */
+  async disconnectUserSockets(userId: string): Promise<void> {
+    if (!this.server || !userId.trim()) return;
+    const room = roomUserChatSessions(userId.trim());
+    const sockets = await this.server.in(room).fetchSockets();
+    for (const s of sockets) {
+      s.disconnect(true);
+    }
   }
 
   async isCustomerChatOnline(ctx: ChatCustomerPresenceContext): Promise<boolean> {

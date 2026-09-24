@@ -42,8 +42,14 @@ async function bootstrap() {
     join(backendRootDir(), '.data', 'local-uploads');
   mkdirSync(localDir, { recursive: true });
   app.use((req: Request, res: Response, next: NextFunction) => {
-    const path = req.path ?? '';
-    if (path.startsWith('/uploads/chat')) {
+    let path = req.path ?? '';
+    try {
+      path = decodeURIComponent(path);
+    } catch {
+      /* keep raw */
+    }
+    const normalized = path.replace(/\\/g, '/').toLowerCase();
+    if (normalized.startsWith('/uploads/chat/') || normalized === '/uploads/chat') {
       res.status(404).end();
       return;
     }

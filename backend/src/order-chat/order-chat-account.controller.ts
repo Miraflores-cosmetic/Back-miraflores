@@ -12,7 +12,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { Throttle } from '@nestjs/throttler';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { memoryStorage } from 'multer';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { BuyerGuard } from '../common/guards/buyer.guard';
@@ -45,8 +45,13 @@ function parseBefore(beforeRaw?: string, cursorRaw?: string): string | undefined
   return beforeTrim || cursorTrim || undefined;
 }
 
+function parseAfter(afterRaw?: string): string | undefined {
+  const t = afterRaw?.trim();
+  return t || undefined;
+}
+
 @Controller('account/chat')
-@UseGuards(JwtAuthGuard, BuyerGuard)
+@UseGuards(JwtAuthGuard, BuyerGuard, ThrottlerGuard)
 export class OrderChatAccountController {
   constructor(private readonly chat: OrderChatService) {}
 
@@ -72,10 +77,15 @@ export class OrderChatAccountController {
     @Query('limit') limitRaw?: string,
     @Query('before') beforeRaw?: string,
     @Query('cursor') cursorRaw?: string,
+    @Query('after') afterRaw?: string,
   ) {
+    const before = parseBefore(beforeRaw, cursorRaw);
+    const after = parseAfter(afterRaw);
+    if (before && after) throw new BadRequestException('Используйте либо before, либо after');
     return this.chat.listSupportMessages(userId, {
       limit: parseLimit(limitRaw),
-      beforeMessageId: parseBefore(beforeRaw, cursorRaw),
+      beforeMessageId: before,
+      afterMessageId: after,
     });
   }
 
@@ -116,6 +126,7 @@ export class OrderChatAccountController {
     await this.chat.revokePendingChatUpload(
       dto.fileUrl,
       chatUploadKeyPrefixSupport(user.sub),
+      user.sub,
     );
     return { ok: true as const };
   }
@@ -131,7 +142,7 @@ export class OrderChatAccountController {
 }
 
 @Controller('account/orders')
-@UseGuards(JwtAuthGuard, BuyerGuard)
+@UseGuards(JwtAuthGuard, BuyerGuard, ThrottlerGuard)
 export class OrderChatAccountOrdersController {
   constructor(private readonly chat: OrderChatService) {}
 
@@ -142,11 +153,16 @@ export class OrderChatAccountOrdersController {
     @Query('limit') limitRaw?: string,
     @Query('before') beforeRaw?: string,
     @Query('cursor') cursorRaw?: string,
+    @Query('after') afterRaw?: string,
   ) {
     await this.chat.assertCustomerCanAccessOrder(orderId, userId);
+    const before = parseBefore(beforeRaw, cursorRaw);
+    const after = parseAfter(afterRaw);
+    if (before && after) throw new BadRequestException('Используйте либо before, либо after');
     return this.chat.listOrderMessages(orderId, {
       limit: parseLimit(limitRaw),
-      beforeMessageId: parseBefore(beforeRaw, cursorRaw),
+      beforeMessageId: before,
+      afterMessageId: after,
     });
   }
 
@@ -193,7 +209,11 @@ export class OrderChatAccountOrdersController {
     @Body() dto: RevokeChatUploadDto,
   ) {
     await this.chat.assertCustomerCanAccessOrder(orderId, user.sub);
-    await this.chat.revokePendingChatUpload(dto.fileUrl, chatUploadKeyPrefixOrder(orderId));
+    await this.chat.revokePendingChatUpload(
+      dto.fileUrl,
+      chatUploadKeyPrefixOrder(orderId),
+      user.sub,
+    );
     return { ok: true as const };
   }
 

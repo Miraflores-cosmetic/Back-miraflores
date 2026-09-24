@@ -1,0 +1,29 @@
+{
+  "name": "@miraflores/order-chat-ui",
+  "version": "0.1.0",
+  "private": true,
+  "sideEffects": ["**/*.css"],
+  "exports": {
+    ".": "./src/index.ts",
+    "./ChatWindow": "./src/ChatWindow/ChatWindow.tsx",
+    "./hooks/useChatAttachments": "./src/hooks/useChatAttachments.ts",
+    "./linkify": "./src/lib/linkifyChatMessageContent.tsx",
+    "./chatUploadAccept": "./src/lib/chatUploadAccept.ts"
+  },
+  "peerDependencies": {
+    "@miraflores/order-chat-core": "*",
+    "react": ">=18",
+    "react-dom": ">=18"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@miraflores/order-chat-core": "*",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.0.0"
+  }
+}

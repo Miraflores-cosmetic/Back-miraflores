@@ -85,7 +85,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
       },
       { maxWait: 15_000, timeout: 120_000 },
     );
-    await flushAfterRlsCommit(afterCommit);
+    flushAfterRlsCommit(afterCommit);
     return result;
   }
 }

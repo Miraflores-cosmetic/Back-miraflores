@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Controller,
   Get,
   NotFoundException,
@@ -10,14 +11,19 @@ import type { Response } from 'express';
 import { createReadStream, existsSync } from 'fs';
 import { join } from 'path';
 import { ConfigService } from '@nestjs/config';
+import { Public } from '../common/decorators/public.decorator';
+import { SkipRlsTransaction } from '../rls/skip-rls-transaction.decorator';
 import { LocalStorageService } from '../storage/local-storage.service';
 import { readChatUploadMeta, inferChatUploadMetaFromFile } from '../storage/chat-upload-meta';
+import { normalizeChatStorageKey } from '../storage/chat-upload-meta';
 import {
-  extractChatStorageKeyFromRef,
   resolveChatFileSigningSecret,
   verifyChatFileSignature,
 } from './chat-file-url';
 
+/** Доступ по HMAC в query (img / PhotoSwipe / новая вкладка без Bearer). */
+@Public()
+@SkipRlsTransaction()
 @Controller('order-chat/files')
 export class OrderChatFilesController {
   private readonly signSecret: string;
@@ -42,15 +48,15 @@ export class OrderChatFilesController {
     if (!key || !sig || !Number.isFinite(exp)) {
       throw new UnauthorizedException('Invalid file link');
     }
-    if (!verifyChatFileSignature(this.signSecret, key, exp, sig)) {
-      throw new UnauthorizedException('Invalid or expired file link');
-    }
-
     let normalized: string;
     try {
-      normalized = extractChatStorageKeyFromRef(key, this.storage.publicBase()) ?? key;
-    } catch {
-      throw new NotFoundException();
+      normalized = normalizeChatStorageKey(key, 'chat');
+    } catch (e) {
+      if (e instanceof BadRequestException) throw e;
+      throw new UnauthorizedException('Invalid file link');
+    }
+    if (!verifyChatFileSignature(this.signSecret, normalized, exp, sig)) {
+      throw new UnauthorizedException('Invalid or expired file link');
     }
 
     const abs = join(this.storage.uploadRoot(), normalized);

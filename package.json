@@ -7,9 +7,11 @@
     "dev:admin": "npm run dev -w miraflores-admin",
     "build:api": "npm run build -w @miraflores/admin-sections && npm run build -w @miraflores/admin-types && npm run build -w @miraflores/order-chat-core && npm run build -w miraflores-api",
     "build:admin": "npm run build -w @miraflores/admin-sections && npm run build -w @miraflores/admin-types && npm run build -w @miraflores/order-chat-core && npm run build -w miraflores-admin",
+    "typecheck:ui": "npm run typecheck -w @miraflores/order-chat-ui --if-present",
     "build": "npm run build -w @miraflores/admin-sections && npm run build -w @miraflores/admin-types && npm run build -w @miraflores/order-chat-core && npm run build -w miraflores-api && npm run build -w miraflores-admin",
     "test:api": "npm run test -w @miraflores/admin-sections --if-present && npm run test -w @miraflores/admin-types --if-present && npm run test -w miraflores-api --if-present",
     "test:admin": "npm run test -w miraflores-admin --if-present",
+    "typecheck:admin": "npm run typecheck -w miraflores-admin --if-present",
     "test:e2e:admin": "npm run test:e2e -w miraflores-admin --if-present"
   },
   "overrides": {

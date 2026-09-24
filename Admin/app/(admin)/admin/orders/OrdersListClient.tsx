@@ -189,7 +189,7 @@ export function OrdersListClient() {
                 <td>
                   <span className={styles.orderNumberCell}>
                     <Link href={`/admin/orders/${o.id}`}>{o.number}</Link>
-                    {(o.chatUnreadCount ?? 0) > 0 ? (
+                    {o.userId && (o.chatUnreadCount ?? 0) > 0 ? (
                       <Link
                         href={`/admin/orders/${o.id}#order-chat`}
                         className={styles.orderChatUnreadLink}
@@ -210,7 +210,7 @@ export function OrdersListClient() {
                           {(o.chatUnreadCount ?? 0) > 99 ? '99+' : o.chatUnreadCount}
                         </span>
                       </Link>
-                    ) : (
+                    ) : o.userId ? (
                       <Link
                         href={`/admin/orders/${o.id}#order-chat`}
                         className={styles.orderChatLinkMuted}
@@ -228,7 +228,7 @@ export function OrdersListClient() {
                           </svg>
                         </span>
                       </Link>
-                    )}
+                    ) : null}
                   </span>
                 </td>
                 <td>

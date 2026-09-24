@@ -1,6 +1,7 @@
 import type { ConfigService } from '@nestjs/config';
 import type { JwtService } from '@nestjs/jwt';
 import type { JwtPayload } from '../common/decorators/current-user.decorator';
+import { resolveOrderChatWsJwtSecret } from '../auth/jwt-secret';
 
 /** Audience для короткоживущего JWT только Socket.IO order-chat (не access token). */
 export const ORDER_CHAT_WS_JWT_AUD = 'order-chat-ws';
@@ -45,6 +46,7 @@ export function issueOrderChatWsToken(
       tv: user.tv,
     },
     {
+      secret: resolveOrderChatWsJwtSecret(config),
       expiresIn: expiresIn as `${number}${'s' | 'm' | 'h' | 'd'}`,
       audience: ORDER_CHAT_WS_JWT_AUD,
     },

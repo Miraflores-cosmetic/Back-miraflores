@@ -692,6 +692,12 @@ a.docChip:hover {
   opacity: 1;
 }
 
+@media (hover: none) {
+  .messageDeleteBtn {
+    opacity: 1;
+  }
+}
+
 .messageDeleteBtn:hover {
   background: rgba(0, 0, 0, 0.06);
   color: var(--color-black);
@@ -950,4 +956,90 @@ a.docChip:hover {
   font-weight: 600;
   cursor: pointer;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+/** Fallback design tokens (админка / витрина могут переопределить выше по DOM). */
+.ocUiTokens {
+  --color-black: var(--oc-ui-black, #000000);
+  --color-ink-black: var(--oc-ui-ink-black, #1d1c1b);
+  --color-gray: var(--oc-ui-gray, #6e6d67);
+  --color-blue: var(--oc-ui-blue, #3d83f6);
+  --color-bright-snow: var(--oc-ui-bright-snow, #f6f5ef);
+  --font-commissioner: var(
+    --oc-ui-font,
+    'Avenir Next',
+    'Helvetica Neue',
+    Arial,
+    sans-serif
+  );
+  --text-caption: var(--oc-ui-text-caption, 14px);
+  --text-caption-weight: var(--oc-ui-text-caption-weight, 400);
+  --text-body: var(--oc-ui-text-body, 15px);
+  --text-body-weight: var(--oc-ui-text-body-weight, 400);
+  --text-card-20-400: var(--oc-ui-text-card-20, 20px);
+  --h5-size: var(--oc-ui-h5-size, 20px);
+  --h5-weight: var(--oc-ui-h5-weight, 400);
+}
+
+.deleteConfirmOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.deleteConfirmDialog {
+  width: min(400px, 100%);
+  padding: 20px;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+}
+
+.deleteConfirmTitle {
+  margin: 0 0 8px;
+  font-family: var(--font-commissioner);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-ink-black);
+}
+
+.deleteConfirmMessage {
+  margin: 0 0 16px;
+  font-family: var(--font-commissioner);
+  font-size: var(--text-body);
+  line-height: 1.45;
+  color: var(--color-gray);
+}
+
+.deleteConfirmActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.deleteConfirmCancel,
+.deleteConfirmDanger {
+  appearance: none;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-family: var(--font-commissioner);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.deleteConfirmCancel {
+  border: 1px solid #e2e6e8;
+  background: #fff;
+  color: var(--color-ink-black);
+}
+
+.deleteConfirmDanger {
+  border: none;
+  background: #c62828;
+  color: #fff;
 }

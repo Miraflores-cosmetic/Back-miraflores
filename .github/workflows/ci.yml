@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  packages-and-api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: npm run build -w @miraflores/order-chat-core
+      - run: npm run build -w @miraflores/admin-sections
+      - run: npm run build -w @miraflores/admin-types
+      - run: npm run test -w @miraflores/order-chat-core
+      - run: npm run test -w miraflores-api -- --run src/order-chat/order-chat.gateway.spec.ts src/order-chat/order-chat-files.controller.spec.ts src/order-chat/order-chat-ws-token.spec.ts src/order-chat/order-chat.service.spec.ts src/storage/chat-upload-meta.spec.ts
+
+  admin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: npm run build -w @miraflores/order-chat-core
+      - run: npm run build -w @miraflores/admin-sections
+      - run: npm run build -w @miraflores/admin-types
+      - run: npm run typecheck -w @miraflores/order-chat-ui
+      - run: npm run typecheck -w miraflores-admin
+      - run: npm run test -w miraflores-admin
+
+  front:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - run: npm run build -w @miraflores/order-chat-core
+      - run: npm ci
+        working-directory: Front
+      - run: npm run type-check
+        working-directory: Front
+      - run: npm run test
+        working-directory: Front
+      - run: npm run build
+        working-directory: Front

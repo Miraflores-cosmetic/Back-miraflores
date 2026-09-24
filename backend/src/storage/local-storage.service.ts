@@ -4,7 +4,9 @@ import { mkdir, readdir, stat, unlink, writeFile } from 'fs/promises';
 import { join, extname } from 'path';
 import { randomBytes } from 'crypto';
 import type { ChatAttachmentKind } from '@prisma/client';
+import { extractChatStorageKeyFromRef } from '../order-chat/chat-file-url';
 import {
+  CHAT_UPLOAD_META_SUFFIX,
   chatAttachmentKindFromMime,
   normalizeChatStorageKey,
   readChatUploadMeta,
@@ -186,15 +188,21 @@ export class LocalStorageService {
   }
 
   /** Validates chat attachment URL and returns stored metadata (sidecar or file probe). */
+  /** Всегда через normalizeChatStorageKey (без сырого tryPublicUrlToKey). */
+  resolveChatStorageKeyFromRef(ref: string, expectedPrefix: string): string {
+    const prefix = expectedPrefix.replace(/\/$/, '');
+    const fromSigned = extractChatStorageKeyFromRef(ref, this.publicBase());
+    if (fromSigned) return normalizeChatStorageKey(fromSigned, prefix);
+    const fromPublic = this.tryPublicUrlToKey(ref);
+    if (!fromPublic) throw new BadRequestException('Недопустимый URL вложения');
+    return normalizeChatStorageKey(fromPublic, prefix);
+  }
+
   async resolveChatAttachmentFromUrl(
     url: string,
     expectedPrefix: string,
   ): Promise<{ fileUrl: string; filename: string; mimeType: string; kind: ChatAttachmentKind }> {
-    const { extractChatStorageKeyFromRef } = await import('../order-chat/chat-file-url');
-    const rawKey =
-      extractChatStorageKeyFromRef(url, this.publicBase()) ?? this.tryPublicUrlToKey(url);
-    if (!rawKey) throw new BadRequestException('Недопустимый URL вложения');
-    const key = normalizeChatStorageKey(rawKey, expectedPrefix.replace(/\/$/, ''));
+    const key = this.resolveChatStorageKeyFromRef(url, expectedPrefix);
     const fileUrl = this.getPublicUrlForKey(key);
     let meta: ChatUploadMeta | null = await readChatUploadMeta(this.uploadRoot(), key);
     if (!meta) {
@@ -233,7 +241,7 @@ export class LocalStorageService {
   async saveChatFile(
     file: { buffer: Buffer; size: number },
     folder: string,
-    opts?: { originalFilename?: string },
+    opts?: { originalFilename?: string; uploadedByUserId?: string },
   ): Promise<{ key: string; url: string; mime: string }> {
     const mime = this.assertChatFile(file);
     const saved = await this.writeFile(file.buffer, folder, mime, { entropyBytes: 16 });
@@ -243,6 +251,7 @@ export class LocalStorageService {
       mimeType: mime,
       kind: chatAttachmentKindFromMime(mime),
       size: file.size,
+      uploadedByUserId: opts?.uploadedByUserId?.trim() || undefined,
     };
     await writeChatUploadMetaFile(this.uploadRoot(), saved.key, meta);
     return { ...saved, mime };
@@ -273,24 +282,31 @@ export class LocalStorageService {
   }
 
   async deleteByPublicUrl(url: string): Promise<boolean> {
-    const { extractChatStorageKeyFromRef } = await import('../order-chat/chat-file-url');
-    const key =
-      extractChatStorageKeyFromRef(url, this.publicBase()) ?? this.tryPublicUrlToKey(url);
-    if (!key) return false;
-    return this.deleteByStorageKey(key);
+    try {
+      const key = this.resolveChatStorageKeyFromRef(url, 'chat');
+      return this.deleteByStorageKey(key);
+    } catch {
+      return false;
+    }
   }
 
   async deleteByStorageKey(key: string): Promise<boolean> {
+    let normalized: string;
+    try {
+      normalized = normalizeChatStorageKey(key, 'chat');
+    } catch {
+      return false;
+    }
     const root = this.uploadRoot();
     let ok = false;
     try {
-      await unlink(join(root, key));
+      await unlink(join(root, normalized));
       ok = true;
     } catch {
       /* file may already be gone */
     }
     try {
-      await unlink(join(root, key + '.chat-upload-meta.json'));
+      await unlink(join(root, normalized + CHAT_UPLOAD_META_SUFFIX));
     } catch {
       /* ignore */
     }

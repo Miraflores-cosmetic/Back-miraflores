@@ -15,6 +15,7 @@ import {
   Prisma,
   UserRole,
 } from '@prisma/client';
+import { readChatUploadMeta } from '../storage/chat-upload-meta';
 import { chatMessageSnippet } from '../mail/email-notification-format';
 import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -45,6 +46,8 @@ import {
 } from './chat-file-url';
 import type { ChatCustomerPresenceContext } from './order-chat.types';
 import type {
+  AdminSupportThreadsOut,
+  ChatCustomerThreadsOut,
   ChatThreadListItem,
   OrderChatMessageOut,
   OrderChatRealtimeEmitter,
@@ -54,7 +57,27 @@ import { issueOrderChatWsToken, type OrderChatWsTokenResponse } from './order-ch
 import {
   batchLastMessagePreviews,
   batchUnreadCounts,
+  countSupportThreadsWithUnread,
+  decodeSupportThreadCursor,
+  encodeSupportThreadCursor,
+  querySupportThreadsPage,
+  staffTotalUnreadCount,
 } from './order-chat-unread.util';
+
+const CUSTOMER_ORDER_THREADS_MAX = 50;
+const CUSTOMER_STARTABLE_ORDERS_MAX = 20;
+
+/** Непрочитанные сверху, затем по последнему сообщению; треды без сообщений — в конце. */
+export function compareCustomerThreads(a: ChatThreadListItem, b: ChatThreadListItem): number {
+  const ua = a.unreadCount > 0 ? 1 : 0;
+  const ub = b.unreadCount > 0 ? 1 : 0;
+  if (ua !== ub) return ub - ua;
+  const ta = a.lastMessageAt ? Date.parse(a.lastMessageAt) : -Infinity;
+  const tb = b.lastMessageAt ? Date.parse(b.lastMessageAt) : -Infinity;
+  if (ta !== tb) return tb > ta ? 1 : -1;
+  if (a.kind !== b.kind) return a.kind === 'SUPPORT' ? -1 : 1;
+  return 0;
+}
 
 function decodeUploadOriginalName(original: string | undefined | null): string {
   const raw = (original ?? 'file').trim() || 'file';
@@ -94,9 +117,12 @@ export class OrderChatService {
   }
 
   private signStoredChatFileUrl(storedUrl: string): string {
-    const key =
-      extractChatStorageKeyFromRef(storedUrl, this.storage.publicBase()) ??
-      this.storage.tryPublicUrlToKey(storedUrl);
+    let key: string | null = null;
+    try {
+      key = this.storage.resolveChatStorageKeyFromRef(storedUrl, 'chat');
+    } catch {
+      key = extractChatStorageKeyFromRef(storedUrl, this.storage.publicBase());
+    }
     if (!key || !isChatStorageKey(key)) return storedUrl;
     return signChatStorageKey(
       this.chatFileSignSecret,
@@ -148,6 +174,11 @@ export class OrderChatService {
     return author.displayName?.trim() || author.email?.trim() || 'Покупатель';
   }
 
+  /** Подпись покупателя в API (без email — защита от битых authorUserId / snapshot). */
+  private labelCustomerAuthor(author: { displayName: string | null }): string {
+    return author.displayName?.trim() || 'Покупатель';
+  }
+
   private mapMessage(m: {
     id: string;
     conversationId: string;
@@ -189,7 +220,10 @@ export class OrderChatService {
       authorUserId: m.authorUserId,
       authorRole: m.authorRole,
       authorLabel:
-        labelFromSnapshot || this.labelAuthor(m.authorRole, author),
+        labelFromSnapshot ||
+        (m.authorRole === ChatMessageAuthorRole.CUSTOMER
+          ? this.labelCustomerAuthor(author)
+          : this.labelAuthor(m.authorRole, author)),
       authorAvatarUrl: rawAvatar && rawAvatar.length > 0 ? rawAvatar : null,
       body: deleted ? '' : m.body,
       deletedAt: m.deletedAt ? m.deletedAt.toISOString() : null,
@@ -226,6 +260,35 @@ export class OrderChatService {
       select: { id: true },
     });
     if (!o) throw new ForbiddenException('Нет доступа к заказу');
+  }
+
+  /** Чат только для заказов с зарегистрированным покупателем (не гостевой checkout). */
+  private async assertOrderHasRegisteredBuyer(orderId: string): Promise<string> {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: { userId: true },
+    });
+    const uid = order?.userId?.trim();
+    if (!uid) {
+      throw new BadRequestException(
+        'Чат недоступен: у заказа нет зарегистрированного покупателя',
+      );
+    }
+    return uid;
+  }
+
+  private async assertRegisteredBuyerUserId(userId: string): Promise<void> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true, isActive: true },
+    });
+    if (!user || user.role !== UserRole.USER || !user.isActive) {
+      throw new NotFoundException('Покупатель не найден');
+    }
+  }
+
+  disconnectRealtimeSessionsForUser(userId: string): void {
+    void this.gateway?.disconnectUserSockets(userId);
   }
 
   private async assertStaffOrdersSection(
@@ -315,6 +378,7 @@ export class OrderChatService {
       const ar = this.authorRoleFromJwt(role);
       if (ar === ChatMessageAuthorRole.STAFF) {
         await this.assertStaffCanAccessOrder(orderId, userId, role, tokenVersion);
+        await this.assertOrderHasRegisteredBuyer(orderId);
         return;
       }
       await this.assertCustomerCanAccessOrder(orderId, userId);
@@ -332,11 +396,13 @@ export class OrderChatService {
       const ar = this.authorRoleFromJwt(role);
       if (ar === ChatMessageAuthorRole.STAFF) {
         await this.assertStaffCanAccessSupport(jwtUserId, role, tokenVersion);
+        await this.assertRegisteredBuyerUserId(customerUserId);
         return;
       }
       if (jwtUserId !== customerUserId) {
         throw new ForbiddenException('Нет доступа к диалогу');
       }
+      await this.assertRegisteredBuyerUserId(customerUserId);
     });
   }
 
@@ -460,6 +526,7 @@ export class OrderChatService {
       afterMessageId?: string | null;
     },
   ): Promise<{ conversationId: string | null; messages: OrderChatMessageOut[]; hasOlder: boolean }> {
+    await this.assertOrderHasRegisteredBuyer(orderId);
     const conv = await this.prisma.chatConversation.findUnique({
       where: { orderId },
       select: { id: true, retentionPurgesAt: true },
@@ -486,6 +553,7 @@ export class OrderChatService {
       afterMessageId?: string | null;
     },
   ): Promise<{ conversationId: string | null; messages: OrderChatMessageOut[]; hasOlder: boolean }> {
+    await this.assertRegisteredBuyerUserId(customerUserId);
     const conv = await this.prisma.chatConversation.findUnique({
       where: { userId: customerUserId },
       select: { id: true, retentionPurgesAt: true, kind: true },
@@ -597,7 +665,9 @@ export class OrderChatService {
     const out = this.mapMessage(row);
     scheduleAfterRlsCommit(() => {
       emit(out);
-      this.gateway?.broadcastStaffInboxUpdated();
+      if (authorRole === ChatMessageAuthorRole.CUSTOMER) {
+        this.gateway?.broadcastStaffInboxUpdated();
+      }
     });
     if (authorRole === ChatMessageAuthorRole.STAFF && emailContext) {
       const snippet = chatMessageSnippet(body, att.length);
@@ -617,17 +687,21 @@ export class OrderChatService {
     if (this.gateway && (await this.gateway.isCustomerChatOnline(ctx))) {
       return;
     }
-    const conv = await this.prisma.chatConversation.findUnique({
-      where: { id: conversationId },
-      select: { lastStaffReplyEmailAt: true },
+    const now = new Date();
+    const throttleBefore = new Date(
+      now.getTime() - ORDER_CHAT_STAFF_REPLY_EMAIL_MIN_INTERVAL_MS,
+    );
+    const claimed = await this.prisma.chatConversation.updateMany({
+      where: {
+        id: conversationId,
+        OR: [
+          { lastStaffReplyEmailAt: null },
+          { lastStaffReplyEmailAt: { lt: throttleBefore } },
+        ],
+      },
+      data: { lastStaffReplyEmailAt: now },
     });
-    const last = conv?.lastStaffReplyEmailAt;
-    if (
-      last &&
-      Date.now() - last.getTime() < ORDER_CHAT_STAFF_REPLY_EMAIL_MIN_INTERVAL_MS
-    ) {
-      return;
-    }
+    if (claimed.count === 0) return;
 
     if (ctx.kind === 'ORDER') {
       const order = await this.prisma.order.findUnique({
@@ -650,10 +724,6 @@ export class OrderChatService {
         snippet,
         customerGreeting: greeting,
       });
-      await this.prisma.chatConversation.update({
-        where: { id: conversationId },
-        data: { lastStaffReplyEmailAt: new Date() },
-      });
       return;
     }
 
@@ -668,10 +738,6 @@ export class OrderChatService {
       to,
       snippet,
       customerGreeting: user.displayName?.trim() || null,
-    });
-    await this.prisma.chatConversation.update({
-      where: { id: conversationId },
-      data: { lastStaffReplyEmailAt: new Date() },
     });
   }
 
@@ -697,11 +763,7 @@ export class OrderChatService {
     this.assertConversationNotExpired(conv.retentionPurgesAt);
     await this.syncOrderConversationRetention(orderId);
 
-    const orderOwner = await this.prisma.order.findUnique({
-      where: { id: orderId },
-      select: { userId: true },
-    });
-    const customerUserId = orderOwner?.userId?.trim() || jwtUserId;
+    const customerUserId = await this.assertOrderHasRegisteredBuyer(orderId);
 
     return this.createMessage(
       conv.id,
@@ -728,6 +790,7 @@ export class OrderChatService {
     } else {
       await this.assertStaffCanAccessSupport(jwtUserId, jwtRole);
     }
+    await this.assertRegisteredBuyerUserId(customerUserId);
 
     const conv = await this.prisma.chatConversation.upsert({
       where: { userId: customerUserId },
@@ -771,6 +834,7 @@ export class OrderChatService {
     } else {
       await this.assertStaffCanAccessSupport(jwtUserId, jwtRole);
     }
+    await this.assertRegisteredBuyerUserId(customerUserId);
     const conv = await this.prisma.chatConversation.findUnique({
       where: { userId: customerUserId },
       select: { id: true },
@@ -795,6 +859,7 @@ export class OrderChatService {
     } else {
       await this.assertStaffCanAccessOrder(orderId, jwtUserId, jwtRole);
     }
+    await this.assertOrderHasRegisteredBuyer(orderId);
     const conv = await this.prisma.chatConversation.findUnique({
       where: { orderId },
       select: { id: true, retentionPurgesAt: true },
@@ -840,8 +905,31 @@ export class OrderChatService {
       data: { deletedAt: new Date(), body: '' },
     });
     for (const a of attachments) {
-      await this.storage.deleteByPublicUrl(a.fileUrl);
+      const fileRef = a.fileUrl;
+      const messageId = msg.id;
+      scheduleAfterRlsCommit(() => {
+        void this.deleteChatFileIfUnreferenced(fileRef, messageId);
+      });
     }
+  }
+
+  private async deleteChatFileIfUnreferenced(
+    fileRef: string,
+    excludeMessageId: string,
+  ): Promise<void> {
+    let canonical: string;
+    try {
+      canonical = this.storage.getPublicUrlForKey(
+        this.storage.resolveChatStorageKeyFromRef(fileRef, 'chat'),
+      );
+    } catch {
+      return;
+    }
+    const others = await this.prisma.chatAttachment.count({
+      where: { fileUrl: canonical, messageId: { not: excludeMessageId } },
+    });
+    if (others > 0) return;
+    await this.storage.deleteByPublicUrl(canonical);
   }
 
   async markOrderRead(orderId: string, jwtUserId: string, jwtRole: string): Promise<void> {
@@ -851,6 +939,7 @@ export class OrderChatService {
     } else {
       await this.assertStaffCanAccessOrder(orderId, jwtUserId, jwtRole);
     }
+    await this.assertOrderHasRegisteredBuyer(orderId);
     const conv = await this.prisma.chatConversation.findUnique({
       where: { orderId },
       select: { id: true },
@@ -870,6 +959,7 @@ export class OrderChatService {
     } else {
       await this.assertStaffCanAccessSupport(jwtUserId, jwtRole);
     }
+    await this.assertRegisteredBuyerUserId(customerUserId);
     const conv = await this.prisma.chatConversation.findUnique({
       where: { userId: customerUserId },
       select: { id: true },
@@ -900,12 +990,13 @@ export class OrderChatService {
       } else {
         await this.assertStaffCanAccessOrder(orderId, jwtUserId, jwtRole);
       }
+      await this.assertOrderHasRegisteredBuyer(orderId);
     });
     const safeName = decodeUploadOriginalName(file.originalname);
     const { url, mime } = await this.storage.saveChatFile(
       { buffer: file.buffer, size: file.size },
       chatUploadKeyPrefixOrder(orderId).replace(/\/$/, ''),
-      { originalFilename: safeName },
+      { originalFilename: safeName, uploadedByUserId: jwtUserId },
     );
     const kind =
       mime.startsWith('image/') && mime !== 'image/tiff'
@@ -920,7 +1011,11 @@ export class OrderChatService {
   }
 
   /** Снять загруженный, но не отправленный файл (нет строки ChatAttachment). */
-  async revokePendingChatUpload(fileRef: string, uploadPrefix: string): Promise<void> {
+  async revokePendingChatUpload(
+    fileRef: string,
+    uploadPrefix: string,
+    jwtUserId: string,
+  ): Promise<void> {
     const prefix = uploadPrefix.replace(/\/$/, '');
     const resolved = await this.storage.resolveChatAttachmentFromUrl(fileRef, `${prefix}/`);
     const attached = await this.prisma.chatAttachment.count({
@@ -928,6 +1023,14 @@ export class OrderChatService {
     });
     if (attached > 0) {
       throw new BadRequestException('Файл уже прикреплён к сообщению');
+    }
+    const key = this.storage.resolveChatStorageKeyFromRef(fileRef, prefix);
+    const meta = await readChatUploadMeta(this.storage.uploadRoot(), key);
+    if (meta?.uploadedByUserId && meta.uploadedByUserId !== jwtUserId) {
+      throw new ForbiddenException('Можно отозвать только свою загрузку');
+    }
+    if (!meta?.uploadedByUserId) {
+      throw new ForbiddenException('Нельзя отозвать эту загрузку');
     }
     await this.storage.deleteByPublicUrl(resolved.fileUrl);
   }
@@ -953,12 +1056,13 @@ export class OrderChatService {
       } else {
         await this.assertStaffCanAccessSupport(jwtUserId, jwtRole);
       }
+      await this.assertRegisteredBuyerUserId(customerUserId);
     });
     const safeName = decodeUploadOriginalName(file.originalname);
     const { url, mime } = await this.storage.saveChatFile(
       { buffer: file.buffer, size: file.size },
       chatUploadKeyPrefixSupport(customerUserId).replace(/\/$/, ''),
-      { originalFilename: safeName },
+      { originalFilename: safeName, uploadedByUserId: jwtUserId },
     );
     const kind =
       mime.startsWith('image/') && mime !== 'image/tiff'
@@ -1030,145 +1134,152 @@ export class OrderChatService {
   }
 
   async unreadCountForStaff(staffUserId: string): Promise<number> {
-    const convs = await this.prisma.chatConversation.findMany({
-      where: {
-        OR: [{ retentionPurgesAt: null }, { retentionPurgesAt: { gt: new Date() } }],
-      },
-      select: { id: true },
-    });
-    const counts = await batchUnreadCounts(
-      this.prisma,
-      convs.map((c) => c.id),
-      staffUserId,
-      ChatMessageAuthorRole.CUSTOMER,
-    );
-    let total = 0;
-    for (const n of counts.values()) total += n;
-    return total;
+    return staffTotalUnreadCount(this.prisma, staffUserId);
   }
 
-  async listThreadsForCustomer(userId: string): Promise<{ threads: ChatThreadListItem[] }> {
-    const supportConv = await this.prisma.chatConversation.findUnique({
-      where: { userId },
-      select: { id: true, retentionPurgesAt: true },
-    });
+  /**
+   * Треды покупателя: «Поддержка» + только заказы, где уже есть сообщения.
+   * Сортировка: непрочитанные сверху, затем по последнему сообщению.
+   * `startableOrders` — последние заказы без переписки для «Начать чат по заказу».
+   */
+  async listThreadsForCustomer(userId: string): Promise<ChatCustomerThreadsOut> {
+    const notPurged = {
+      OR: [{ retentionPurgesAt: null }, { retentionPurgesAt: { gt: new Date() } }],
+    };
 
-    const orders = await this.prisma.order.findMany({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
-      take: 100,
-      select: {
-        id: true,
-        number: true,
-        chatConversation: {
-          select: { id: true, retentionPurgesAt: true },
+    const [supportConv, orderConvs] = await Promise.all([
+      this.prisma.chatConversation.findFirst({
+        where: { userId, kind: ChatConversationKind.SUPPORT, ...notPurged },
+        select: { id: true },
+      }),
+      this.prisma.chatConversation.findMany({
+        where: {
+          kind: ChatConversationKind.ORDER,
+          order: { userId },
+          messages: { some: { deletedAt: null } },
+          ...notPurged,
         },
-      },
-    });
+        orderBy: { updatedAt: 'desc' },
+        take: CUSTOMER_ORDER_THREADS_MAX,
+        select: { id: true, order: { select: { id: true, number: true } } },
+      }),
+    ]);
 
-    const convIds: string[] = [];
-    if (supportConv?.id) convIds.push(supportConv.id);
-    for (const o of orders) {
-      const conv = o.chatConversation;
-      if (!conv?.id) continue;
-      if (conv.retentionPurgesAt && conv.retentionPurgesAt <= new Date()) continue;
-      convIds.push(conv.id);
-    }
-
-    const unreadMap = await batchUnreadCounts(
-      this.prisma,
-      convIds,
-      userId,
-      ChatMessageAuthorRole.STAFF,
-    );
-    const previewMap = await batchLastMessagePreviews(this.prisma, convIds);
-
-    const supportLast = supportConv?.id
-      ? previewMap.get(supportConv.id) ?? { preview: null, at: null }
-      : { preview: null, at: null };
-
-    const threads: ChatThreadListItem[] = [
-      {
-        kind: 'SUPPORT',
-        conversationId: supportConv?.id ?? null,
-        title: 'Поддержка',
-        unreadCount: supportConv?.id ? unreadMap.get(supportConv.id) ?? 0 : 0,
-        lastMessagePreview: supportLast.preview,
-        lastMessageAt: supportLast.at?.toISOString() ?? null,
-      },
+    const convIds = [
+      ...(supportConv ? [supportConv.id] : []),
+      ...orderConvs.map((c) => c.id),
     ];
+    const [unreadMap, previewMap] = await Promise.all([
+      batchUnreadCounts(this.prisma, convIds, userId, ChatMessageAuthorRole.STAFF),
+      batchLastMessagePreviews(this.prisma, convIds),
+    ]);
 
-    for (const o of orders) {
-      const conv = o.chatConversation;
-      if (conv?.retentionPurgesAt && conv.retentionPurgesAt <= new Date()) continue;
-      const last = conv?.id
-        ? previewMap.get(conv.id) ?? { preview: null, at: null }
-        : { preview: null, at: null };
-      threads.push({
+    const supportLast = supportConv ? previewMap.get(supportConv.id) : undefined;
+    const support: ChatThreadListItem = {
+      kind: 'SUPPORT',
+      conversationId: supportConv?.id ?? null,
+      title: 'Поддержка',
+      unreadCount: supportConv ? unreadMap.get(supportConv.id) ?? 0 : 0,
+      lastMessagePreview: supportLast?.preview ?? null,
+      lastMessageAt: supportLast?.at?.toISOString() ?? null,
+    };
+
+    const orderThreads: ChatThreadListItem[] = [];
+    for (const c of orderConvs) {
+      const last = previewMap.get(c.id);
+      if (!c.order || !last?.at) continue;
+      orderThreads.push({
         kind: 'ORDER',
-        conversationId: conv?.id ?? null,
-        orderId: o.id,
-        orderNumber: o.number,
-        title: `Заказ ${o.number}`,
-        unreadCount: conv?.id ? unreadMap.get(conv.id) ?? 0 : 0,
+        conversationId: c.id,
+        orderId: c.order.id,
+        orderNumber: c.order.number,
+        title: `Заказ ${c.order.number}`,
+        unreadCount: unreadMap.get(c.id) ?? 0,
         lastMessagePreview: last.preview,
-        lastMessageAt: last.at?.toISOString() ?? null,
+        lastMessageAt: last.at.toISOString(),
       });
     }
 
-    return { threads };
+    const threads = [support, ...orderThreads].sort(compareCustomerThreads);
+
+    const startable = await this.prisma.order.findMany({
+      where: {
+        userId,
+        id: { notIn: orderThreads.map((t) => t.orderId!) },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: CUSTOMER_STARTABLE_ORDERS_MAX,
+      select: { id: true, number: true, createdAt: true },
+    });
+
+    return {
+      threads,
+      startableOrders: startable.map((o) => ({
+        orderId: o.id,
+        orderNumber: o.number,
+        createdAt: o.createdAt.toISOString(),
+      })),
+    };
   }
 
+  /**
+   * Инбокс поддержки: непрочитанные сверху, затем по последней активности;
+   * поиск по email / имени / телефону / тексту сообщений; keyset-пагинация.
+   */
   async listSupportThreadsForAdmin(
     staffUserId: string,
-    limitRaw = 50,
-  ): Promise<{
-    threads: Array<{
-      userId: string;
-      userEmail: string;
-      userDisplayName: string | null;
-      conversationId: string;
-      unreadCount: number;
-      lastMessagePreview: string | null;
-      lastMessageAt: string | null;
-    }>;
-  }> {
-    const limit = Math.min(100, Math.max(1, Math.floor(limitRaw)));
-    const convs = await this.prisma.chatConversation.findMany({
-      where: { kind: ChatConversationKind.SUPPORT },
-      orderBy: { updatedAt: 'desc' },
-      take: limit,
-      select: {
-        id: true,
-        userId: true,
-        user: { select: { email: true, displayName: true } },
-      },
-    });
-    const convIds = convs.map((c) => c.id);
-    const unreadMap = await batchUnreadCounts(
-      this.prisma,
-      convIds,
-      staffUserId,
-      ChatMessageAuthorRole.CUSTOMER,
-    );
-    const previewMap = await batchLastMessagePreviews(this.prisma, convIds);
+    opts: { limit?: number; q?: string; unreadOnly?: boolean; cursor?: string } = {},
+  ): Promise<AdminSupportThreadsOut> {
+    const limit = Math.min(100, Math.max(1, Math.floor(opts.limit ?? 30)));
+    const cursor = decodeSupportThreadCursor(opts.cursor);
+    if (opts.cursor?.trim() && !cursor) {
+      throw new BadRequestException('Некорректный cursor');
+    }
+    const q = opts.q?.trim().slice(0, 200) || undefined;
 
-    const threads = convs
-      .map((c) => {
-        if (!c.userId || !c.user) return null;
-        const last = previewMap.get(c.id) ?? { preview: null, at: null };
+    const [rows, unreadThreadsTotal] = await Promise.all([
+      querySupportThreadsPage(this.prisma, {
+        staffUserId,
+        q,
+        unreadOnly: opts.unreadOnly,
+        cursor,
+        limit,
+      }),
+      countSupportThreadsWithUnread(this.prisma, staffUserId),
+    ]);
+
+    const page = rows.slice(0, limit);
+    const previewMap = await batchLastMessagePreviews(
+      this.prisma,
+      page.map((r) => r.id),
+    );
+
+    const last = page[page.length - 1];
+    const nextCursor =
+      rows.length > limit && last
+        ? encodeSupportThreadCursor({
+            u: Number(last.unread) > 0 ? 1 : 0,
+            t: last.sortAt.toISOString(),
+            id: last.id,
+          })
+        : null;
+
+    return {
+      threads: page.map((r) => {
+        const lm = previewMap.get(r.id);
         return {
-          userId: c.userId,
-          userEmail: c.user.email,
-          userDisplayName: c.user.displayName,
-          conversationId: c.id,
-          unreadCount: unreadMap.get(c.id) ?? 0,
-          lastMessagePreview: last.preview,
-          lastMessageAt: last.at?.toISOString() ?? null,
+          userId: r.userId,
+          userEmail: r.email,
+          userDisplayName: r.displayName,
+          conversationId: r.id,
+          unreadCount: Number(r.unread),
+          lastMessagePreview: lm?.preview ?? null,
+          lastMessageAt: lm?.at?.toISOString() ?? null,
         };
-      })
-      .filter((t): t is NonNullable<typeof t> => t != null);
-    return { threads };
+      }),
+      nextCursor,
+      unreadThreadsTotal,
+    };
   }
 
   private async syncOrderConversationRetention(orderId: string): Promise<void> {
@@ -1181,25 +1292,47 @@ export class OrderChatService {
     }
   }
 
-  /** Удаляет беседы с истёкшим retentionPurgesAt (вызывается worker). */
+  /** Удаляет беседы с истёкшим retentionPurgesAt (батч; файлы — после commit). */
   async purgeExpiredConversations(now = new Date()): Promise<number> {
     const due = await this.prisma.chatConversation.findMany({
       where: { retentionPurgesAt: { lte: now } },
       select: {
         id: true,
-        messages: { select: { attachments: { select: { fileUrl: true } } } },
+        messages: { select: { id: true, attachments: { select: { fileUrl: true } } } },
       },
       take: 25,
     });
     for (const conv of due) {
+      const fileJobs: Array<{ fileRef: string; messageId: string }> = [];
       for (const msg of conv.messages) {
         for (const att of msg.attachments) {
-          await this.storage.deleteByPublicUrl(att.fileUrl);
+          fileJobs.push({ fileRef: att.fileUrl, messageId: msg.id });
         }
       }
       await this.prisma.chatConversation.delete({ where: { id: conv.id } });
+      for (const job of fileJobs) {
+        scheduleAfterRlsCommit(() => {
+          void this.deleteChatFileIfUnreferenced(job.fileRef, job.messageId);
+        });
+      }
     }
     return due.length;
+  }
+
+  /** Разовый/периодический backfill retentionPurgesAt для уже закрытых заказов. */
+  async backfillRetentionForTerminalOrders(limit = 50): Promise<number> {
+    const orders = await this.prisma.order.findMany({
+      where: {
+        status: { in: TERMINAL_ORDER_STATUSES },
+        chatConversation: { is: { retentionPurgesAt: null } },
+      },
+      select: { id: true, status: true },
+      take: limit,
+    });
+    for (const o of orders) {
+      await this.applyRetentionForOrder(o.id, o.status);
+    }
+    return orders.length;
   }
 
   /** Комментарий покупателя при оформлении → первое сообщение в чате заказа. */
@@ -1219,28 +1352,34 @@ export class OrderChatService {
       select: { id: true },
     });
 
-    const existing = await this.prisma.chatMessage.count({
-      where: { conversationId: conv.id },
-    });
-    if (existing > 0) return;
-
     const author = await this.prisma.user.findUnique({
       where: { id: order.userId },
       select: this.chatAuthorSelect(),
     });
     const authorLabelSnapshot = author
-      ? this.labelAuthor(ChatMessageAuthorRole.CUSTOMER, author)
+      ? this.labelCustomerAuthor(author)
       : 'Покупатель';
 
-    await this.prisma.chatMessage.create({
-      data: {
-        conversationId: conv.id,
-        authorUserId: order.userId,
-        authorRole: ChatMessageAuthorRole.CUSTOMER,
-        authorLabelSnapshot,
-        body: note.slice(0, ORDER_CHAT_POST_BODY_MAX_CHARS),
-      },
-    });
+    try {
+      await this.prisma.chatMessage.create({
+        data: {
+          conversationId: conv.id,
+          authorUserId: order.userId,
+          authorRole: ChatMessageAuthorRole.CUSTOMER,
+          authorLabelSnapshot,
+          body: note.slice(0, ORDER_CHAT_POST_BODY_MAX_CHARS),
+          clientMessageId: 'seed:customer-note',
+        },
+      });
+    } catch (e) {
+      if (
+        e instanceof Prisma.PrismaClientKnownRequestError &&
+        e.code === 'P2002'
+      ) {
+        return;
+      }
+      throw e;
+    }
   }
 
   /** После claim гостевых заказов — перенос customerNote в чат. */

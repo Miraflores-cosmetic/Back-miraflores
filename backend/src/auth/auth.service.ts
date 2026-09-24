@@ -168,6 +168,7 @@ export class AuthService {
       where: { id: userId },
       data: { tokenVersion: { increment: 1 } },
     });
+    void this.orderChat.disconnectRealtimeSessionsForUser(userId);
   }
 
   async touchAdminLogin(userId: string) {
@@ -330,6 +331,7 @@ export class AuthService {
       where: { id: user.id },
       data: { passwordHash, tokenVersion: { increment: 1 } },
     });
+    void this.orderChat.disconnectRealtimeSessionsForUser(user.id);
     // Гостевые заказы с тем же email (без ожидания следующего login).
     await this.claimGuestOrders(user.id, null, payload.email);
     return { ok: true as const };

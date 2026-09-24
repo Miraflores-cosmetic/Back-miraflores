@@ -12,7 +12,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { Throttle } from '@nestjs/throttler';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { memoryStorage } from 'multer';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
@@ -51,7 +51,7 @@ function parseAfter(afterRaw?: string): string | undefined {
 }
 
 @Controller('orders/admin')
-@UseGuards(JwtAuthGuard, AdminGuard)
+@UseGuards(JwtAuthGuard, AdminGuard, ThrottlerGuard)
 export class OrderChatAdminController {
   constructor(private readonly chat: OrderChatService) {}
 
@@ -70,12 +70,19 @@ export class OrderChatAdminController {
   listSupportThreads(
     @CurrentUser('sub') staffId: string,
     @Query('limit') limitRaw?: string,
+    @Query('q') q?: string,
+    @Query('filter') filter?: string,
+    @Query('cursor') cursor?: string,
   ) {
-    const limit = limitRaw ? parseInt(limitRaw, 10) : 50;
-    return this.chat.listSupportThreadsForAdmin(
-      staffId,
-      Number.isFinite(limit) ? limit : 50,
-    );
+    if (filter && filter !== 'all' && filter !== 'unread') {
+      throw new BadRequestException('filter: all | unread');
+    }
+    return this.chat.listSupportThreadsForAdmin(staffId, {
+      limit: parseLimit(limitRaw),
+      q,
+      unreadOnly: filter === 'unread',
+      cursor,
+    });
   }
 
   @Get('chat/users/:userId/messages')
@@ -144,6 +151,7 @@ export class OrderChatAdminController {
     await this.chat.revokePendingChatUpload(
       dto.fileUrl,
       chatUploadKeyPrefixSupport(userId),
+      user.sub,
     );
     return { ok: true as const };
   }
@@ -222,7 +230,11 @@ export class OrderChatAdminController {
     @Body() dto: RevokeChatUploadDto,
   ) {
     await this.chat.assertStaffCanAccessOrder(orderId, user.sub, user.role);
-    await this.chat.revokePendingChatUpload(dto.fileUrl, chatUploadKeyPrefixOrder(orderId));
+    await this.chat.revokePendingChatUpload(
+      dto.fileUrl,
+      chatUploadKeyPrefixOrder(orderId),
+      user.sub,
+    );
     return { ok: true as const };
   }
 

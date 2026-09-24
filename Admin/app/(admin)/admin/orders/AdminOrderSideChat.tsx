@@ -9,13 +9,17 @@ import orderStyles from './orders.module.css';
 
 export function AdminOrderSideChat({
   orderId,
+  buyerUserId,
   staffUserId,
   staffAvatarUrl,
 }: {
   orderId: string;
+  /** Зарегистрированный покупатель; без него чат по заказу недоступен (гостевой заказ). */
+  buyerUserId: string | null;
   staffUserId?: string | null;
   staffAvatarUrl?: string | null;
 }) {
+  const chatAvailable = Boolean(buyerUserId?.trim());
   const chatTarget = useMemo(
     () => ({ kind: 'order' as const, orderId }),
     [orderId],
@@ -44,11 +48,21 @@ export function AdminOrderSideChat({
     loadOlderChatMessages,
   } = useAdminOrderChat({
     target: chatTarget,
-    enabled: true,
+    enabled: chatAvailable,
     staffUserId,
     staffAvatarUrl,
     panelVisible: chatPanelVisible,
   });
+
+  if (!chatAvailable) {
+    return (
+      <div ref={chatPanelRef} className={orderStyles.orderDetailChatWrap}>
+        <p className={orderStyles.orderDetailChatGuestHint}>
+          Чат недоступен: у заказа нет аккаунта покупателя (гостевой заказ).
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div ref={chatPanelRef} className={orderStyles.orderDetailChatWrap}>

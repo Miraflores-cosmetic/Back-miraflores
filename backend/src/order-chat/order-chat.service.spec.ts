@@ -48,7 +48,6 @@ describe('OrderChatService', () => {
       customerNote: '  Привезите после 18  ',
     });
     prisma.chatConversation.upsert.mockResolvedValue({ id: 'c1' });
-    prisma.chatMessage.count.mockResolvedValue(0);
     prisma.chatMessage.create.mockResolvedValue({ id: 'm1' });
     prisma.user.findUnique.mockResolvedValue({
       email: 'u@test',
@@ -65,6 +64,7 @@ describe('OrderChatService', () => {
           authorUserId: 'u1',
           authorRole: ChatMessageAuthorRole.CUSTOMER,
           body: 'Привезите после 18',
+          clientMessageId: 'seed:customer-note',
         }),
       }),
     );

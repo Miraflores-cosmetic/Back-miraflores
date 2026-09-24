@@ -14,4 +14,5 @@ export {
   chatUploadKeyPrefixSupport,
   roomOrderChat,
   roomSupportChat,
+  roomUserChatSessions,
 } from '@miraflores/order-chat-core';

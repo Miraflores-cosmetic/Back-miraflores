@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { resolveJwtSecret, resolveRegistrationTokenSecret, resolveOrderPaySecret } from './jwt-secret';
+import {
+  resolveJwtSecret,
+  resolveRegistrationTokenSecret,
+  resolveOrderPaySecret,
+  resolveOrderChatWsJwtSecret,
+} from './jwt-secret';
 
 function cfg(map: Record<string, string | undefined>) {
   return {
@@ -92,6 +97,48 @@ describe('resolveRegistrationTokenSecret', () => {
         }),
       ),
     ).toBe('local-reg-secret');
+  });
+});
+
+describe('resolveOrderChatWsJwtSecret', () => {
+  it('prod без секрета — throw', () => {
+    expect(() =>
+      resolveOrderChatWsJwtSecret(
+        cfg({ NODE_ENV: 'production', JWT_SECRET: 'a-strong-secret-value' }),
+      ),
+    ).toThrow(/ORDER_CHAT_WS_JWT_SECRET/);
+  });
+
+  it('prod равный JWT_SECRET — throw', () => {
+    expect(() =>
+      resolveOrderChatWsJwtSecret(
+        cfg({
+          NODE_ENV: 'production',
+          JWT_SECRET: 'a-strong-secret-value',
+          ORDER_CHAT_WS_JWT_SECRET: 'a-strong-secret-value',
+        }),
+      ),
+    ).toThrow(/differ from JWT_SECRET/);
+  });
+
+  it('prod с отдельным секретом — ok', () => {
+    expect(
+      resolveOrderChatWsJwtSecret(
+        cfg({
+          NODE_ENV: 'production',
+          JWT_SECRET: 'a-strong-secret-value',
+          ORDER_CHAT_WS_JWT_SECRET: 'another-strong-ws-secret',
+        }),
+      ),
+    ).toBe('another-strong-ws-secret');
+  });
+
+  it('dev без ws — fallback на JWT', () => {
+    expect(
+      resolveOrderChatWsJwtSecret(
+        cfg({ NODE_ENV: 'development', JWT_SECRET: 'local-jwt-secret' }),
+      ),
+    ).toBe('local-jwt-secret');
   });
 });
 

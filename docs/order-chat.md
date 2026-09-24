@@ -8,14 +8,14 @@
 |------|------------|
 | **Nest `backend/src/order-chat/`** | API, WS gateway, RLS, retention, signed URLs вложений, email throttle |
 | **`@miraflores/order-chat-core`** | Общие константы, типы, маппер API→UI, фабрика socket-менеджера (без React) |
-| **Admin** | BFF `/api/admin/backend/*`, ws-token, `ChatWindow`, заказы + support threads |
+| **Admin** | BFF `/api/admin/backend/*`, `GET /api/admin/ws-token` (прямой вызов Nest + cookie), `ChatWindow`, заказы + support threads |
 | **Front** (отдельный репозиторий) | FAB + lazy-модалка, ЛК, `file:../packages/order-chat-core` при локальной разработке рядом с монорепо |
 
 ### Транспорт
 
 - **REST**: сообщения, read, upload, revoke черновых файлов, threads (ЛК).
 - **WebSocket**: namespace `/order-chat`, события `message_created` / `message_deleted`, join комнат `orderChat:{orderId}` / `supportChat:{userId}`.
-- **JWT WS**: `aud=order-chat-ws`, выдача через `GET /account/chat/ws-token` (покупатель) и Admin BFF `GET /api/admin/ws-token`.
+- **JWT WS**: `aud=order-chat-ws`, отдельный секрет `ORDER_CHAT_WS_JWT_SECRET` (≠ `JWT_SECRET`); проверка только в gateway. REST `JwtStrategy` отклоняет любой Bearer с `aud` / `typ` / `purpose` (в т.ч. pwreset). Выдача: `GET /account/chat/ws-token`, Admin BFF `GET /api/admin/ws-token`.
 
 ## Монорепо
 
@@ -40,12 +40,25 @@ cd backend && npx prisma migrate deploy
 
 См. `backend/.env.example` и `Admin/.env.example` (JWT, signing secret для chat files, origins).
 
+**Production (обязательно для старта API):** в `/opt/miraflores/backend/.env` задайте whitelist Origin для Socket.IO namespace `/order-chat` — те же HTTPS-URL, с которых открываются витрина и админка (у нас оба на `miraflores-shop.com`, включая `www`):
+
+```env
+ORDER_CHAT_SOCKET_CORS_ORIGINS=https://miraflores-shop.com,https://www.miraflores-shop.com
+```
+
+Без этой переменной при `NODE_ENV=production` процесс падает при загрузке `order-chat.gateway`. Аварийный обход: `ORDER_CHAT_SOCKET_CORS_RELAXED=1` (не для постоянной эксплуатации). После правки: `systemctl restart miraflores-api`.
+
 ### Безопасность (кратко)
 
 - RLS на `ChatConversation`, `ChatMessage`, `ChatAttachment`, `ChatReadState`.
 - Подписанные URL вложений (`/api/v1/order-chat/files/...`); nginx не отдаёт `/uploads/chat/` напрямую.
 - Admin BFF: проверка `Origin` на мутирующих запросах; multipart upload **стримится** в API (без двойной буферизации).
-- `@Throttle` на POST сообщений и upload; email staff→customer не чаще 10 мин / беседа, если клиент не online в WS.
+- `@UseGuards(ThrottlerGuard)` на контроллерах чата + `@Throttle` на POST/upload; email staff→customer не чаще 10 мин / беседа, если клиент не online в WS.
+- Orphan-upload sweep на диске **отключён** до хранения `storageKey` в БД (см. `order-chat-retention.worker`).
+- WS-клиент: один сокет на variant; JWT только на handshake (`auth` callback); TTL refresh обновляет метаданные без recreate; join с ack + догрузка `after`.
+- After-commit (WS/SMTP) — `setImmediate`, не блокирует POST.
+- Вложения: revoke только `uploadedByUserId`; удаление файла — если нет других `ChatAttachment` с тем же URL.
+- Пути: `normalizeChatStorageKey`; static `/uploads/chat` блокируется по decoded path.
 
 ### Admin
 
@@ -67,6 +80,8 @@ Socket-менеджер: один сокет на `variant` (`account` | `admin`
 ```json
 "@miraflores/order-chat-core": "file:../packages/order-chat-core"
 ```
+
+Vite не видит named exports из CJS `dist` (`dist` в `.gitignore`). Alias на исходники: `Front/vite.config.ts`, `vitest.config.ts`, `tsconfig.json` → `../packages/order-chat-core/src/index.ts`.
 
 **Важно:** для CI/CD отдельного Front-репо нужно либо:
 

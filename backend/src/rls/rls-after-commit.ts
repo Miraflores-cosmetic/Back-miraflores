@@ -27,16 +27,15 @@ export function scheduleAfterRlsCommit(fn: () => void | Promise<void>): void {
   store.afterCommit.push(fn);
 }
 
-export async function flushAfterRlsCommit(
-  jobs: Array<() => void | Promise<void>>,
-): Promise<void> {
+/** Не блокирует HTTP-ответ: side effects (WS, SMTP) после commit. */
+export function flushAfterRlsCommit(jobs: Array<() => void | Promise<void>>): void {
   for (const job of jobs) {
-    try {
-      await job();
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      log.warn(`after-commit job failed: ${msg}`);
-    }
+    setImmediate(() => {
+      void Promise.resolve(job()).catch((e) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        log.warn(`after-commit job failed: ${msg}`);
+      });
+    });
   }
 }
 

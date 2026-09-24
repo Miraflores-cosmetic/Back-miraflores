@@ -4,6 +4,7 @@ import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import type { JwtPayload } from '../common/decorators/current-user.decorator';
+import { assertStandardAccessJwtPayload } from './jwt-access-token';
 import { resolveJwtSecret } from './jwt-secret';
 
 @Injectable()
@@ -20,6 +21,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: JwtPayload) {
+    assertStandardAccessJwtPayload(payload as JwtPayload & Record<string, unknown>);
     // Guards run before RlsInterceptor — without a tx GUC, FORCE RLS hides all User rows.
     const user = await this.prisma.runInRlsTransaction(
       { userId: String(payload.sub ?? ''), bypass: true },
