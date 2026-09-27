@@ -24,7 +24,7 @@ export class ShippingQuoteRequestDto {
   @Type(() => ShippingAddressDto)
   shippingAddress!: ShippingAddressDto;
 
-  /** CDEK | YANDEX */
+  /** CDEK | YANDEX | OZON */
   @IsString()
   @MaxLength(20)
   shippingMethod!: string;

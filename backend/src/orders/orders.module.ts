@@ -18,6 +18,7 @@ import { YooKassaService } from './yookassa.service';
 import { MailModule } from '../mail/mail.module';
 import { UserGroupsModule } from '../user-groups/user-groups.module';
 import { OrderChatModule } from '../order-chat/order-chat.module';
+import { OzonModule } from '../ozon/ozon.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { OrderChatModule } from '../order-chat/order-chat.module';
     SettingsModule,
     MailModule,
     OrderChatModule,
+    OzonModule,
   ],
   controllers: [OrdersPublicController, OrdersAdminController],
   providers: [

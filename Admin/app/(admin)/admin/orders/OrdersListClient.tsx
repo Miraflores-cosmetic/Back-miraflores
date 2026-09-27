@@ -10,7 +10,11 @@ import {
   adminBackendJson,
 } from '@/lib/adminBackendFetch';
 import { formatAdminDateTime, formatAdminMoney } from '@/lib/adminFormat';
-import type { AdminOrderListResponse } from '@/lib/adminOrderTypes';
+import type {
+  AdminOrderListResponse,
+  AdminOrderOzonFlag,
+  AdminOrderOzonFlagCounts,
+} from '@/lib/adminOrderTypes';
 import { orderStatusLabel, orderStatusBadgeClass } from '@/lib/orderStatusLabels';
 import catalogStyles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
 import orderStyles from './orders.module.css';
@@ -38,15 +42,66 @@ const STATUS_FILTERS: Array<{ value: string; label: string }> = [
   // NEW — legacy, скрыт из фильтра
 ];
 
+const OZON_FLAGS: Array<{ value: AdminOrderOzonFlag; label: string; countKey: keyof AdminOrderOzonFlagCounts; title: string }> = [
+  {
+    value: 'ozon_no_track',
+    label: 'Ozon без трека',
+    countKey: 'noTrack',
+    title: 'Оплачены, но номера отправления Ozon ещё нет — оформить в кабинете Ozon',
+  },
+  {
+    value: 'ozon_no_cost',
+    label: 'Ozon без факта стоимости',
+    countKey: 'noCost',
+    title: 'Отправлены Ozon, но стоимость из кабинета не внесена — нужна для сверки тарифа',
+  },
+];
+
+function readFlagFromUrl(): AdminOrderOzonFlag | '' {
+  if (typeof window === 'undefined') return '';
+  const v = new URLSearchParams(window.location.search).get('flag');
+  return OZON_FLAGS.some((f) => f.value === v) ? (v as AdminOrderOzonFlag) : '';
+}
+
+function writeFlagToUrl(flag: AdminOrderOzonFlag | '') {
+  const url = new URL(window.location.href);
+  if (flag) url.searchParams.set('flag', flag);
+  else url.searchParams.delete('flag');
+  window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+}
+
 export function OrdersListClient() {
   const [q, setQ] = useState('');
   const [qDebounced, setQDebounced] = useState('');
   const [status, setStatus] = useState('');
+  const [flag, setFlag] = useState<AdminOrderOzonFlag | ''>('');
+  const [flagReady, setFlagReady] = useState(false);
+  const [flagCounts, setFlagCounts] = useState<AdminOrderOzonFlagCounts | null>(null);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [fetching, setFetching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<AdminOrderListResponse | null>(null);
+
+  useEffect(() => {
+    setFlag(readFlagFromUrl());
+    setFlagReady(true);
+  }, []);
+
+  const loadFlagCounts = useCallback(async () => {
+    try {
+      setFlagCounts(await adminBackendJson<AdminOrderOzonFlagCounts>('orders/admin/ozon-flags'));
+    } catch {
+      /* чипы без счётчиков — список всё равно работает */
+    }
+  }, []);
+
+  const toggleFlag = (next: AdminOrderOzonFlag) => {
+    const value = flag === next ? '' : next;
+    setFlag(value);
+    setPage(1);
+    writeFlagToUrl(value);
+  };
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -67,10 +122,12 @@ export function OrdersListClient() {
       });
       if (qDebounced.trim()) sp.set('q', qDebounced.trim());
       if (status) sp.set('status', status);
+      if (flag) sp.set('flag', flag);
       const res = await adminBackendJson<AdminOrderListResponse>(
         `orders/admin?${sp}`,
       );
       setData(res);
+      void loadFlagCounts();
     } catch (e) {
       if (!soft) {
         setError(
@@ -82,11 +139,11 @@ export function OrdersListClient() {
       setLoading(false);
       if (!soft) setFetching(false);
     }
-  }, [page, qDebounced, status]);
+  }, [page, qDebounced, status, flag, loadFlagCounts]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (flagReady) void load();
+  }, [load, flagReady]);
 
   useEffect(() => {
     const onChatRefresh = () => void load({ soft: true });
@@ -131,7 +188,13 @@ export function OrdersListClient() {
         error={error}
         onRetry={() => void load()}
         loadingLabel="Загрузка заказов…"
-        empty="Заказов пока нет"
+        empty={
+          flag === 'ozon_no_track'
+            ? 'Все оплаченные заказы Ozon с треком'
+            : flag === 'ozon_no_cost'
+              ? 'Стоимость внесена по всем отправлениям Ozon'
+              : 'Заказов пока нет'
+        }
         isEmpty={!loading && items.length === 0}
         isFetching={fetching}
         toolbar={
@@ -162,6 +225,30 @@ export function OrdersListClient() {
                 ))}
               </select>
             </label>
+            <div className={styles.ozonFlagChips} role="group" aria-label="Операционные фильтры Ozon">
+              {OZON_FLAGS.map((f) => {
+                const count = flagCounts?.[f.countKey];
+                const active = flag === f.value;
+                return (
+                  <button
+                    key={f.value}
+                    type="button"
+                    className={`${styles.ozonFlagChip} ${active ? styles.ozonFlagChipActive : ''}`}
+                    aria-pressed={active}
+                    title={f.title}
+                    disabled={fetching}
+                    onClick={() => toggleFlag(f.value)}
+                  >
+                    {f.label}
+                    {count != null ? (
+                      <span className={`${styles.ozonFlagCount} ${count === 0 ? styles.ozonFlagCountZero : ''}`}>
+                        {count}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         }
         pagination={
@@ -208,6 +295,18 @@ export function OrdersListClient() {
                       {' '}
                       · возврат {formatAdminMoney(o.refundedAmount ?? 0)}
                     </span>
+                  ) : null}
+                  {o.ozon?.noTrack || o.ozon?.noCost ? (
+                    <div>
+                      {o.ozon.noTrack ? (
+                        <span className={`${styles.badgeOzonFlag} ${styles.badgeOzonFlagWarn}`}>
+                          Ozon: нет трека
+                        </span>
+                      ) : null}
+                      {o.ozon.noCost ? (
+                        <span className={styles.badgeOzonFlag}>Ozon: внести стоимость</span>
+                      ) : null}
+                    </div>
                   ) : null}
                 </td>
                 <td>

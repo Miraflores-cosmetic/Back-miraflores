@@ -13,7 +13,18 @@ export type AdminOrderListItem = {
   chatUnreadCount?: number;
   /** Всего сообщений в чате заказа (без удалённых). */
   chatMessageCount?: number;
+  /** null — не Ozon; иначе операционные флаги для бейджей. */
+  ozon?: { noTrack: boolean; noCost: boolean } | null;
 };
+
+export type AdminOrderOzonFlag = 'ozon_no_track' | 'ozon_no_cost';
+
+export type AdminChecklistMark = {
+  doneAt: string;
+  doneBy: { id: string; name: string } | null;
+};
+
+export type AdminOrderOzonFlagCounts = { noTrack: number; noCost: number };
 
 export type AdminOrderListResponse = {
   items: AdminOrderListItem[];
@@ -159,7 +170,15 @@ export type AdminOrderDetail = {
     status: string | null;
     externalId: string | null;
     createdAt: string;
+    /** Факт из кабинета перевозчика (Ozon) и оценка по своей сетке — для сверки тарифа */
+    carrierCostRub?: number | null;
+    carrierCostAt?: string | null;
+    estimatedCostRub?: number | null;
+    billableGrams?: number | null;
+    tariffVersion?: string | null;
   }>;
+  /** Ручные отметки чеклистов склада: { ozon: { packed: { doneAt, doneBy } } } */
+  checklist?: Record<string, Record<string, AdminChecklistMark>>;
   events: AdminOrderEvent[];
   /** Деньги списаны после cancel/TTL, автовозврат не удался */
   latePaymentFailed?: boolean;

@@ -63,7 +63,7 @@ export function parseShipmentProvider(
   raw?: string | null,
 ): ShipmentProvider {
   const v = (raw ?? '').trim().toUpperCase();
-  if (v === 'CDEK' || v === 'YANDEX' || v === 'PICKUP') {
+  if (v === 'CDEK' || v === 'YANDEX' || v === 'OZON' || v === 'PICKUP') {
     return v as ShipmentProvider;
   }
   return ShipmentProvider.PICKUP;

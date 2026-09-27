@@ -15,6 +15,7 @@ import { formatAddressLine } from '@/lib/shipping/buyerAddressHelpers';
 import {
   displayJcosAddressComment,
   getJcosDeliveryDisplayMode,
+  jcosCarrierDisplayName,
   parseJcosAddressMeta,
 } from '@/lib/shipping/addressShippingMeta';
 import type { BuyerOrderDetail } from './accountTypes';
@@ -49,7 +50,7 @@ function deliveryMethodLabel(comment: string | undefined | null): string | null 
   const { meta } = parseJcosAddressMeta(comment ?? '');
   if (!meta) return null;
   const { mode } = getJcosDeliveryDisplayMode(comment);
-  const carrier = meta.carrier === 'yandex' ? 'Яндекс Доставка' : 'СДЭК';
+  const carrier = jcosCarrierDisplayName(meta.carrier);
   return `${carrier} · ${mode === 'pvz' ? 'ПВЗ' : 'Курьер'}`;
 }
 

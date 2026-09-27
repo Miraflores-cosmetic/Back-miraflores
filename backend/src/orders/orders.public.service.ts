@@ -4,8 +4,10 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { OZON_UNAVAILABLE_MESSAGE, OzonAuthService } from '../ozon/ozon-auth.service';
 import { OrderStatus, PaymentStatus, Prisma, ShipmentProvider } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { scheduleAfterRlsCommitWithBypass } from '../rls/rls-after-commit';
@@ -99,6 +101,7 @@ export class OrdersPublicService {
     private readonly shippingServerEstimate: ShippingServerEstimateService,
     private readonly lifecycle: OrderLifecycleService,
     private readonly orderChat: OrderChatService,
+    @Optional() private readonly ozonAuth?: OzonAuthService,
   ) {}
 
   /**
@@ -276,6 +279,14 @@ export class OrdersPublicService {
       recipientName: dto.shippingAddress.recipientName?.trim() || '',
     };
 
+    if (
+      requireCheckoutShipmentProvider(dto.shippingMethod) === 'OZON' &&
+      this.ozonAuth &&
+      !(await this.ozonAuth.isConnected())
+    ) {
+      throw new BadRequestException(OZON_UNAVAILABLE_MESSAGE);
+    }
+
     const { cost, method, freePvz } = buildQuoteCost({
       shippingMethod: dto.shippingMethod,
       shippingComment: shippingAddress.comment,
@@ -289,9 +300,10 @@ export class OrdersPublicService {
         lines: items.map((l) => ({ variantId: l.variantId, qty: l.qty })),
       }),
       requireServerReprice:
-        this.shippingServerEstimate.requireServerReprice() &&
-        dto.shippingMethod.trim().toUpperCase() === 'CDEK' &&
-        this.shippingServerEstimate.isCdekConfigured(),
+        dto.shippingMethod.trim().toUpperCase() === 'OZON' ||
+        (this.shippingServerEstimate.requireServerReprice() &&
+          dto.shippingMethod.trim().toUpperCase() === 'CDEK' &&
+          this.shippingServerEstimate.isCdekConfigured()),
     });
 
     const linesForHash = items.map((l) => ({

@@ -16,6 +16,7 @@ import type {
   JcosShippingDropoff,
 } from '@/lib/shipping/addressShippingMeta';
 import { yandexPointIdForCargoOffers } from '@/lib/shipping/yandexPickupPointId';
+import { YANDEX_DELIVERY_ENABLED } from '@/lib/shipping/deliveryCarriers';
 import type { YandexPickupPoint } from '@/lib/shipping/types';
 import { CdekPvzPicker, type CdekPvzChoice } from './CdekPvzPicker';
 import { YandexPvzPicker } from './YandexPvzPicker';
@@ -75,6 +76,11 @@ type Props = {
    * Админка: false — родитель держит open и показывает шаг «стоимость».
    */
   closeAfterConfirm?: boolean;
+  /**
+   * Админка (правка заказа): оставить вкладку перевозчика из seed, даже если служба скрыта
+   * (старые заказы Яндекс Доставки). На витрине скрытый перевозчик заменяется на СДЭК.
+   */
+  keepSeedCarrier?: boolean;
 };
 
 function CloseIcon() {
@@ -106,7 +112,10 @@ export function ShippingCarrierModal({
   onClose,
   onConfirm,
   closeAfterConfirm = true,
+  keepSeedCarrier = false,
 }: Props) {
+  const yandexAllowed =
+    YANDEX_DELIVERY_ENABLED || (keepSeedCarrier && seed?.carrier === 'yandex');
   const titleId = useId();
   const panelRef = useRef<HTMLElement>(null);
   const buyerAuth = useBuyerAuthOptional();
@@ -138,7 +147,8 @@ export function ShippingCarrierModal({
     if (!open) return;
     const s = seedRef.current;
     const profile = profileRef.current;
-    setCarrier(s?.carrier ?? 'cdek');
+    const hiddenSeedCarrier = s?.carrier === 'yandex' && !yandexAllowed;
+    setCarrier(hiddenSeedCarrier ? 'cdek' : (s?.carrier ?? 'cdek'));
     setDropoff(s?.dropoff ?? 'pvz');
     setRecipientName(
       s?.recipientName?.trim() || profile?.recipientName?.trim() || '',
@@ -153,7 +163,7 @@ export function ShippingCarrierModal({
     setComment(s?.comment?.trim() || '');
     setLat(s?.lat);
     setLon(s?.lon);
-    setPvzId(s?.pvzId);
+    setPvzId(hiddenSeedCarrier ? undefined : s?.pvzId);
     setErrors({});
     setFormError(null);
     setSubmitting(false);
@@ -170,7 +180,7 @@ export function ShippingCarrierModal({
     if (needPhone && buyerUser.phone?.trim()) {
       setPhone((prev) => prev || buyerUser.phone!.trim());
     }
-  }, [open, buyerUser]);
+  }, [open, buyerUser, yandexAllowed]);
 
   useEffect(() => {
     if (!open) return;
@@ -340,7 +350,7 @@ export function ShippingCarrierModal({
   const selectedSummary =
     city.trim() && address.trim()
       ? [
-          carrier === 'yandex' ? 'Яндекс' : 'СДЭК',
+          carrier === 'yandex' ? 'Яндекс' : carrier === 'ozon' ? 'Ozon' : 'СДЭК',
           dropoff === 'pvz' ? 'ПВЗ' : 'Курьер',
           city.trim(),
           address.trim(),
@@ -428,20 +438,42 @@ export function ShippingCarrierModal({
                 >
                   СДЭК
                 </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={carrier === 'yandex'}
-                  className={[
-                    styles.tab,
-                    carrier === 'yandex' ? styles.tabActive : '',
-                  ]
-                    .filter(Boolean)
-                    .join(' ')}
-                  onClick={() => switchCarrier('yandex')}
-                >
-                  Яндекс
-                </button>
+                {yandexAllowed ? (
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={carrier === 'yandex'}
+                    className={[
+                      styles.tab,
+                      carrier === 'yandex' ? styles.tabActive : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                    onClick={() => switchCarrier('yandex')}
+                  >
+                    Яндекс
+                  </button>
+                ) : null}
+                {seed?.carrier === 'ozon' ? (
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={carrier === 'ozon'}
+                    className={[
+                      styles.tab,
+                      carrier === 'ozon' ? styles.tabActive : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                    onClick={() => {
+                      setCarrier('ozon');
+                      setDropoff(seed.dropoff ?? 'pvz');
+                      setPvzId(seed.pvzId);
+                    }}
+                  >
+                    Ozon
+                  </button>
+                ) : null}
               </div>
 
               <div
@@ -493,6 +525,13 @@ export function ShippingCarrierModal({
                     defaultCity={city || 'Москва'}
                     selectedPointId={pvzId ?? null}
                   />
+                ) : null}
+                {carrier === 'ozon' && dropoff === 'pvz' ? (
+                  <p className={styles.blockHint}>
+                    {pvzId
+                      ? `Пункт Ozon № ${pvzId} — выбран покупателем на сайте. Новый пункт Ozon выбирается на витрине; здесь можно поправить контакты или сменить службу.`
+                      : 'Пункт Ozon выбирается покупателем на сайте. Смените службу, чтобы выбрать пункт здесь.'}
+                  </p>
                 ) : null}
                 {dropoff === 'courier' ? (
                   <AddressMap

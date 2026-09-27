@@ -10,6 +10,7 @@ import {
   ShippingCarrierModal,
   type ShippingSelection,
 } from '@/components/shipping/ShippingCarrierModal';
+import { YANDEX_DELIVERY_ENABLED } from '@/lib/shipping/deliveryCarriers';
 import { useToast } from '@/components/Toast/ToastProvider';
 import { useBuyerAuth } from '@/lib/BuyerAuthProvider';
 import { formatPhoneE164, isValidPhone } from '@/lib/phone';
@@ -370,7 +371,9 @@ export function AccountUserClient() {
 
           {addresses.length === 0 ? (
             <p className={styles.empty}>
-              Пока нет сохранённых способов доставки — СДЭК или Яндекс
+              {YANDEX_DELIVERY_ENABLED
+                ? 'Пока нет сохранённых способов доставки — СДЭК или Яндекс'
+                : 'Пока нет сохранённых способов доставки'}
             </p>
           ) : (
             <ul className={styles.addrList}>

@@ -16,6 +16,7 @@ export type OrderEventType =
   | 'NOTE'
   | 'OPS_ALERT'
   | 'CARRIER_REGISTERED'
+  | 'CARRIER_COST'
   | 'ADDRESS_UPDATED'
   | 'ITEMS_UPDATED'
   | 'SURCHARGE_PAID';

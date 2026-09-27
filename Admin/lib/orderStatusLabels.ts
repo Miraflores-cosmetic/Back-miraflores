@@ -31,6 +31,7 @@ const ORDER_EVENT_TYPE_LABELS: Record<string, string> = {
   NOTE: 'Заметка',
   OPS_ALERT: 'Ops-алерт',
   CARRIER_REGISTERED: 'Отправление у перевозчика',
+  CARRIER_COST: 'Стоимость доставки (факт)',
   ADDRESS_UPDATED: 'Адрес изменён',
   ITEMS_UPDATED: 'Состав изменён',
   SURCHARGE_PAID: 'Доплата получена',

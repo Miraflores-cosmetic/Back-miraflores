@@ -638,6 +638,80 @@
   gap: 8px;
 }
 
+.ozonFlagChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ozonFlagChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--account-hairline-color, #e2e6e8);
+  background: #fff;
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ozonFlagChip:hover:not(:disabled) {
+  border-color: #005bff;
+}
+
+.ozonFlagChip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ozonFlagChipActive {
+  border-color: #005bff;
+  background: #005bff;
+  color: #fff;
+}
+
+.ozonFlagCount {
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #fdecec;
+  color: #a4262c;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.ozonFlagCountZero {
+  background: var(--color-bright-snow, #f5f7f8);
+  color: #5b6166;
+}
+
+.ozonFlagChipActive .ozonFlagCount {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
+.badgeOzonFlag {
+  display: inline-flex;
+  align-items: center;
+  margin: 4px 6px 0 0;
+  padding: 1px 8px;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  white-space: nowrap;
+  background: #eaf1ff;
+  color: #0b3a99;
+}
+
+.badgeOzonFlagWarn {
+  background: #fff4e0;
+  color: #8a5a00;
+}
+
 .badgeCert {
   display: inline-flex;
   align-items: center;
@@ -1028,6 +1102,225 @@
   color: inherit;
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+
+/* Ozon: чеклист ручной отправки */
+.ozonChecklist {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.ozonSectionHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin-bottom: 10px;
+}
+
+.ozonHeadActions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 0.875rem;
+}
+
+.ozonBlockers {
+  margin: 0 0 12px;
+  padding: 10px 14px 10px 30px;
+  border-radius: 8px;
+  background: #fff4f5;
+  border: 1px solid rgba(179, 18, 43, 0.25);
+  color: #a3122b;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.ozonFields {
+  margin: 0 0 8px;
+  border: 1px solid var(--account-hairline-color, #e2e6e8);
+  border-radius: 8px;
+}
+
+.ozonFieldRow {
+  display: grid;
+  grid-template-columns: minmax(140px, 38%) 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  font-size: 0.875rem;
+}
+
+.ozonFieldRow + .ozonFieldRow {
+  border-top: 1px solid var(--account-hairline-color, #e2e6e8);
+}
+
+.ozonFieldRow dt {
+  color: var(--color-gray, #666);
+}
+
+.ozonFieldRow dd {
+  margin: 0;
+  font-weight: 500;
+  word-break: break-word;
+}
+
+.ozonCopyBtn {
+  composes: orderCopyBtn;
+  margin: 0;
+  min-width: 84px;
+}
+
+.ozonCopyBtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.ozonProgress {
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-gray, #666);
+}
+
+.ozonSteps {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ozonStepLabel {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.ozonStepLabel:hover {
+  background: #f6f6f4;
+}
+
+.ozonStepLabel input {
+  margin-top: 3px;
+  flex-shrink: 0;
+  accent-color: #1f7a4d;
+}
+
+.ozonStepLabel input:disabled {
+  cursor: default;
+}
+
+.ozonStepTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.ozonStepHint {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--color-gray, #777);
+}
+
+.ozonStepMark {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.72rem;
+  color: #4a6b58;
+}
+
+.ozonStepDone .ozonStepTitle {
+  color: #1f7a4d;
+}
+
+.ozonAutoTag {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #eef3f0;
+  color: #4a6b58;
+  font-size: 0.68rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.ozonManualPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 91, 255, 0.22);
+  background: #f3f7ff;
+}
+
+.ozonManualTitle {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #0b3a99;
+}
+
+.ozonManualSteps {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.ozonManualStepDone {
+  color: #1f7a4d;
+}
+
+.ozonManualStepDone::marker {
+  content: '✓  ';
+}
+
+.ozonPoint {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ozonPointBadge {
+  align-self: flex-start;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #005bff;
+  color: #fff;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.ozonCostRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-top: 4px;
+  font-size: 0.8125rem;
+}
+
+.ozonCostInput {
+  width: 96px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--account-hairline-color, #e2e6e8);
+  font: inherit;
 }
 
 .orderInlineLink:hover {

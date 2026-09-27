@@ -6,19 +6,47 @@ import {
   hashShippingAddress,
 } from './shipping-quote.service';
 
-export type CheckoutCarrier = 'CDEK' | 'YANDEX';
+export type CheckoutCarrier = 'CDEK' | 'YANDEX' | 'OZON';
 
 const MAX_SHIPPING_COST = 500_000;
 
-/** Только СДЭК / Яндекс для публичного checkout (PICKUP не принимаем с клиента). */
+/** Яндекс Доставка в checkout скрыта; включить — YANDEX_DELIVERY_ENABLED=true. */
+export function isYandexDeliveryEnabled(): boolean {
+  return process.env.YANDEX_DELIVERY_ENABLED?.trim().toLowerCase() === 'true';
+}
+
+/** Только СДЭК / Ozon (и Яндекс, если включён) для публичного checkout (PICKUP не принимаем с клиента). */
 export function requireCheckoutShipmentProvider(
   raw?: string | null,
 ): CheckoutCarrier {
   const v = (raw ?? '').trim().toUpperCase();
-  if (v === 'CDEK' || v === 'YANDEX') return v;
+  if (v === 'YANDEX' && !isYandexDeliveryEnabled()) {
+    throw new BadRequestException(
+      'Яндекс Доставка сейчас недоступна. Выберите другую службу доставки.',
+    );
+  }
+  if (v === 'CDEK' || v === 'YANDEX' || v === 'OZON') return v;
   throw new BadRequestException(
-    'Укажите службу доставки (СДЭК или Яндекс Доставка)',
+    isYandexDeliveryEnabled()
+      ? 'Укажите службу доставки (СДЭК, Яндекс Доставка или Ozon)'
+      : 'Укажите службу доставки (СДЭК или Ozon)',
   );
+}
+
+function vspMetaValue(s: string, key: string): string {
+  const m = s.match(new RegExp(`(?:^|\\|)${key}=([^|&]*)`, 'i'));
+  let v = m?.[1] || '';
+  if (v.endsWith('__')) v = v.slice(0, -2);
+  try {
+    v = decodeURIComponent(v);
+  } catch {
+    /* noop */
+  }
+  return v.trim();
+}
+
+function isOzonCourierComment(s: string): boolean {
+  return /(?:^|\|)dropoff=courier(?:\||$|__)/i.test(s);
 }
 
 /**
@@ -87,6 +115,11 @@ export function isPvzShippingComment(comment?: string | null): boolean {
     return Boolean(v.trim());
   }
 
+  if (/__VSP:carrier=ozon/i.test(s)) {
+    if (isOzonCourierComment(s)) return false;
+    return Boolean(vspMetaValue(s, 'pvz'));
+  }
+
   return false;
 }
 
@@ -104,6 +137,21 @@ export function assertShippingCommentMatchesCarrier(
     /__VSP:carrier=cdek/i.test(s) ||
     /__JCOS:carrier=cdek/i.test(s) ||
     /СДЭК/i.test(s);
+  const metaCarrier = s.match(/__(?:VSP|JCOS):carrier=(\w+)/i)?.[1]?.toLowerCase();
+
+  if (method === 'OZON') {
+    if (metaCarrier !== 'ozon') {
+      throw new BadRequestException(
+        'Адрес доставки не соответствует Ozon. Выберите пункт выдачи или курьера Ozon.',
+      );
+    }
+    return;
+  }
+  if (metaCarrier === 'ozon') {
+    throw new BadRequestException(
+      'Адрес доставки оформлен для Ozon. Выберите службу Ozon или другой адрес.',
+    );
+  }
 
   if (method === 'YANDEX' && !hasYandex) {
     throw new BadRequestException(
@@ -153,6 +201,20 @@ export function assertCdekPvzCodePresent(opts: {
   throw new BadRequestException(
     'Выберите пункт выдачи СДЭК — код ПВЗ обязателен для заказа',
   );
+}
+
+/** Ozon: ПВЗ без кода пункта не принимаем (курьер — без кода). */
+export function assertOzonPvzCodePresent(opts: {
+  shippingMethod?: string | null;
+  comment?: string | null;
+  pvzCode?: string | null;
+}): void {
+  const method = (opts.shippingMethod ?? '').trim().toUpperCase();
+  if (method !== 'OZON') return;
+  const s = (opts.comment ?? '').trim();
+  if (isOzonCourierComment(s)) return;
+  if ((opts.pvzCode ?? '').trim() || vspMetaValue(s, 'pvz')) return;
+  throw new BadRequestException('Выберите пункт выдачи Ozon — код пункта обязателен для заказа');
 }
 
 /** Достаёт код ПВЗ из comment (__VSP__/__JCOS__) или явного поля. */
@@ -229,6 +291,11 @@ export function resolveShippingFromQuote(opts: {
     comment: opts.shippingAddress.comment,
     pvzCode: opts.shippingAddress.pvzCode,
   });
+  assertOzonPvzCodePresent({
+    shippingMethod: method,
+    comment: opts.shippingAddress.comment,
+    pvzCode: opts.shippingAddress.pvzCode,
+  });
 
   const addrHash = hashShippingAddress(opts.shippingAddress, method);
   if (addrHash !== opts.quote.addrHash) {
@@ -288,6 +355,11 @@ export function buildQuoteCost(opts: {
   const method = requireCheckoutShipmentProvider(opts.shippingMethod);
   assertShippingCommentMatchesCarrier(opts.shippingComment, method);
   assertCdekPvzCodePresent({
+    shippingMethod: method,
+    comment: opts.shippingComment,
+    pvzCode: opts.pvzCode,
+  });
+  assertOzonPvzCodePresent({
     shippingMethod: method,
     comment: opts.shippingComment,
     pvzCode: opts.pvzCode,

@@ -13,6 +13,8 @@ import { Public } from '../common/decorators/public.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { ShippingQuoteRequestDto } from './dto/shipping-quote.dto';
+import { OzonEstimateRequestDto } from '../ozon/dto/ozon.dto';
+import { ShippingServerEstimateService } from './shipping-server-estimate.service';
 import { OrderPayAccessDto } from './dto/order-access.dto';
 import { OrdersPublicService } from './orders.public.service';
 import {
@@ -27,6 +29,7 @@ export class OrdersPublicController {
   constructor(
     private readonly orders: OrdersPublicService,
     private readonly config: ConfigService,
+    private readonly shippingEstimate: ShippingServerEstimateService,
   ) {}
 
   @Post()
@@ -48,6 +51,17 @@ export class OrdersPublicController {
     const userId =
       user?.role === 'USER' && user.sub ? user.sub : null;
     return this.orders.createShippingQuote(dto, userId);
+  }
+
+  /** Тариф Ozon (своя сетка) — та же функция, что в shipping-quote. */
+  @Post('shipping-estimate/ozon')
+  async ozonShippingEstimate(@Body() dto: OzonEstimateRequestDto) {
+    const result = await this.shippingEstimate.estimateOzon(
+      dto.lines.map((l) => ({ variantId: l.variantId, qty: l.qty })),
+      dto.dropoff,
+    );
+    if (!result) return { cost: null, daysMin: null, daysMax: null };
+    return { cost: result.cost, daysMin: result.daysMin, daysMax: result.daysMax };
   }
 
   /** Статика до :orderId — иначе «yookassa» / «payments» попадут в param. */

@@ -144,6 +144,7 @@ export const ADMIN_NAV: NavItem[] = [
         section: 'users',
       },
       { href: '/admin/cart', label: 'Корзина', section: 'settings' },
+      { href: '/admin/settings/delivery', label: 'Службы доставки', section: 'staff' },
       { href: '/admin/settings/gratitude', label: 'Программа благодарности', section: 'settings' },
       { href: '/admin/settings/staff', label: 'Сотрудники', section: 'staff' },
     ],

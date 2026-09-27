@@ -69,7 +69,7 @@ export function OrderAddressEditModal({
     }
     if (!base.carrier) {
       const m = (shippingMethod || 'CDEK').toUpperCase();
-      base.carrier = m === 'YANDEX' ? 'yandex' : 'cdek';
+      base.carrier = m === 'YANDEX' ? 'yandex' : m === 'OZON' ? 'ozon' : 'cdek';
     }
     if (initial.region?.trim()) base.region = initial.region.trim();
     if (initial.district?.trim()) base.district = initial.district.trim();
@@ -162,7 +162,12 @@ export function OrderAddressEditModal({
         comment,
       },
       shippingCost: shippingCostNum,
-      shippingMethod: pending.carrier === 'yandex' ? 'YANDEX' : 'CDEK',
+      shippingMethod:
+        pending.carrier === 'yandex'
+          ? 'YANDEX'
+          : pending.carrier === 'ozon'
+            ? 'OZON'
+            : 'CDEK',
       notifyCustomer,
     });
     setConfirmOpen(false);
@@ -187,6 +192,7 @@ export function OrderAddressEditModal({
           phone: customerPhone ?? undefined,
         }}
         closeAfterConfirm={false}
+        keepSeedCarrier
         onClose={onClose}
         onConfirm={(selection) => void handleCarrierConfirm(selection)}
       />
@@ -208,7 +214,11 @@ export function OrderAddressEditModal({
         {pending ? (
           <div className={styles.orderAddressConfirm}>
             <p className={styles.muted} style={{ marginTop: 0 }}>
-              {pending.carrier === 'yandex' ? 'Яндекс' : 'СДЭК'}
+              {pending.carrier === 'yandex'
+                ? 'Яндекс'
+                : pending.carrier === 'ozon'
+                  ? 'Ozon'
+                  : 'СДЭК'}
               {' · '}
               {pending.dropoff === 'pvz' ? 'ПВЗ' : 'Курьер'}
             </p>

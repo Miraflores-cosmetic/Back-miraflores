@@ -205,3 +205,25 @@ export class OrderNoteDto {
   @MaxLength(2000)
   message!: string;
 }
+
+export class OrderChecklistMarkDto {
+  @IsString()
+  @MaxLength(32)
+  checklist!: string;
+
+  @IsString()
+  @MaxLength(32)
+  stepId!: string;
+
+  @IsBoolean()
+  done!: boolean;
+}
+
+/** Фактическая стоимость отправления у перевозчика (Ozon — из кабинета). */
+export class OrderShipmentCostDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(1_000_000)
+  carrierCostRub!: number;
+}

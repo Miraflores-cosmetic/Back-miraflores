@@ -191,6 +191,10 @@ export function resolveAdminSectionFromPathname(pathname: string): AdminPathAcce
   if (p === '/admin/settings/staff' || p.startsWith('/admin/settings/staff/')) {
     return 'staff';
   }
+  /** OAuth-интеграции перевозчиков — только суперадмин (Nest SuperAdminGuard). */
+  if (p === '/admin/settings/delivery' || p.startsWith('/admin/settings/delivery/')) {
+    return 'staff';
+  }
 
   if (p.startsWith('/admin/faq')) return 'settings';
   if (p.startsWith('/admin/quiz')) return 'settings';

@@ -217,7 +217,7 @@ export class CreateOrderDto {
   @MaxLength(2000)
   shippingQuote?: string;
 
-  /** Перевозчик: CDEK | YANDEX (обязан совпасть с quote). Не нужен для gift-denom-only. */
+  /** Перевозчик: CDEK | YANDEX | OZON (обязан совпасть с quote). Не нужен для gift-denom-only. */
   @IsOptional()
   @IsString()
   @MaxLength(20)

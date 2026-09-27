@@ -112,7 +112,7 @@ git push origin main
 
 | Файл | Назначение |
 |------|------------|
-| `/opt/miraflores/backend/.env` | DB, JWT, SMTP, ЮKassa, CDEK, uploads, `FRONTEND_PUBLIC_URL`, `ONEC_LOGIN` / `ONEC_PASSWORD` |
+| `/opt/miraflores/backend/.env` | DB, JWT, SMTP, ЮKassa, CDEK, uploads, `FRONTEND_PUBLIC_URL`, `ONEC_LOGIN` / `ONEC_PASSWORD`, Ozon (`OZON_*`, `ADMIN_PUBLIC_URL`, `OPS_ALERT_EMAIL`) |
 | `/opt/miraflores/Admin/.env.local` | `NEXT_PUBLIC_*`, Yandex Delivery, CDEK, webhook secret |
 | `/opt/miraflores/Front/.env` | пишет скрипт деплоя (`VITE_API_URL=/api/v1`, Yandex Map) |
 | `/opt/miraflores/deploy/.env` | пароль Postgres для docker-compose |
@@ -127,6 +127,50 @@ journalctl -u miraflores-api --since "3 hours ago" --no-pager \
 ```
 
 Успех: `Staff admin welcome email sent to …`
+
+---
+
+## Ozon Доставка: выкатка на прод
+
+Подробно об интеграции — [docs/ozon-delivery.md](docs/ozon-delivery.md). Пока Ozon не подключён, витрина его просто не показывает, поэтому код можно выкатывать раньше, чем появятся ключи.
+
+**1. Env на VPS** — `/opt/miraflores/backend/.env` (скрипты деплоя его не трогают):
+
+```bash
+OZON_CLIENT_ID=…                      # dev.ozon.ru → приложение «Ozon Доставка»
+OZON_CLIENT_SECRET=…                  # он же ключ шифрования refresh token: сменили — переподключить
+OZON_OAUTH_REDIRECT_URI=https://miraflores-shop.com/api/v1/delivery/ozon/oauth/callback
+ADMIN_PUBLIC_URL=https://miraflores-shop.com   # без /admin — вернёт на /admin/settings/delivery
+OPS_ALERT_EMAIL=…                     # алерты мониторинга Ozon (иначе SUPPORT_EMAIL, иначе только лог)
+OZON_HEALTH_INTERVAL_MIN=30           # 0 — выключить фоновые проверки
+```
+
+Необязательно: `/opt/miraflores/Admin/.env.local` → `NEXT_PUBLIC_OZON_CABINET_URL` (по умолчанию `https://seller.ozon.ru/`; `NEXT_PUBLIC_*` вшивается при сборке admin). Флаги `*YANDEX_DELIVERY_ENABLED` не задавать — Яндекс скрыт.
+
+**2. dev.ozon.ru** → приложение → Redirect URI **ровно** как `OZON_OAUTH_REDIRECT_URI`. nginx менять не нужно: callback идёт через `location /api/v1/`.
+
+**3. Деплой**:
+
+```bash
+./deploy/scripts/deploy-backend.sh     # api + admin; prisma migrate deploy — автоматически
+./deploy/scripts/deploy-front.sh
+```
+
+Миграции: `20260925100000_ozon_delivery` (OzonIntegration, enum OZON) и `20260927120000_ozon_monitoring_reconciliation` (поля Shipment для сверки, мониторинг, OzonHealthCheck). Обе только добавляют таблицы и колонки, откат кода их не требует. Проверить на VPS: `npx prisma migrate status --schema backend/prisma/schema.prisma`.
+
+**4. Подключение и проверка**:
+
+1. Админка → Настройки → **Службы доставки**: Redirect URI в карточке совпадает с dev.ozon.ru → «Подключить Ozon» → вход в кабинет продавца.
+2. «Проверить API» → «в справочнике N пунктов».
+3. Карточка «Мониторинг Ozon»: интервал 30 мин, «Email-алерты: Настроены».
+4. Витрина:
+
+```bash
+curl -s https://miraflores-shop.com/api/v1/delivery/ozon/availability   # {"available":true,…}
+journalctl -u miraflores-api --since "1 hour ago" --no-pager | grep -E "Ozon|OPS_ALERT ozon_health"
+```
+
+Если что-то не так: «Отключить» в карточке Ozon — витрина сразу вернётся к СДЭК.
 
 ---
 

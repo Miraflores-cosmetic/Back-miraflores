@@ -27,6 +27,7 @@ import {
   ShippingCarrierModal,
   type ShippingSelection,
 } from '@/components/shipping/ShippingCarrierModal';
+import { YANDEX_DELIVERY_ENABLED } from '@/lib/shipping/deliveryCarriers';
 import {
   buildJcosAddress2WithMeta,
   formatJcosDeliveryAddressSummary,
@@ -643,7 +644,15 @@ export function CheckoutClient() {
     }
 
     if (!shippingMeta?.carrier) {
-      setError('Выберите службу доставки (СДЭК или Яндекс)');
+      setError(
+        YANDEX_DELIVERY_ENABLED
+          ? 'Выберите службу доставки (СДЭК или Яндекс)'
+          : 'Выберите службу доставки',
+      );
+      return;
+    }
+    if (shippingMeta.carrier === 'yandex' && !YANDEX_DELIVERY_ENABLED) {
+      setError('Яндекс Доставка сейчас недоступна — выберите другой способ доставки');
       return;
     }
 

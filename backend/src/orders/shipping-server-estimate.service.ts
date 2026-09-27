@@ -3,6 +3,12 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import type { CheckoutCarrier } from './order-shipping.resolve';
 import { isPvzShippingComment } from './order-shipping.resolve';
+import {
+  estimateOzonDelivery,
+  type OzonDropoff,
+  type OzonTariffResult,
+} from '../ozon/ozon-tariff';
+import { loadOzonTariffLines } from '../ozon/ozon-variant-dims';
 
 type EstimateLine = { variantId: string; qty: number };
 
@@ -149,7 +155,7 @@ export class ShippingServerEstimateService {
   }
 
   /**
-   * Серверный пересчёт доставки (СДЭК). Яндекс — пока null (BFF-only).
+   * Серверный пересчёт доставки: СДЭК (API), Ozon (своя сетка). Яндекс — null (BFF-only).
    * Возвращает null, если перевозчик не поддержан или нет credentials.
    */
   async estimate(opts: {
@@ -161,7 +167,22 @@ export class ShippingServerEstimateService {
       if (!this.isCdekConfigured()) return null;
       return this.estimateCdek(opts.shippingAddress, opts.lines);
     }
+    if (opts.method === 'OZON') {
+      const comment = opts.shippingAddress.comment ?? '';
+      const dropoff: OzonDropoff =
+        parseVspMeta(comment).dropoff === 'courier' ? 'courier' : 'pvz';
+      return (await this.estimateOzon(opts.lines, dropoff))?.cost ?? null;
+    }
     return null;
+  }
+
+  /** Тариф Ozon по весу/габаритам вариантов из каталога. */
+  async estimateOzon(
+    lines: EstimateLine[],
+    dropoff: OzonDropoff,
+  ): Promise<OzonTariffResult | null> {
+    if (!lines.length) return null;
+    return estimateOzonDelivery(await loadOzonTariffLines(this.prisma, lines), dropoff);
   }
 
   private async getCdekToken(): Promise<string> {

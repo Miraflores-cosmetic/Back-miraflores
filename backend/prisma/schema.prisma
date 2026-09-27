@@ -266,6 +266,7 @@ enum PaymentStatus {
 enum ShipmentProvider {
   CDEK
   YANDEX
+  OZON
   PICKUP
 }
 
@@ -763,6 +764,7 @@ model Order {
   items           OrderItem[]
   payments        Payment[]
   shipments       Shipment[]
+  checklistMarks  OrderChecklistMark[]
   events          OrderEvent[]
   promoRedemption PromoCodeRedemption?
   /// Сумма уже возвращённых средств (₽)
@@ -892,8 +894,29 @@ model Shipment {
   tracking   String?
   status     String?
   raw        Json?
+  /// Фактическая стоимость у перевозчика (Ozon: из кабинета), ₽ — для сверки тарифной сетки
+  carrierCostRub   Int?
+  carrierCostAt    DateTime?
+  /// Оценка по своей сетке в момент ввода факта
+  estimatedCostRub Int?
+  billableGrams    Int?
+  tariffVersion    String?
   createdAt  DateTime         @default(now())
   updatedAt  DateTime         @updatedAt
+}
+
+/// Ручные отметки чеклиста склада (общие для всех смен); снятие отметки удаляет строку.
+model OrderChecklistMark {
+  id           String   @id @default(cuid())
+  orderId      String
+  order        Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  /// ozon — отправка Ozon Доставкой
+  checklist    String
+  stepId       String
+  doneByUserId String?
+  doneAt       DateTime @default(now())
+
+  @@unique([orderId, checklist, stepId])
 }
 
 /// Журнал действий по заказу (админ / система / оплата)
@@ -1345,6 +1368,44 @@ model GiftCertificateLedger {
 
   @@index([certificateId, createdAt])
   @@index([orderId])
+}
+
+/// OAuth частного приложения «Ozon Доставка» (singleton id=default).
+/// RLS: только bypass (staff / системные операции).
+model OzonIntegration {
+  id                String    @id @default("default")
+  /// AES-256-GCM (ключ из OZON_CLIENT_SECRET), base64url iv.tag.data
+  refreshTokenEnc   String?   @db.Text
+  connectedAt       DateTime?
+  connectedByUserId String?
+  lastRefreshAt     DateTime?
+  lastError         String?
+  /// Мониторинг (OzonHealthService)
+  lastCheckAt         DateTime?
+  lastCheckOk         Boolean?
+  lastPointCount      Int?
+  consecutiveFailures Int       @default(0)
+  /// ok | failing — для алерта о падении и восстановлении
+  alertState          String?
+  lastAlertAt         DateTime?
+  updatedAt         DateTime  @updatedAt
+}
+
+/// История проверок Ozon (дашборд «Службы доставки»), храним ~14 дней.
+model OzonHealthCheck {
+  id         String   @id @default(cuid())
+  createdAt  DateTime @default(now())
+  ok         Boolean
+  connected  Boolean
+  pointCount Int?
+  durationMs Int
+  /// disconnected | refresh_failed | points_failed | points_empty
+  failure    String?
+  error      String?
+  /// scheduled | manual
+  trigger    String
+
+  @@index([createdAt])
 }
 
 /// Подписка с homepage-формы (email может ещё не быть User).

@@ -8,7 +8,7 @@
  * - `__VSP:carrier=cdek|…__` (legacy с витрины — только читаем)
  */
 
-export type JcosShippingCarrier = 'cdek' | 'yandex';
+export type JcosShippingCarrier = 'cdek' | 'yandex' | 'ozon';
 export type JcosShippingDropoff = 'pvz' | 'courier';
 
 export type JcosAddressMeta = {
@@ -16,12 +16,12 @@ export type JcosAddressMeta = {
   dropoff?: JcosShippingDropoff;
   lon?: number;
   lat?: number;
-  /** id пункта (CDEK code или Yandex pickup point id) */
+  /** id пункта (CDEK code / Yandex pickup point id / Ozon map_point_id) */
   pvzId?: string;
 };
 
 function parseMetaFirstLine(first: string): JcosAddressMeta | null {
-  const m = first.match(/^__(?:JCOS|VSP):carrier=(cdek|yandex)(.*)__$/i);
+  const m = first.match(/^__(?:JCOS|VSP):carrier=(cdek|yandex|ozon)(.*)__$/i);
   if (!m) return null;
   const carrier = m[1].toLowerCase() as JcosShippingCarrier;
   const tail = m[2] || '';
@@ -97,6 +97,12 @@ export function displayJcosAddressComment(
   return parseJcosAddressMeta(streetAddress2 || '').comment;
 }
 
+export function jcosCarrierDisplayName(carrier: JcosShippingCarrier | string | null | undefined): string {
+  if (carrier === 'yandex') return 'Яндекс Доставка';
+  if (carrier === 'ozon') return 'Ozon Доставка';
+  return 'СДЭК';
+}
+
 export function getJcosShippingCarrier(
   streetAddress2: string | undefined | null,
 ): JcosShippingCarrier {
@@ -133,7 +139,7 @@ export function formatJcosDeliveryAddressSummary(address: {
   streetAddress1?: string | null;
 }): string {
   const { carrier, mode } = getJcosDeliveryDisplayMode(address.streetAddress2);
-  const carrierLabel = carrier === 'yandex' ? 'Яндекс Доставка' : 'СДЭК';
+  const carrierLabel = jcosCarrierDisplayName(carrier);
   const modeLabel = mode === 'pvz' ? 'ПВЗ' : 'Курьер';
   const city = (address.city || '').trim();
   const street = (address.streetAddress1 || '').trim();

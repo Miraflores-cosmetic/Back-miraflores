@@ -64,6 +64,10 @@ import type {
   OrderShippingAddressUpdateDto,
 } from './dto/order-admin-actions.dto';
 import { OrderChatService } from '../order-chat/order-chat.service';
+import { estimateOzonDelivery } from '../ozon/ozon-tariff';
+import { loadOzonTariffLines } from '../ozon/ozon-variant-dims';
+import { ozonFlagWhere, ozonRowFlags, parseOzonFlagFilter } from './order-ozon-flags';
+import { isManualChecklistStep, serializeChecklistMarks } from './order-checklist';
 
 const LIST_MAX = 100;
 const LIST_DEFAULT = 20;
@@ -156,11 +160,14 @@ export class OrdersAdminService {
       page?: number;
       limit?: number;
       staffUserId?: string;
+      flag?: string;
     } = {},
   ) {
     const page = Math.max(1, opts.page ?? 1);
     const limit = Math.min(LIST_MAX, Math.max(1, opts.limit ?? LIST_DEFAULT));
-    const where = this.listWhere(opts.q, opts.status);
+    const base = this.listWhere(opts.q, opts.status);
+    const flag = parseOzonFlagFilter(opts.flag);
+    const where: Prisma.OrderWhereInput = flag ? { AND: [base, ozonFlagWhere(flag)] } : base;
 
     const [total, rows] = await this.prisma.$transaction([
       this.prisma.order.count({ where }),
@@ -180,6 +187,8 @@ export class OrdersAdminService {
           refundedAmount: true,
           userId: true,
           createdAt: true,
+          shippingMethod: true,
+          shipments: { select: { provider: true, tracking: true, carrierCostRub: true } },
         },
       }),
     ]);
@@ -196,8 +205,9 @@ export class OrdersAdminService {
     ]);
 
     return {
-      items: rows.map((r) => ({
+      items: rows.map(({ shipments, ...r }) => ({
         ...r,
+        ozon: ozonRowFlags({ status: r.status, shippingMethod: r.shippingMethod, shipments }),
         chatUnreadCount: chatUnreadByOrderId[r.id] ?? 0,
         chatMessageCount: chatMessageCountByOrderId[r.id] ?? 0,
       })),
@@ -205,6 +215,15 @@ export class OrdersAdminService {
       page,
       limit,
     };
+  }
+
+  /** Счётчики для чипов «Ozon без трека» / «Ozon без факта стоимости» в списке заказов. */
+  async ozonFlagCounts(): Promise<{ noTrack: number; noCost: number }> {
+    const [noTrack, noCost] = await this.prisma.$transaction([
+      this.prisma.order.count({ where: ozonFlagWhere('ozon_no_track') }),
+      this.prisma.order.count({ where: ozonFlagWhere('ozon_no_cost') }),
+    ]);
+    return { noTrack, noCost };
   }
 
   async unviewedCount() {
@@ -322,7 +341,13 @@ export class OrdersAdminService {
             provider: true,
             tracking: true,
             status: true,
+            externalId: true,
             createdAt: true,
+            carrierCostRub: true,
+            carrierCostAt: true,
+            estimatedCostRub: true,
+            billableGrams: true,
+            tariffVersion: true,
           },
         },
         events: {
@@ -335,6 +360,9 @@ export class OrdersAdminService {
             meta: true,
             createdAt: true,
           },
+        },
+        checklistMarks: {
+          select: { checklist: true, stepId: true, doneAt: true, doneByUserId: true },
         },
         promoRedemption: { select: { id: true } },
       },
@@ -476,6 +504,7 @@ export class OrdersAdminService {
         };
       }),
       shipments: order.shipments,
+      checklist: await this.serializeChecklist(order.checklistMarks ?? []),
       events: await this.enrichEvents(order.events),
       latePaymentFailed: order.events.some((e) => {
         const m = e.meta;
@@ -507,6 +536,43 @@ export class OrdersAdminService {
       /** @deprecated use actions.canCancel */
       canCancel: canCancel(order.status),
     };
+  }
+
+  private async serializeChecklist(
+    marks: Array<{ checklist: string; stepId: string; doneAt: Date; doneByUserId: string | null }>,
+  ) {
+    const ids = [...new Set(marks.map((m) => m.doneByUserId).filter((v): v is string => Boolean(v)))];
+    const users = ids.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: ids } },
+          select: { id: true, email: true, displayName: true },
+        })
+      : [];
+    return serializeChecklistMarks(marks, new Map(users.map((u) => [u.id, u])));
+  }
+
+  /** Отметка ручного шага чеклиста склада — видна всем сменам. */
+  async setChecklistMark(
+    id: string,
+    actorUserId: string,
+    input: { checklist: string; stepId: string; done: boolean },
+  ) {
+    if (!isManualChecklistStep(input.checklist, input.stepId)) {
+      throw new BadRequestException('Неизвестный шаг чеклиста');
+    }
+    const order = await this.prisma.order.findUnique({ where: { id }, select: { id: true } });
+    if (!order) throw new NotFoundException('Заказ не найден');
+    const key = { orderId: id, checklist: input.checklist, stepId: input.stepId };
+    if (input.done) {
+      await this.prisma.orderChecklistMark.upsert({
+        where: { orderId_checklist_stepId: key },
+        create: { ...key, doneByUserId: actorUserId },
+        update: {},
+      });
+    } else {
+      await this.prisma.orderChecklistMark.deleteMany({ where: key });
+    }
+    return this.getById(id);
   }
 
   async markPaid(id: string, actorUserId: string) {
@@ -673,6 +739,11 @@ export class OrdersAdminService {
       if (provider === ShipmentProvider.YANDEX && !tracking) {
         throw new BadRequestException(
           'Для Яндекс Доставки укажите трек-номер. Автосоздание заявки пока не подключено.',
+        );
+      }
+      if (provider === ShipmentProvider.OZON && !tracking) {
+        throw new BadRequestException(
+          'Для Ozon Доставки укажите номер отправления / трек. Отправление оформляется вручную в кабинете Ozon.',
         );
       }
 
@@ -974,6 +1045,11 @@ export class OrdersAdminService {
           'Автосоздание заявки Яндекс Доставки пока не подключено. Укажите трек вручную или зарегистрируйте отправление в кабинете Яндекса.',
         );
       }
+      if (resolvedProvider === ShipmentProvider.OZON) {
+        throw new BadRequestException(
+          'Автосоздание отправления Ozon недоступно. Оформите отправление в кабинете Ozon и укажите трек вручную.',
+        );
+      }
 
       const placeholder = await tx.shipment.create({
         data: {
@@ -1073,13 +1149,16 @@ export class OrdersAdminService {
     shippingAddress: unknown,
   ): ShipmentProvider {
     const v = (raw ?? '').trim().toUpperCase();
-    if (v === 'CDEK' || v === 'YANDEX' || v === 'PICKUP') {
+    if (v === 'CDEK' || v === 'YANDEX' || v === 'OZON' || v === 'PICKUP') {
       return v as ShipmentProvider;
     }
     if (orderMethod) return orderMethod;
 
     const comment =
       (shippingAddress as { comment?: string } | null)?.comment || '';
+    if (/__(?:JCOS|VSP):carrier=ozon/i.test(comment)) {
+      return ShipmentProvider.OZON;
+    }
     if (
       /__JCOS:carrier=yandex/i.test(comment) ||
       /__VSP:carrier=yandex/i.test(comment) ||
@@ -1125,6 +1204,64 @@ export class OrdersAdminService {
       type: 'NOTE',
       message: text.slice(0, 2000),
       actorUserId,
+    });
+    return this.getById(id);
+  }
+
+  /**
+   * Факт стоимости у перевозчика на последнем отправлении. Для Ozon рядом сохраняется
+   * оценка по действующей сетке (billable, версия) — основа сверки тарифа.
+   */
+  async setShipmentCost(id: string, actorUserId: string, carrierCostRub: number) {
+    const order = await this.prisma.order.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        shippingAddress: true,
+        items: { select: { variantId: true, qty: true } },
+        shipments: { orderBy: { createdAt: 'desc' }, take: 1 },
+      },
+    });
+    if (!order) throw new NotFoundException('Заказ не найден');
+    const shipment = order.shipments[0];
+    if (!shipment) {
+      throw new BadRequestException('Сначала отметьте заказ отправленным — стоимость привязывается к отправлению');
+    }
+
+    let estimate: Awaited<ReturnType<typeof estimateOzonDelivery>> = null;
+    if (shipment.provider === ShipmentProvider.OZON) {
+      const comment = String((order.shippingAddress as ShippingAddressSnap | null)?.comment ?? '');
+      const dropoff = /(?:^|\|)dropoff=courier(?:\||$|__)/i.test(comment) ? 'courier' : 'pvz';
+      const lines = await loadOzonTariffLines(
+        this.prisma,
+        order.items.map((i) => ({ variantId: i.variantId, qty: i.qty })),
+      );
+      estimate = estimateOzonDelivery(lines, dropoff);
+    }
+
+    await this.prisma.shipment.update({
+      where: { id: shipment.id },
+      data: {
+        carrierCostRub,
+        carrierCostAt: new Date(),
+        estimatedCostRub: estimate?.cost ?? null,
+        billableGrams: estimate ? Math.round(estimate.billableKg * 1000) : null,
+        tariffVersion: estimate?.tariffVersion ?? null,
+      },
+    });
+    await this.lifecycle.addEvent(this.prisma, {
+      orderId: id,
+      type: 'CARRIER_COST',
+      message: estimate
+        ? `Стоимость у перевозчика: ${carrierCostRub} ₽ (по сетке ${estimate.cost} ₽)`
+        : `Стоимость у перевозчика: ${carrierCostRub} ₽`,
+      actorUserId,
+      meta: {
+        shipmentId: shipment.id,
+        carrierCostRub,
+        estimatedCostRub: estimate?.cost ?? null,
+        tariffVersion: estimate?.tariffVersion ?? null,
+      },
     });
     return this.getById(id);
   }
@@ -1533,18 +1670,22 @@ export class OrdersAdminService {
 
         // Метод из comment meta, если DTO method не передан явно
         const jcosCarrier = (after.comment || '').match(
-          /__(?:JCOS|VSP):carrier=(cdek|yandex)/i,
+          /__(?:JCOS|VSP):carrier=(cdek|yandex|ozon)/i,
         );
         if (dto.shippingMethod == null && jcosCarrier) {
+          const c = jcosCarrier[1].toLowerCase();
           shippingMethod =
-            jcosCarrier[1].toLowerCase() === 'yandex'
+            c === 'yandex'
               ? ShipmentProvider.YANDEX
-              : ShipmentProvider.CDEK;
+              : c === 'ozon'
+                ? ShipmentProvider.OZON
+                : ShipmentProvider.CDEK;
         }
 
         if (
           shippingMethod === ShipmentProvider.CDEK ||
-          shippingMethod === ShipmentProvider.YANDEX
+          shippingMethod === ShipmentProvider.YANDEX ||
+          shippingMethod === ShipmentProvider.OZON
         ) {
           assertShippingCommentMatchesCarrier(
             after.comment,

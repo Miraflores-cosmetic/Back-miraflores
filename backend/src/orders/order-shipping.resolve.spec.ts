@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BadRequestException } from '@nestjs/common';
 import { ShipmentProvider } from '@prisma/client';
 import {
@@ -15,8 +15,20 @@ import {
 } from './shipping-quote.service';
 
 describe('requireCheckoutShipmentProvider', () => {
-  it('принимает CDEK и YANDEX', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('принимает CDEK; YANDEX по умолчанию отклоняет', () => {
+    vi.stubEnv('YANDEX_DELIVERY_ENABLED', '');
     expect(requireCheckoutShipmentProvider('cdek')).toBe('CDEK');
+    expect(() => requireCheckoutShipmentProvider('YANDEX')).toThrow(
+      'Яндекс Доставка сейчас недоступна',
+    );
+  });
+
+  it('YANDEX принимается при YANDEX_DELIVERY_ENABLED=true', () => {
+    vi.stubEnv('YANDEX_DELIVERY_ENABLED', 'true');
     expect(requireCheckoutShipmentProvider('YANDEX')).toBe('YANDEX');
   });
 
@@ -188,5 +200,98 @@ describe('resolveShippingFromQuote', () => {
       freeShippingThresholdRub: 10_000,
     });
     expect(r.cost).toBe(0);
+  });
+});
+
+describe('Ozon', () => {
+  const pvzComment =
+    '__VSP:carrier=ozon|lon=37.6|lat=55.7|pvz=1011000000123|dropoff=pvz__\nТип доставки: Ozon ПВЗ.';
+  const courierComment =
+    '__VSP:carrier=ozon|lon=37.6|lat=55.7|pvz=|dropoff=courier__\nТип доставки: Ozon Курьер.';
+
+  it('OZON — допустимый перевозчик', () => {
+    expect(requireCheckoutShipmentProvider('ozon')).toBe('OZON');
+  });
+
+  it('ПВЗ Ozon с кодом — бесплатно по порогу, курьер — нет', () => {
+    expect(isPvzShippingComment(pvzComment)).toBe(true);
+    expect(isPvzShippingComment(courierComment)).toBe(false);
+    expect(
+      computeFreePvzShipping({
+        shippingComment: pvzComment,
+        goodsSubtotal: 12_000,
+        freeShippingThresholdRub: 10_000,
+      }),
+    ).toBe(true);
+  });
+
+  it('server estimate обязателен и побеждает заниженный client', () => {
+    expect(
+      buildQuoteCost({
+        shippingMethod: 'OZON',
+        shippingComment: pvzComment,
+        pvzCode: '1011000000123',
+        goodsSubtotal: 3000,
+        freeShippingThresholdRub: 10_000,
+        clientEstimate: 1,
+        serverEstimate: 79,
+        requireServerReprice: true,
+      }),
+    ).toEqual({ cost: 79, method: 'OZON', freePvz: false });
+    expect(() =>
+      buildQuoteCost({
+        shippingMethod: 'OZON',
+        shippingComment: pvzComment,
+        goodsSubtotal: 3000,
+        freeShippingThresholdRub: 10_000,
+        clientEstimate: 79,
+        serverEstimate: null,
+        requireServerReprice: true,
+      }),
+    ).toThrow(BadRequestException);
+  });
+
+  it('ПВЗ Ozon без кода пункта — ошибка; курьер без кода — ок', () => {
+    expect(() =>
+      buildQuoteCost({
+        shippingMethod: 'OZON',
+        shippingComment: '__VSP:carrier=ozon|lon=|lat=|pvz=|dropoff=pvz__',
+        goodsSubtotal: 3000,
+        freeShippingThresholdRub: 10_000,
+        serverEstimate: 79,
+      }),
+    ).toThrow(/Ozon/);
+    expect(
+      buildQuoteCost({
+        shippingMethod: 'OZON',
+        shippingComment: courierComment,
+        goodsSubtotal: 3000,
+        freeShippingThresholdRub: 10_000,
+        serverEstimate: 142,
+      }).cost,
+    ).toBe(142);
+  });
+
+  it('адрес Ozon не принимается под СДЭК и наоборот', () => {
+    expect(() =>
+      buildQuoteCost({
+        shippingMethod: 'CDEK',
+        shippingComment: pvzComment,
+        goodsSubtotal: 3000,
+        freeShippingThresholdRub: 10_000,
+        clientEstimate: 300,
+      }),
+    ).toThrow(BadRequestException);
+    expect(() =>
+      buildQuoteCost({
+        shippingMethod: 'OZON',
+        shippingComment:
+          '__VSP:carrier=cdek|lon=|lat=|pvz=MSK45|dropoff=pvz__\nТип доставки: СДЭК ПВЗ.',
+        pvzCode: 'MSK45',
+        goodsSubtotal: 3000,
+        freeShippingThresholdRub: 10_000,
+        serverEstimate: 79,
+      }),
+    ).toThrow(BadRequestException);
   });
 });

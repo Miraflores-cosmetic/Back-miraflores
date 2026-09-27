@@ -14,11 +14,13 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { parseOptionalPositiveInt } from '../common/parse-positive-int';
 import {
+  OrderChecklistMarkDto,
   OrderItemsUpdateDto,
   OrderNoteDto,
   OrderRefundDto,
   OrderRegisterCarrierDto,
   OrderShipDto,
+  OrderShipmentCostDto,
   OrderSendTrackingDto,
   OrderShippingAddressUpdateDto,
   OrderSurchargePaymentDto,
@@ -42,6 +44,7 @@ export class OrdersAdminController {
     @Query('status') status?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('flag') flag?: string,
   ) {
     return this.orders.list({
       q,
@@ -49,12 +52,18 @@ export class OrdersAdminController {
       page: parseOptionalPositiveInt(page),
       limit: parseOptionalPositiveInt(limit),
       staffUserId,
+      flag,
     });
   }
 
   @Get('unviewed-count')
   unviewedCount() {
     return this.orders.unviewedCount();
+  }
+
+  @Get('ozon-flags')
+  ozonFlagCounts() {
+    return this.orders.ozonFlagCounts();
   }
 
   @Get(':id')
@@ -161,5 +170,25 @@ export class OrdersAdminController {
     @Body() dto: OrderNoteDto,
   ) {
     return this.orders.addNote(id, actorUserId, dto.message);
+  }
+
+  /** Ручной шаг чеклиста склада (общий для смен). */
+  @Put(':id/checklist')
+  setChecklistMark(
+    @Param('id') id: string,
+    @CurrentUser('sub') actorUserId: string,
+    @Body() dto: OrderChecklistMarkDto,
+  ) {
+    return this.orders.setChecklistMark(id, actorUserId, dto);
+  }
+
+  /** Фактическая стоимость отправления у перевозчика (сверка тарифа Ozon). */
+  @Patch(':id/shipment-cost')
+  setShipmentCost(
+    @Param('id') id: string,
+    @CurrentUser('sub') actorUserId: string,
+    @Body() dto: OrderShipmentCostDto,
+  ) {
+    return this.orders.setShipmentCost(id, actorUserId, dto.carrierCostRub);
   }
 }

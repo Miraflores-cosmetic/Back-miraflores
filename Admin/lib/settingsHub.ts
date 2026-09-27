@@ -29,6 +29,7 @@ export const SETTINGS_HUB_LINKS: readonly SettingsHubLink[] = [
     aclBadge: 'Пользователи',
   },
   { href: '/admin/cart', label: 'Корзина', section: 'settings' },
+  { href: '/admin/settings/delivery', label: 'Службы доставки', section: 'staff' },
   { href: '/admin/settings/gratitude', label: 'Программа благодарности', section: 'settings' },
   { href: '/admin/settings/staff', label: 'Сотрудники', section: 'staff' },
 ];

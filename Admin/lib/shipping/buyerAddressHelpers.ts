@@ -3,6 +3,7 @@ import { formatPhoneE164 } from '@/lib/phone';
 import {
   buildJcosAddress2WithMeta,
   getJcosDeliveryDisplayMode,
+  jcosCarrierDisplayName,
   parseJcosAddressMeta,
 } from '@/lib/shipping/addressShippingMeta';
 
@@ -54,7 +55,7 @@ export function buyerDeliveryTitle(
 ): string {
   const { meta } = parseJcosAddressMeta(a.comment ?? '');
   if (meta) {
-    const carrier = meta.carrier === 'yandex' ? 'Яндекс Доставка' : 'СДЭК';
+    const carrier = jcosCarrierDisplayName(meta.carrier);
     const { mode } = getJcosDeliveryDisplayMode(a.comment);
     return `${carrier}, ${mode === 'pvz' ? 'ПВЗ' : 'Курьер'}`;
   }

@@ -29,6 +29,10 @@ import { dispatchAdminOrdersUnviewedRefresh } from '@/hooks/useAdminUnviewedOrde
 import { OrderAccordion, OrderIconBtn } from './OrderAccordion';
 import { AdminOrderChatModal } from './AdminOrderChatModal';
 import { OrderAddressEditModal } from './OrderAddressEditModal';
+import { YANDEX_DELIVERY_ENABLED } from '@/lib/shipping/deliveryCarriers';
+import { isOzonOrder, ozonPickupPoint } from '@/lib/shipping/ozonFulfillment';
+import { OzonFulfillmentChecklist } from './OzonFulfillmentChecklist';
+import { OzonCarrierCostForm, OzonShipmentPanel } from './OzonShipmentPanel';
 import { OrderItemsEditModal } from './OrderItemsEditModal';
 import { OrderShippingCostEditModal } from './OrderShippingCostEditModal';
 import catalogStyles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
@@ -62,6 +66,7 @@ function formatShippingAddress(
 function carrierLabel(carrier?: string | null): string {
   if (carrier === 'cdek') return 'СДЭК';
   if (carrier === 'yandex') return 'Яндекс Доставка';
+  if (carrier === 'ozon') return 'Ozon Доставка';
   return carrier || '';
 }
 
@@ -73,6 +78,7 @@ function dropoffLabel(dropoff?: string | null): string {
 
 function shipProviderFromMeta(carrier?: string | null): string {
   if (carrier === 'yandex') return 'YANDEX';
+  if (carrier === 'ozon') return 'OZON';
   if (carrier === 'cdek') return 'CDEK';
   return 'CDEK';
 }
@@ -135,6 +141,7 @@ export function OrderDetailClient({
   const [copied, setCopied] = useState(false);
   const [addressModalOpen, setAddressModalOpen] = useState(false);
   const [shippingCostModalOpen, setShippingCostModalOpen] = useState(false);
+  const [ozonChecklistOpen, setOzonChecklistOpen] = useState(false);
   const [itemsModalOpen, setItemsModalOpen] = useState(false);
   const [surchargeUrl, setSurchargeUrl] = useState<string | null>(null);
   const [openClient, setOpenClient] = useState(true);
@@ -251,7 +258,14 @@ export function OrderDetailClient({
   useEffect(() => {
     if (!order || shipPrefillDone) return;
     const fromOrder = (order.shippingMethod || '').toUpperCase();
-    if (fromOrder === 'CDEK' || fromOrder === 'YANDEX' || fromOrder === 'PICKUP') {
+    if (isOzonOrder(order)) {
+      setShipProvider('OZON');
+    } else if (
+      fromOrder === 'CDEK' ||
+      fromOrder === 'YANDEX' ||
+      fromOrder === 'OZON' ||
+      fromOrder === 'PICKUP'
+    ) {
       setShipProvider(fromOrder);
     } else {
       setShipProvider(shipProviderFromMeta(shippingMeta.meta?.carrier));
@@ -270,12 +284,13 @@ export function OrderDetailClient({
     path: string,
     body: Record<string, unknown> | undefined,
     successMsg: string,
+    method: 'POST' | 'PATCH' = 'POST',
   ) {
     setBusy(true);
     setError(null);
     try {
       const row = await adminBackendJson<AdminOrderDetail>(path, {
-        method: 'POST',
+        method,
         body: body ? JSON.stringify(body) : undefined,
       });
       if (row.items && row.actions) {
@@ -532,6 +547,8 @@ export function OrderDetailClient({
   const canMarkPaid = a.canMarkPaid && canOrdersFinance;
   const canRefund = a.canRefund && canOrdersFinance;
   const canSendTracking = Boolean(a.canSendTracking);
+  const ozonOrder = isOzonOrder(order);
+  const ozonPoint = ozonOrder ? ozonPickupPoint(order) : null;
   const carrierAlreadyCreated = Boolean(
     order.shipments?.some(
       (s) =>
@@ -560,6 +577,7 @@ export function OrderDetailClient({
     }
     const m = (order.shippingMethod || '').toUpperCase();
     if (m === 'YANDEX') return 'Яндекс Доставка';
+    if (m === 'OZON') return 'Ozon Доставка';
     if (m === 'CDEK') return 'СДЭК';
     return order.shippingMethod || null;
   })();
@@ -772,7 +790,29 @@ export function OrderDetailClient({
                   <dd>{methodHint}</dd>
                 </div>
               ) : null}
-              {(order.shippingAddress?.pvzCode || shippingMeta.meta?.pvzId) ? (
+              {ozonOrder && !ozonPoint?.courier ? (
+                <div className={styles.detailDlRow}>
+                  <dt>Пункт Ozon</dt>
+                  <dd className={styles.ozonPoint}>
+                    <span className={styles.ozonPointBadge}>Ozon · выбран покупателем</span>
+                    {ozonPoint?.pointId ? (
+                      <span>
+                        ID <code>{ozonPoint.pointId}</code>
+                      </span>
+                    ) : (
+                      <span className={styles.mutedInline}>ID пункта не сохранён — уточните у клиента</span>
+                    )}
+                    {ozonPoint?.address ? (
+                      <span className={styles.mutedInline}>
+                        {[ozonPoint.city, ozonPoint.address].filter(Boolean).join(', ')}
+                      </span>
+                    ) : null}
+                    <span className={styles.mutedInline}>
+                      Это ID Ozon (map_point_id), не код ПВЗ СДЭК. Сменить пункт — «Изменить адрес».
+                    </span>
+                  </dd>
+                </div>
+              ) : !ozonOrder && (order.shippingAddress?.pvzCode || shippingMeta.meta?.pvzId) ? (
                 <div className={styles.detailDlRow}>
                   <dt>ПВЗ</dt>
                   <dd>
@@ -1057,13 +1097,13 @@ export function OrderDetailClient({
             <>
               <h2 className={styles.sectionTitle}>Отправления</h2>
               <ul className={styles.orderPaymentList}>
-                {order.shipments.map((s) => {
+                {order.shipments.map((s, idx) => {
                   const url = s.tracking
                     ? trackingUrl(s.provider, s.tracking)
                     : null;
                   return (
                     <li key={s.id} className={styles.orderPaymentItem}>
-                      {s.provider}
+                      {s.provider === 'OZON' ? 'Ozon' : s.provider}
                       {s.tracking ? (
                         <>
                           {' · '}
@@ -1086,6 +1126,21 @@ export function OrderDetailClient({
                       <span className={styles.orderMetaMuted}>
                         {formatAdminDateTime(s.createdAt)}
                       </span>
+                      {s.provider === 'OZON' && idx === 0 ? (
+                        <OzonCarrierCostForm
+                          key={`${s.id}-${s.carrierCostRub ?? 'none'}`}
+                          shipment={s}
+                          busy={busy}
+                          onSave={(carrierCostRub) =>
+                            void runAction(
+                              `orders/admin/${orderId}/shipment-cost`,
+                              { carrierCostRub },
+                              'Стоимость отправления сохранена',
+                              'PATCH',
+                            )
+                          }
+                        />
+                      ) : null}
                     </li>
                   );
                 })}
@@ -1355,6 +1410,13 @@ export function OrderDetailClient({
               {a.canShip || canSendTracking ? (
                 <div className={styles.orderAsideFieldStack}>
                   <p className={styles.orderAsideTitle}>Отправка</p>
+                  {ozonOrder ? (
+                    <OzonShipmentPanel
+                      order={order}
+                      tracking={tracking}
+                      onOpenChecklist={() => setOzonChecklistOpen(true)}
+                    />
+                  ) : null}
                   {a.canShip ? (
                     <>
                       <AdminSelect
@@ -1363,19 +1425,39 @@ export function OrderDetailClient({
                         onChange={(e) => setShipProvider(e.target.value)}
                         disabled={busy}
                       >
-                        <option value="CDEK">СДЭК</option>
-                        <option value="YANDEX">Яндекс</option>
-                        <option value="PICKUP">Самовывоз</option>
+                        {ozonOrder ? (
+                          <>
+                            <option value="OZON">Ozon</option>
+                            <option value="PICKUP">Самовывоз</option>
+                          </>
+                        ) : (
+                          <>
+                            <option value="CDEK">СДЭК</option>
+                            {YANDEX_DELIVERY_ENABLED ||
+                            (order.shippingMethod || '').toUpperCase() === 'YANDEX' ||
+                            shippingMeta.meta?.carrier === 'yandex' ? (
+                              <option value="YANDEX">Яндекс</option>
+                            ) : null}
+                            <option value="OZON">Ozon</option>
+                            <option value="PICKUP">Самовывоз</option>
+                          </>
+                        )}
                       </AdminSelect>
+                      {ozonOrder ? (
+                        <p className={styles.orderHint}>
+                          Покупатель выбрал Ozon — СДЭК недоступен. Чтобы отправить другой
+                          службой, смените способ в «Изменить адрес».
+                        </p>
+                      ) : null}
                       <AdminTextField
-                        label="Трек"
+                        label={shipProvider === 'OZON' ? 'Трек (номер отправления Ozon)' : 'Трек'}
                         value={tracking}
                         onChange={(e) => setTracking(e.target.value)}
                         disabled={busy}
                         placeholder={
                           shipProvider === 'CDEK'
                             ? 'пусто = создать в СДЭК'
-                            : shipProvider === 'YANDEX'
+                            : shipProvider === 'YANDEX' || shipProvider === 'OZON'
                               ? 'обязательно'
                               : 'опционально'
                         }
@@ -1384,6 +1466,12 @@ export function OrderDetailClient({
                         <p className={styles.orderHint}>
                           Без трека Nest создаст отправление в СДЭК по pvzCode /
                           адресу (нужны CDEK_ACCOUNT / CDEK_SECURE на API).
+                        </p>
+                      ) : null}
+                      {shipProvider === 'OZON' && !ozonOrder && !tracking.trim() ? (
+                        <p className={styles.orderHint}>
+                          Ozon: автосоздание недоступно — создайте отправление в кабинете
+                          Ozon и вставьте номер отправления в «Трек».
                         </p>
                       ) : null}
                       {shipProvider === 'YANDEX' && !tracking.trim() ? (
@@ -1401,7 +1489,8 @@ export function OrderDetailClient({
                         variant="accent"
                         disabled={
                           busy ||
-                          (shipProvider === 'YANDEX' && !tracking.trim())
+                          ((shipProvider === 'YANDEX' || shipProvider === 'OZON') &&
+                            !tracking.trim())
                         }
                         onClick={() =>
                           askConfirm({
@@ -1797,6 +1886,15 @@ export function OrderDetailClient({
         />
       ) : null}
 
+      {ozonOrder ? (
+        <OzonFulfillmentChecklist
+          open={ozonChecklistOpen}
+          order={order}
+          onClose={() => setOzonChecklistOpen(false)}
+          onOrderChange={setOrder}
+        />
+      ) : null}
+
       <OrderAddressEditModal
         open={addressModalOpen}
         initial={order.shippingAddress}
@@ -1852,9 +1950,11 @@ export function OrderDetailClient({
               order.shippingAddress
                 ? formatShippingAddress(order.shippingAddress)
                 : null,
-              order.shippingAddress?.pvzCode
-                ? `ПВЗ ${order.shippingAddress.pvzCode}`
-                : null,
+              ozonPoint && !ozonPoint.courier && ozonPoint.pointId
+                ? `Пункт Ozon ID ${ozonPoint.pointId}`
+                : order.shippingAddress?.pvzCode
+                  ? `ПВЗ ${order.shippingAddress.pvzCode}`
+                  : null,
               order.shippingAddress?.recipientName
                 ? `Получатель: ${order.shippingAddress.recipientName}`
                 : null,

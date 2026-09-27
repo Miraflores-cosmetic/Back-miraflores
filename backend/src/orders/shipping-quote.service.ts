@@ -149,7 +149,9 @@ export class ShippingQuoteService {
 
     if (
       payload.v !== 1 ||
-      (payload.method !== 'CDEK' && payload.method !== 'YANDEX') ||
+      (payload.method !== 'CDEK' &&
+        payload.method !== 'YANDEX' &&
+        payload.method !== 'OZON') ||
       typeof payload.addrHash !== 'string' ||
       typeof payload.linesHash !== 'string' ||
       !Number.isFinite(payload.cost) ||
