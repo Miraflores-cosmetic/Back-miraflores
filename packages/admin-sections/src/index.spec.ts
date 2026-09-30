@@ -55,6 +55,7 @@ describe('isAllowedAdminBackendPath', () => {
     expect(isAllowedAdminBackendPath(['quiz', 'admin'])).toBe(true);
     expect(isAllowedAdminBackendPath(['assistant', 'admin', 'chat'])).toBe(true);
     expect(isAllowedAdminBackendPath(['newsletter', 'admin', 'stats'])).toBe(true);
+    expect(isAllowedAdminBackendPath(['delivery', 'ozon', 'admin', 'status'])).toBe(true);
   });
 
   it('отклоняет чужие пути', () => {
@@ -125,6 +126,7 @@ describe('resolveAdminSectionFromApiPath', () => {
     expect(resolveAdminSectionFromApiPath('/api/v1/settings/admin/staff-profile/reset-password')).toBe(
       'dashboard',
     );
+    expect(resolveAdminSectionFromApiPath('/api/v1/delivery/ozon/admin/status')).toBe('staff');
     expect(resolveAdminSectionFromApiPath('/api/v1/settings/admin/staff')).toBe('staff');
     expect(resolveAdminSectionFromApiPath('/api/v1/settings/admin/staff/abc')).toBe('staff');
     expect(resolveAdminSectionFromApiPath('/api/v1/settings/admin/faq')).toBe('settings');

@@ -99,6 +99,7 @@ export const ADMIN_BACKEND_BFF_PREFIXES: ReadonlyArray<readonly [string, string]
   ['assistant', 'admin'],
   ['auth', 'admin'],
   ['user-groups', 'admin'],
+  ['delivery', 'ozon'],
 ] as const;
 
 /** Первые два сегмента BFF-пути (`segments` из `[...segments]`). */
@@ -135,6 +136,7 @@ export function resolveAdminSectionFromApiPath(
 
   if (p.includes('/settings/admin/staff-profile')) return 'dashboard';
   if (p.includes('/settings/admin/staff')) return 'staff';
+  if (p.includes('/delivery/ozon/admin')) return 'staff';
 
   if (p.includes('/users/admin')) return 'users';
   if (p.includes('/user-groups/admin')) return 'users';
