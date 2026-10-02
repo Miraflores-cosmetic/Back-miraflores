@@ -85,54 +85,82 @@ function LayoutPreview({
   items: PromoDraft[];
 }) {
   const shown = items.filter((i) => i.imageUrl.trim());
+  const hasInactive = shown.some((i) => !i.active);
   return (
-    <div className={styles.preview}>
-      <div className={styles.previewHead}>
-        <p className={styles.previewTitle}>Превью раскладки</p>
-        <p className={styles.previewWords}>
-          {titleLeft || '…'} · {titleRight || '…'}
-        </p>
-      </div>
-      <div className={styles.previewFan}>
-        {shown.length === 0 ? (
-          <div className={styles.previewEmpty}>Нет карточек с картинкой</div>
-        ) : (
-          shown.map((item, index) => (
-            <div
-              key={item.key}
-              className={[
-                styles.previewCard,
-                item.notch ? styles.previewCardNotch : '',
-                item.active ? '' : styles.previewCardInactive,
-              ]
-                .filter(Boolean)
-                .join(' ')}
-              style={{
-                zIndex: index + 1,
-                transform: `rotate(${(index - (shown.length - 1) / 2) * 5}deg)`,
-              }}
-              title={item.href}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img className={styles.previewImg} src={item.imageUrl} alt="" />
+    <aside className={styles.aside} aria-label="Превью блока на главной">
+      <div className={styles.preview}>
+        <div className={styles.previewHead}>
+          <p className={styles.previewTitle}>Как на главной</p>
+          <p className={styles.previewWords}>
+            <span className={titleLeft.trim() ? '' : styles.previewWordsMuted}>
+              {titleLeft.trim() || 'Текст слева'}
+            </span>
+            {' · '}
+            <span className={titleRight.trim() ? '' : styles.previewWordsMuted}>
+              {titleRight.trim() || 'Текст справа'}
+            </span>
+          </p>
+        </div>
+        <div className={styles.previewFan}>
+          {shown.length === 0 ? (
+            <div className={styles.previewEmpty}>
+              Загрузите изображения в карточки — здесь появится веер
             </div>
-          ))
-        )}
+          ) : (
+            shown.map((item, index) => (
+              <div
+                key={item.key}
+                className={[
+                  styles.previewCard,
+                  item.notch ? styles.previewCardNotch : '',
+                  item.active ? '' : styles.previewCardInactive,
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                style={{
+                  zIndex: index + 1,
+                  transform: `rotate(${(index - (shown.length - 1) / 2) * 5}deg)`,
+                }}
+                title={item.href}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img className={styles.previewImg} src={item.imageUrl} alt="" />
+              </div>
+            ))
+          )}
+        </div>
+        <p className={styles.previewHint}>
+          Слева направо — порядок карточек. Перетаскивайте строки в списке, чтобы изменить порядок.
+        </p>
+        {shown.length > 0 ? (
+          <div className={styles.previewLegend}>
+            <span className={styles.previewLegendItem}>
+              <span className={`${styles.previewLegendDot} ${styles.previewLegendDotActive}`} />
+              активные
+            </span>
+            {hasInactive ? (
+              <span className={styles.previewLegendItem}>
+                <span className={`${styles.previewLegendDot} ${styles.previewLegendDotMuted}`} />
+                скрытые
+              </span>
+            ) : null}
+            <span className={styles.previewLegendItem}>вырез справа — как на витрине</span>
+          </div>
+        ) : null}
       </div>
-      <p className={styles.previewHint}>
-        Слева направо — порядок на сайте. Неактивные приглушены. Вырез справа — как на витрине.
-      </p>
-    </div>
+    </aside>
   );
 }
 
 function SortablePromoRow({
+  index,
   item,
   disabled,
   onChange,
   onRemoveRequest,
   onUpload,
 }: {
+  index: number;
   item: PromoDraft;
   disabled: boolean;
   onChange: (patch: Partial<PromoDraft>) => void;
@@ -145,6 +173,8 @@ function SortablePromoRow({
     disabled,
   });
 
+  const missingImage = !item.imageUrl.trim();
+
   return (
     <li
       ref={setNodeRef}
@@ -152,52 +182,56 @@ function SortablePromoRow({
         transform: CSS.Transform.toString(transform),
         transition,
       }}
-      className={`${settingsStyles.faqCard} ${isDragging ? settingsStyles.faqCardDragging : ''}`}
+      className={[
+        styles.promoCard,
+        isDragging ? styles.promoCardDragging : '',
+        item.active ? '' : styles.promoCardInactive,
+      ]
+        .filter(Boolean)
+        .join(' ')}
     >
-      <div className={settingsStyles.faqCardHead}>
+      <div className={styles.promoCardHead}>
         <button
           type="button"
-          className={settingsStyles.dragBtn}
+          className={styles.dragBtn}
           {...attributes}
           {...listeners}
-          aria-label="Перетащить"
+          aria-label="Изменить порядок"
           disabled={disabled}
         >
           ⋮⋮
         </button>
-        <label className={settingsStyles.activeLabel}>
-          <AdminCheckbox
-            checked={item.active}
-            onChange={(e) => onChange({ active: e.target.checked })}
+        <span className={styles.promoCardIndex}>{index + 1}</span>
+        <span className={styles.promoCardHeadTitle}>
+          {missingImage ? 'Нужно изображение' : item.alt.trim() || 'Без подписи'}
+        </span>
+        <div className={styles.promoCardHeadActions}>
+          <label className={styles.activeLabel}>
+            <AdminCheckbox
+              checked={item.active}
+              onChange={(e) => onChange({ active: e.target.checked })}
+              disabled={disabled}
+            />
+            На сайте
+          </label>
+          <AdminCompactBtn
+            type="button"
+            variant="danger"
+            onClick={onRemoveRequest}
             disabled={disabled}
-          />
-          Активна
-        </label>
-        <AdminCompactBtn
-          type="button"
-          variant="danger"
-          onClick={onRemoveRequest}
-          disabled={disabled}
-          aria-label="Удалить"
-        >
-          Удалить
-        </AdminCompactBtn>
+          >
+            Удалить
+          </AdminCompactBtn>
+        </div>
       </div>
 
-      <div className={styles.cardFields}>
-        <div className={styles.imageCol}>
-          <p className={settingsStyles.heroImageLabel}>Баннер</p>
-          {item.imageUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img className={settingsStyles.heroThumb} src={item.imageUrl} alt="" />
-          ) : (
-            <p className={catalogStyles.lead}>Не выбрано</p>
-          )}
+      <div className={styles.promoCardBody}>
+        <div className={styles.imagePanel}>
           <input
             ref={fileRef}
             type="file"
             accept="image/jpeg,image/png,image/webp,image/gif"
-            className={settingsStyles.heroFileInput}
+            className={styles.fileInputHidden}
             disabled={disabled}
             onChange={(e) => {
               const file = e.target.files?.[0];
@@ -205,52 +239,78 @@ function SortablePromoRow({
               if (file) void onUpload(file);
             }}
           />
-          <AdminCompactBtn
-            type="button"
-            variant="outline"
-            disabled={disabled}
-            onClick={() => fileRef.current?.click()}
-          >
-            {item.imageUrl ? 'Заменить' : 'Загрузить'}
-          </AdminCompactBtn>
           {item.imageUrl ? (
+            <div className={styles.imageFrame}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img className={styles.imageThumb} src={item.imageUrl} alt="" />
+              {item.notch ? <span className={styles.imageNotchBadge}>Вырез</span> : null}
+            </div>
+          ) : (
+            <button
+              type="button"
+              className={`${styles.imageFrame} ${styles.imageFrameEmpty} ${
+                disabled ? styles.imageFrameEmptyDisabled : ''
+              }`}
+              disabled={disabled}
+              onClick={() => fileRef.current?.click()}
+            >
+              <span className={styles.imageEmptyIcon} aria-hidden>
+                ↑
+              </span>
+              <p className={styles.imageEmptyText}>JPEG, PNG, WebP или GIF</p>
+            </button>
+          )}
+          <div className={styles.imageActions}>
             <AdminCompactBtn
               type="button"
               variant="outline"
               disabled={disabled}
-              onClick={() => onChange({ imageUrl: '' })}
+              onClick={() => fileRef.current?.click()}
             >
-              Убрать
+              {item.imageUrl ? 'Заменить' : 'Загрузить'}
             </AdminCompactBtn>
-          ) : null}
+            {item.imageUrl ? (
+              <AdminCompactBtn
+                type="button"
+                variant="outline"
+                disabled={disabled}
+                onClick={() => onChange({ imageUrl: '' })}
+              >
+                Убрать
+              </AdminCompactBtn>
+            ) : null}
+          </div>
         </div>
 
-        <div className={styles.metaCol}>
-          <HomePromoLinkField
-            href={item.href}
-            disabled={disabled}
-            onChange={(nextHref) => onChange({ href: nextHref })}
-          />
+        <div className={styles.fieldsCol}>
+          <div className={styles.fieldGroup}>
+            <p className={styles.fieldGroupLabel}>Куда ведёт клик</p>
+            <HomePromoLinkField
+              href={item.href}
+              disabled={disabled}
+              onChange={(nextHref) => onChange({ href: nextHref })}
+            />
+          </div>
 
           <label className={catalogStyles.field}>
-            <span className={catalogStyles.label}>Подпись (alt)</span>
+            <span className={catalogStyles.label}>Подпись для accessibility (alt)</span>
             <input
               className={catalogStyles.input}
               value={item.alt}
               disabled={disabled}
-              placeholder="Краткое описание"
+              placeholder="Например: Скидки на уход"
               onChange={(e) => onChange({ alt: e.target.value })}
             />
           </label>
 
-          <div className={styles.checkRow}>
-            <label className={settingsStyles.activeLabel}>
+          <div className={styles.optionsRow}>
+            <label className={styles.activeLabel}>
               <AdminCheckbox
                 checked={item.notch}
                 onChange={(e) => onChange({ notch: e.target.checked })}
                 disabled={disabled}
               />
-              Вырез справа
+              Вырез справа (форма карточки на главной)
             </label>
           </div>
         </div>
@@ -298,6 +358,25 @@ export function HomePromoAdminClient() {
     () => items.some((it) => !isPromoHrefComplete(it.href)),
     [items],
   );
+
+  const statusLines = useMemo(() => {
+    const lines: { text: string; tone: 'info' | 'warn' }[] = [];
+    if (dirty) lines.push({ text: 'Есть несохранённые изменения', tone: 'info' });
+    if (uploading) lines.push({ text: 'Загрузка изображения…', tone: 'info' });
+    if (incompleteCount > 0) {
+      lines.push({
+        text: `У ${incompleteCount} карточек нет изображения — сохранение недоступно`,
+        tone: 'warn',
+      });
+    }
+    if (invalidHref) {
+      lines.push({ text: 'Проверьте ссылки у всех карточек', tone: 'warn' });
+    }
+    if (items.length > MAX_ITEMS) {
+      lines.push({ text: `Не больше ${MAX_ITEMS} карточек`, tone: 'warn' });
+    }
+    return lines;
+  }, [dirty, uploading, incompleteCount, invalidHref, items.length]);
 
   const load = useCallback(async () => {
     beginLoad();
@@ -353,6 +432,21 @@ export function HomePromoAdminClient() {
     }
   }
 
+  function addCard() {
+    markDirty();
+    setItems((prev) => [
+      ...prev,
+      {
+        key: newKey(),
+        imageUrl: '',
+        href: '/catalog',
+        alt: '',
+        notch: false,
+        active: true,
+      },
+    ]);
+  }
+
   async function onSave(e: React.FormEvent) {
     e.preventDefault();
     if (!loadedOk) return;
@@ -404,11 +498,12 @@ export function HomePromoAdminClient() {
   const canEdit = loadedOk && !loading && !uploading;
   const canSave =
     canEdit && dirty && !saving && incompleteCount === 0 && !invalidHref && items.length <= MAX_ITEMS;
+  const canAdd = canEdit && !saving && items.length < MAX_ITEMS;
 
   return (
-    <div>
+    <div className={styles.page}>
       <div className={settingsStyles.hubHeader}>
-        <h1 className={`${catalogStyles.title} ${settingsStyles.hubHeaderTitle}`}>Промо</h1>
+        <h1 className={`${catalogStyles.title} ${settingsStyles.hubHeaderTitle}`}>Промо на главной</h1>
         <a
           className={settingsStyles.storefrontLink}
           href="/"
@@ -418,8 +513,9 @@ export function HomePromoAdminClient() {
           Открыть главную ↗
         </a>
       </div>
-      <p className={catalogStyles.lead}>
-        Блок на главной: заголовок и до {MAX_ITEMS} карточек (веер на десктопе, слайдер на мобиле).
+      <p className={styles.lead}>
+        Заголовок секции и до {MAX_ITEMS} кликабельных карточек: на десктопе — веер, на телефоне —
+        горизонтальный слайдер.
       </p>
 
       <AdminSettingsListErrors
@@ -431,113 +527,155 @@ export function HomePromoAdminClient() {
       />
 
       {loading ? (
-        <p className={catalogStyles.lead}>Загрузка…</p>
+        <p className={styles.lead}>Загрузка…</p>
       ) : !loadedOk ? (
-        <p className={catalogStyles.lead}>
+        <p className={styles.lead}>
           Не удалось загрузить промо. Нажмите «Повторить» — сохранение отключено, чтобы не стереть
           данные.
         </p>
       ) : (
-        <form
-          onSubmit={(e) => void onSave(e)}
-          className={`${catalogStyles.form} ${catalogStyles.formWide}`}
-        >
-          {dirty ? <p className={catalogStyles.lead}>Несохранённые изменения</p> : null}
-          {uploading ? <p className={catalogStyles.lead}>Загрузка изображения…</p> : null}
-          {incompleteCount > 0 ? (
-            <p className={catalogStyles.lead}>
-              Есть карточки без картинки ({incompleteCount}) — сохранение недоступно
-            </p>
-          ) : null}
-          {invalidHref ? (
-            <p className={catalogStyles.lead}>
-              Есть карточки без корректной ссылки — сохранение недоступно
-            </p>
-          ) : null}
-
-          <div className={styles.titleRow}>
-            <label className={catalogStyles.field}>
-              <span className={catalogStyles.label}>Текст слева</span>
-              <input
-                className={catalogStyles.input}
-                value={titleLeft}
-                disabled={saving}
-                onChange={(e) => {
-                  markDirty();
-                  setTitleLeft(e.target.value);
-                }}
-              />
-            </label>
-            <label className={catalogStyles.field}>
-              <span className={catalogStyles.label}>Текст справа</span>
-              <input
-                className={catalogStyles.input}
-                value={titleRight}
-                disabled={saving}
-                onChange={(e) => {
-                  markDirty();
-                  setTitleRight(e.target.value);
-                }}
-              />
-            </label>
-          </div>
-
-          <LayoutPreview titleLeft={titleLeft} titleRight={titleRight} items={items} />
-
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
-            <SortableContext
-              items={items.map((i) => i.key)}
-              strategy={verticalListSortingStrategy}
+        <form onSubmit={(e) => void onSave(e)}>
+          {statusLines.length > 0 ? (
+            <div
+              className={`${styles.statusBar} ${
+                statusLines.some((l) => l.tone === 'warn')
+                  ? styles.statusBarWarn
+                  : styles.statusBarInfo
+              }`}
+              role="status"
             >
-              <ul className={settingsStyles.faqList}>
-                {items.map((item, index) => (
-                  <SortablePromoRow
-                    key={item.key}
-                    item={item}
-                    disabled={saving || uploading}
-                    onChange={(patch) => {
-                      markDirty();
-                      setItems((prev) =>
-                        prev.map((row, i) => (i === index ? { ...row, ...patch } : row)),
-                      );
-                    }}
-                    onRemoveRequest={() => setDeleteKey(item.key)}
-                    onUpload={(file) => onUpload(item.key, file)}
-                  />
-                ))}
-              </ul>
-            </SortableContext>
-          </DndContext>
-
-          {items.length === 0 ? (
-            <p className={catalogStyles.lead}>Карточек пока нет</p>
+              {statusLines.map((line) => (
+                <span key={line.text}>{line.text}</span>
+              ))}
+            </div>
           ) : null}
 
-          <div className={catalogStyles.formActions}>
-            <AdminCompactBtn
-              type="button"
-              variant="outline"
-              disabled={saving || uploading || items.length >= MAX_ITEMS}
-              onClick={() => {
-                markDirty();
-                setItems((prev) => [
-                  ...prev,
-                  {
-                    key: newKey(),
-                    imageUrl: '',
-                    href: '/catalog',
-                    alt: '',
-                    notch: false,
-                    active: true,
-                  },
-                ]);
-              }}
-            >
-              {items.length >= MAX_ITEMS ? `Макс. ${MAX_ITEMS} карточек` : 'Добавить карточку'}
-            </AdminCompactBtn>
-            <AdminCompactBtn type="submit" variant="accent" disabled={!canSave}>
-              {saving ? 'Сохранение…' : 'Сохранить'}
-            </AdminCompactBtn>
+          <div className={styles.layout}>
+            <div className={styles.main}>
+              <section className={styles.panel} aria-labelledby="promo-title-heading">
+                <div className={styles.sectionHead}>
+                  <div>
+                    <h2 id="promo-title-heading" className={styles.sectionTitle}>
+                      Заголовок секции
+                    </h2>
+                    <p className={styles.sectionDesc}>
+                      Две части заголовка над карточками — обычно «НАШИ» и «АКЦИИ».
+                    </p>
+                  </div>
+                </div>
+                <div className={styles.titleGrid}>
+                  <label className={catalogStyles.field}>
+                    <span className={catalogStyles.label}>Слева</span>
+                    <input
+                      className={catalogStyles.input}
+                      value={titleLeft}
+                      disabled={saving}
+                      onChange={(e) => {
+                        markDirty();
+                        setTitleLeft(e.target.value);
+                      }}
+                    />
+                  </label>
+                  <label className={catalogStyles.field}>
+                    <span className={catalogStyles.label}>Справа</span>
+                    <input
+                      className={catalogStyles.input}
+                      value={titleRight}
+                      disabled={saving}
+                      onChange={(e) => {
+                        markDirty();
+                        setTitleRight(e.target.value);
+                      }}
+                    />
+                  </label>
+                </div>
+              </section>
+
+              <section className={styles.panel} aria-labelledby="promo-cards-heading">
+                <div className={styles.sectionHead}>
+                  <div>
+                    <h2 id="promo-cards-heading" className={styles.sectionTitle}>
+                      Карточки
+                    </h2>
+                    <p className={styles.sectionDesc}>
+                      Перетащите за ⋮⋮, чтобы изменить порядок. Сохраните, чтобы обновить главную.
+                    </p>
+                  </div>
+                  <span className={styles.sectionBadge}>
+                    {items.length} / {MAX_ITEMS}
+                  </span>
+                </div>
+
+                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+                  <SortableContext
+                    items={items.map((i) => i.key)}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    {items.length === 0 ? (
+                      <div className={styles.emptyCards}>
+                        <p className={styles.emptyCardsTitle}>Пока нет карточек</p>
+                        <p className={styles.emptyCardsDesc}>
+                          Добавьте первую — загрузите баннер и выберите, куда ведёт ссылка.
+                        </p>
+                        <AdminCompactBtn type="button" variant="accent" disabled={!canAdd} onClick={addCard}>
+                          Добавить карточку
+                        </AdminCompactBtn>
+                      </div>
+                    ) : (
+                      <ul className={styles.cardList}>
+                        {items.map((item, index) => (
+                          <SortablePromoRow
+                            key={item.key}
+                            index={index}
+                            item={item}
+                            disabled={saving || uploading}
+                            onChange={(patch) => {
+                              markDirty();
+                              setItems((prev) =>
+                                prev.map((row, i) => (i === index ? { ...row, ...patch } : row)),
+                              );
+                            }}
+                            onRemoveRequest={() => setDeleteKey(item.key)}
+                            onUpload={(file) => onUpload(item.key, file)}
+                          />
+                        ))}
+                      </ul>
+                    )}
+                  </SortableContext>
+                </DndContext>
+
+                {items.length > 0 ? (
+                  <div className={styles.pageFooter}>
+                    <p className={styles.pageFooterHint}>
+                      {canAdd ? 'Можно добавить ещё карточки до лимита' : `Достигнут лимит ${MAX_ITEMS}`}
+                    </p>
+                    <div className={styles.pageFooterActions}>
+                      <AdminCompactBtn
+                        type="button"
+                        variant="outline"
+                        disabled={!canAdd}
+                        onClick={addCard}
+                      >
+                        Добавить карточку
+                      </AdminCompactBtn>
+                    </div>
+                  </div>
+                ) : null}
+              </section>
+
+              <div className={styles.pageFooter}>
+                <p className={styles.pageFooterHint}>
+                  {dirty ? 'Не забудьте сохранить перед выходом' : 'Все изменения на сайте'}
+                </p>
+                <div className={styles.pageFooterActions}>
+                  <AdminCompactBtn type="submit" variant="accent" disabled={!canSave}>
+                    {saving ? 'Сохранение…' : 'Сохранить'}
+                  </AdminCompactBtn>
+                </div>
+              </div>
+            </div>
+
+            <LayoutPreview titleLeft={titleLeft} titleRight={titleRight} items={items} />
           </div>
         </form>
       )}
@@ -545,7 +683,7 @@ export function HomePromoAdminClient() {
       <AdminConfirmDialog
         open={deleteKey != null}
         title="Удалить карточку?"
-        message="Карточка будет убрана из списка. Сохраните изменения, чтобы применить на сайте."
+        message="Карточка исчезнет из списка. Нажмите «Сохранить», чтобы убрать её с главной."
         confirmLabel="Удалить"
         danger
         onCancel={() => setDeleteKey(null)}

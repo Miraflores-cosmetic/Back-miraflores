@@ -31,7 +31,7 @@
   font-size: clamp(28px, 5.2vw, 64px);
   line-height: 1.05;
   text-transform: uppercase;
-  color: var(--color-brand-green);
+  color: #000;
   white-space: nowrap;
   user-select: none;
   z-index: 20;
