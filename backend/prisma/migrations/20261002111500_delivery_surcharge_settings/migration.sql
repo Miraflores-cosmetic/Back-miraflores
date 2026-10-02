@@ -1,3 +1,6 @@
+-- CartSettings was renamed from DeliverySettings (20260827200000); PK name stayed "DeliverySettings_pkey".
+ALTER TABLE "CartSettings" RENAME CONSTRAINT "DeliverySettings_pkey" TO "CartSettings_pkey";
+
 CREATE TABLE "DeliverySettings" (
     "id" TEXT NOT NULL,
     "cdekSurchargeRub" INTEGER NOT NULL DEFAULT 0,
