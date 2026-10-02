@@ -9,6 +9,8 @@ export type AdminOrderListItem = {
   refundedAmount?: number;
   userId: string | null;
   createdAt: string;
+  /** Оплачен, карточку в админке ещё не открывали (бейдж «Заказы» в сайдбаре). */
+  adminUnviewed?: boolean;
   /** Непрочитанные сообщения клиента в чате заказа (для текущего staff). */
   chatUnreadCount?: number;
   /** Всего сообщений в чате заказа (без удалённых). */

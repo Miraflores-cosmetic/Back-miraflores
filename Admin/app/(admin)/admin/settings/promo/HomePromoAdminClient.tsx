@@ -22,15 +22,14 @@ import { AdminConfirmDialog } from '@/components/admin/AdminModal/AdminConfirmDi
 import { AdminSettingsListErrors } from '@/components/admin/AdminSettingsListErrors/AdminSettingsListErrors';
 import { useToast } from '@/components/Toast/ToastProvider';
 import { adminBackendFetch, adminBackendJson } from '@/lib/adminBackendFetch';
-import { HOME_PROMO_PAGE_OPTIONS } from '@/lib/homePromoPageOptions';
 import { useAdminSettingsListShell } from '@/lib/useAdminSettingsListShell';
 import { revalidateHomeStorefront } from '@/lib/revalidateHomeStorefront';
 import catalogStyles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
 import settingsStyles from '@/app/(admin)/admin/settings/Settings.module.css';
+import { HomePromoLinkField, isPromoHrefComplete } from './HomePromoLinkField';
 import styles from './HomePromoAdmin.module.css';
 
 const MAX_ITEMS = 5;
-const HREF_OK = /^\/[a-zA-Z0-9/_-]*$/;
 
 type PromoDraft = {
   key: string;
@@ -88,9 +87,12 @@ function LayoutPreview({
   const shown = items.filter((i) => i.imageUrl.trim());
   return (
     <div className={styles.preview}>
-      <p className={styles.previewTitle}>
-        Превью раскладки: {titleLeft || '…'} / {titleRight || '…'}
-      </p>
+      <div className={styles.previewHead}>
+        <p className={styles.previewTitle}>Превью раскладки</p>
+        <p className={styles.previewWords}>
+          {titleLeft || '…'} · {titleRight || '…'}
+        </p>
+      </div>
       <div className={styles.previewFan}>
         {shown.length === 0 ? (
           <div className={styles.previewEmpty}>Нет карточек с картинкой</div>
@@ -105,7 +107,10 @@ function LayoutPreview({
               ]
                 .filter(Boolean)
                 .join(' ')}
-              style={{ zIndex: index + 1, transform: `rotate(${(index - shown.length / 2) * 4}deg)` }}
+              style={{
+                zIndex: index + 1,
+                transform: `rotate(${(index - (shown.length - 1) / 2) * 5}deg)`,
+              }}
               title={item.href}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -115,7 +120,7 @@ function LayoutPreview({
         )}
       </div>
       <p className={styles.previewHint}>
-        Порядок слева направо = порядок на сайте. Неактивные приглушены. Вырез — clip справа.
+        Слева направо — порядок на сайте. Неактивные приглушены. Вырез справа — как на витрине.
       </p>
     </div>
   );
@@ -139,8 +144,6 @@ function SortablePromoRow({
     id: item.key,
     disabled,
   });
-
-  const knownHref = HOME_PROMO_PAGE_OPTIONS.some((o) => o.href === item.href);
 
   return (
     <li
@@ -181,12 +184,12 @@ function SortablePromoRow({
         </AdminCompactBtn>
       </div>
 
-      <div className={styles.cardBody}>
-        <div className={catalogStyles.field}>
-          <span className={catalogStyles.label}>Баннер</span>
+      <div className={styles.cardFields}>
+        <div className={styles.imageCol}>
+          <p className={settingsStyles.heroImageLabel}>Баннер</p>
           {item.imageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img className={styles.thumb} src={item.imageUrl} alt="" />
+            <img className={settingsStyles.heroThumb} src={item.imageUrl} alt="" />
           ) : (
             <p className={catalogStyles.lead}>Не выбрано</p>
           )}
@@ -194,7 +197,7 @@ function SortablePromoRow({
             ref={fileRef}
             type="file"
             accept="image/jpeg,image/png,image/webp,image/gif"
-            className={styles.fileInput}
+            className={settingsStyles.heroFileInput}
             disabled={disabled}
             onChange={(e) => {
               const file = e.target.files?.[0];
@@ -202,89 +205,55 @@ function SortablePromoRow({
               if (file) void onUpload(file);
             }}
           />
-          <div className={styles.thumbActions}>
+          <AdminCompactBtn
+            type="button"
+            variant="outline"
+            disabled={disabled}
+            onClick={() => fileRef.current?.click()}
+          >
+            {item.imageUrl ? 'Заменить' : 'Загрузить'}
+          </AdminCompactBtn>
+          {item.imageUrl ? (
             <AdminCompactBtn
               type="button"
               variant="outline"
               disabled={disabled}
-              onClick={() => fileRef.current?.click()}
+              onClick={() => onChange({ imageUrl: '' })}
             >
-              {item.imageUrl ? 'Заменить' : 'Загрузить'}
+              Убрать
             </AdminCompactBtn>
-            {item.imageUrl ? (
-              <AdminCompactBtn
-                type="button"
-                variant="outline"
-                disabled={disabled}
-                onClick={() => onChange({ imageUrl: '' })}
-              >
-                Убрать
-              </AdminCompactBtn>
-            ) : null}
-          </div>
+          ) : null}
         </div>
 
-        <label className={catalogStyles.field}>
-          <span className={catalogStyles.label}>Ссылка (страница сайта)</span>
-          <select
-            className={catalogStyles.input}
-            value={knownHref ? item.href : '__custom__'}
+        <div className={styles.metaCol}>
+          <HomePromoLinkField
+            href={item.href}
             disabled={disabled}
-            onChange={(e) => {
-              const v = e.target.value;
-              if (v === '__custom__') {
-                onChange({ href: item.href && !knownHref ? item.href : '/catalog' });
-              } else {
-                onChange({ href: v });
-              }
-            }}
-          >
-            {HOME_PROMO_PAGE_OPTIONS.map((o) => (
-              <option key={o.href} value={o.href}>
-                {o.label}
-              </option>
-            ))}
-            <option value="__custom__">Другой путь…</option>
-          </select>
-        </label>
+            onChange={(nextHref) => onChange({ href: nextHref })}
+          />
 
-        {!knownHref ? (
           <label className={catalogStyles.field}>
-            <span className={catalogStyles.label}>Свой путь (только /…)</span>
+            <span className={catalogStyles.label}>Подпись (alt)</span>
             <input
               className={catalogStyles.input}
-              value={item.href}
+              value={item.alt}
               disabled={disabled}
-              placeholder="/catalog"
-              onChange={(e) => onChange({ href: e.target.value })}
+              placeholder="Краткое описание"
+              onChange={(e) => onChange({ alt: e.target.value })}
             />
-            {item.href && !HREF_OK.test(item.href) ? (
-              <span className={catalogStyles.lead}>
-                Допустимы только относительные пути вроде /catalog
-              </span>
-            ) : null}
           </label>
-        ) : null}
 
-        <label className={catalogStyles.field}>
-          <span className={catalogStyles.label}>Подпись (alt)</span>
-          <input
-            className={catalogStyles.input}
-            value={item.alt}
-            disabled={disabled}
-            placeholder="Краткое описание"
-            onChange={(e) => onChange({ alt: e.target.value })}
-          />
-        </label>
-
-        <label className={settingsStyles.activeLabel}>
-          <AdminCheckbox
-            checked={item.notch}
-            onChange={(e) => onChange({ notch: e.target.checked })}
-            disabled={disabled}
-          />
-          Треугольный вырез справа
-        </label>
+          <div className={styles.checkRow}>
+            <label className={settingsStyles.activeLabel}>
+              <AdminCheckbox
+                checked={item.notch}
+                onChange={(e) => onChange({ notch: e.target.checked })}
+                disabled={disabled}
+              />
+              Вырез справа
+            </label>
+          </div>
+        </div>
       </div>
     </li>
   );
@@ -326,7 +295,7 @@ export function HomePromoAdminClient() {
     [items],
   );
   const invalidHref = useMemo(
-    () => items.some((it) => !HREF_OK.test(it.href.trim() || '/')),
+    () => items.some((it) => !isPromoHrefComplete(it.href)),
     [items],
   );
 
@@ -438,7 +407,17 @@ export function HomePromoAdminClient() {
 
   return (
     <div>
-      <h1 className={catalogStyles.title}>Промо</h1>
+      <div className={settingsStyles.hubHeader}>
+        <h1 className={`${catalogStyles.title} ${settingsStyles.hubHeaderTitle}`}>Промо</h1>
+        <a
+          className={settingsStyles.storefrontLink}
+          href="/"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Открыть главную ↗
+        </a>
+      </div>
       <p className={catalogStyles.lead}>
         Блок на главной: заголовок и до {MAX_ITEMS} карточек (веер на десктопе, слайдер на мобиле).
       </p>
@@ -455,7 +434,8 @@ export function HomePromoAdminClient() {
         <p className={catalogStyles.lead}>Загрузка…</p>
       ) : !loadedOk ? (
         <p className={catalogStyles.lead}>
-          Не удалось загрузить. Нажмите «Повторить» — сохранение отключено.
+          Не удалось загрузить промо. Нажмите «Повторить» — сохранение отключено, чтобы не стереть
+          данные.
         </p>
       ) : (
         <form
@@ -467,6 +447,11 @@ export function HomePromoAdminClient() {
           {incompleteCount > 0 ? (
             <p className={catalogStyles.lead}>
               Есть карточки без картинки ({incompleteCount}) — сохранение недоступно
+            </p>
+          ) : null}
+          {invalidHref ? (
+            <p className={catalogStyles.lead}>
+              Есть карточки без корректной ссылки — сохранение недоступно
             </p>
           ) : null}
 
@@ -504,7 +489,7 @@ export function HomePromoAdminClient() {
               items={items.map((i) => i.key)}
               strategy={verticalListSortingStrategy}
             >
-              <ul className={`${settingsStyles.faqList} ${styles.sortable}`}>
+              <ul className={settingsStyles.faqList}>
                 {items.map((item, index) => (
                   <SortablePromoRow
                     key={item.key}
@@ -524,7 +509,11 @@ export function HomePromoAdminClient() {
             </SortableContext>
           </DndContext>
 
-          <div className={styles.actions}>
+          {items.length === 0 ? (
+            <p className={catalogStyles.lead}>Карточек пока нет</p>
+          ) : null}
+
+          <div className={catalogStyles.formActions}>
             <AdminCompactBtn
               type="button"
               variant="outline"
@@ -544,8 +533,7 @@ export function HomePromoAdminClient() {
                 ]);
               }}
             >
-              Добавить карточку
-              {items.length >= MAX_ITEMS ? ` (макс. ${MAX_ITEMS})` : ''}
+              {items.length >= MAX_ITEMS ? `Макс. ${MAX_ITEMS} карточек` : 'Добавить карточку'}
             </AdminCompactBtn>
             <AdminCompactBtn type="submit" variant="accent" disabled={!canSave}>
               {saving ? 'Сохранение…' : 'Сохранить'}

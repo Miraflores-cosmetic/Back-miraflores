@@ -254,7 +254,11 @@ export function AdminSidebarNav({
                 <span className={styles.navLinkLeading} />
                 <span className={styles.navLinkLabel}>{item.label}</span>
                 {showOrdersBadge ? (
-                  <span className={styles.navBadge} aria-label={`Непросмотренных заказов: ${unviewedOrdersCount}`}>
+                  <span
+                    className={styles.navBadge}
+                    title="Оплаченные заказы без просмотра карточки"
+                    aria-label={`Непросмотренных оплаченных заказов: ${unviewedOrdersCount}`}
+                  >
                     {unviewedOrdersCount > 99 ? '99+' : unviewedOrdersCount}
                   </span>
                 ) : null}

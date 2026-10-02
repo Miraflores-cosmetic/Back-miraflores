@@ -638,6 +638,66 @@
   gap: 8px;
 }
 
+.orderNumberLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.orderUnviewedDot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #297230;
+  box-shadow: 0 0 0 2px rgba(41, 114, 48, 0.18);
+}
+
+.orderUnviewedChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--account-hairline-color, #e2e6e8);
+  background: #fff;
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.orderUnviewedChip:hover:not(:disabled) {
+  border-color: #297230;
+}
+
+.orderUnviewedChip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.orderUnviewedChipActive {
+  border-color: #297230;
+  background: rgba(41, 114, 48, 0.08);
+}
+
+.orderUnviewedChipCount {
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #297230;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.orderUnviewedChipCountZero {
+  background: var(--color-bright-snow, #f5f7f8);
+  color: #5b6166;
+}
+
 .badgeCert {
   display: inline-flex;
   align-items: center;

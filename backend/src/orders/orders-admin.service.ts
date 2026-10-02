@@ -161,13 +161,22 @@ export class OrdersAdminService {
       limit?: number;
       staffUserId?: string;
       flag?: string;
+      unviewedOnly?: boolean;
     } = {},
   ) {
     const page = Math.max(1, opts.page ?? 1);
     const limit = Math.min(LIST_MAX, Math.max(1, opts.limit ?? LIST_DEFAULT));
     const base = this.listWhere(opts.q, opts.status);
     const flag = parseOzonFlagFilter(opts.flag);
-    const where: Prisma.OrderWhereInput = flag ? { AND: [base, ozonFlagWhere(flag)] } : base;
+    let where: Prisma.OrderWhereInput = flag ? { AND: [base, ozonFlagWhere(flag)] } : base;
+    if (opts.unviewedOnly) {
+      where = {
+        AND: [
+          where,
+          { adminViewedAt: null, status: OrderStatus.PAID },
+        ],
+      };
+    }
 
     const [total, rows] = await this.prisma.$transaction([
       this.prisma.order.count({ where }),
@@ -188,6 +197,7 @@ export class OrdersAdminService {
           userId: true,
           createdAt: true,
           shippingMethod: true,
+          adminViewedAt: true,
           shipments: { select: { provider: true, tracking: true, carrierCostRub: true } },
         },
       }),
@@ -205,8 +215,9 @@ export class OrdersAdminService {
     ]);
 
     return {
-      items: rows.map(({ shipments, ...r }) => ({
+      items: rows.map(({ shipments, adminViewedAt, ...r }) => ({
         ...r,
+        adminUnviewed: r.status === OrderStatus.PAID && adminViewedAt == null,
         ozon: ozonRowFlags({ status: r.status, shippingMethod: r.shippingMethod, shipments }),
         chatUnreadCount: chatUnreadByOrderId[r.id] ?? 0,
         chatMessageCount: chatMessageCountByOrderId[r.id] ?? 0,

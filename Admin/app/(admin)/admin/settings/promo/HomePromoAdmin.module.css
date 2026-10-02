@@ -1,16 +1,37 @@
+/* Локальные дополнения к Settings.module.css (faqCard / heroImages). */
+
 .preview {
-  margin: 0 0 24px;
-  padding: 16px;
+  margin: 0 0 20px;
+  max-width: 720px;
+  padding: 14px;
   border: 1px solid var(--account-hairline-color, #e2e6e8);
   border-radius: 10px;
-  background: var(--color-bright-snow, #f5f7f8);
+  background: #fff;
+}
+
+.previewHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin-bottom: 12px;
 }
 
 .previewTitle {
-  margin: 0 0 12px;
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-gray, #9d9d9d);
+}
+
+.previewWords {
+  margin: 0;
   font-size: 0.875rem;
   font-weight: 500;
-  color: var(--color-black);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #297230;
 }
 
 .previewFan {
@@ -18,21 +39,23 @@
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  min-height: 140px;
-  padding: 12px 8px 4px;
+  min-height: 132px;
+  padding: 16px 12px 8px;
   overflow: hidden;
+  border-radius: 8px;
+  background: var(--color-bright-snow, #f5f7f8);
 }
 
 .previewCard {
   position: relative;
   flex: 0 0 auto;
-  width: 88px;
+  width: 84px;
   aspect-ratio: 1.2 / 1;
-  margin-left: -28px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  margin-left: -26px;
+  border: 1px solid var(--account-hairline-color, #e2e6e8);
   background: #e8e6e1;
   overflow: hidden;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
 }
 
 .previewCard:first-child {
@@ -40,7 +63,7 @@
 }
 
 .previewCardInactive {
-  opacity: 0.4;
+  opacity: 0.38;
 }
 
 .previewCardNotch {
@@ -65,8 +88,9 @@
 }
 
 .previewHint {
-  margin: 8px 0 0;
+  margin: 10px 0 0;
   font-size: 0.75rem;
+  line-height: 1.4;
   color: var(--color-gray, #9d9d9d);
 }
 
@@ -74,8 +98,8 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
-  margin-bottom: 24px;
-  max-width: 480px;
+  margin: 0 0 20px;
+  max-width: 720px;
 }
 
 @media (max-width: 640px) {
@@ -84,47 +108,63 @@
   }
 }
 
-.cardBody {
+.cardFields {
   display: grid;
-  gap: 12px;
+  grid-template-columns: minmax(160px, 220px) 1fr;
+  gap: 16px;
+  align-items: start;
 }
 
-.thumb {
-  display: block;
-  width: 160px;
-  height: 120px;
-  object-fit: cover;
-  margin-bottom: 8px;
-  background: #eee;
+@media (max-width: 720px) {
+  .cardFields {
+    grid-template-columns: 1fr;
+  }
 }
 
-.thumbActions {
+.imageCol {
   display: flex;
+  flex-direction: column;
   gap: 8px;
-  flex-wrap: wrap;
 }
 
-.fileInput {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
-.actions {
+.metaCol {
   display: flex;
+  flex-direction: column;
   gap: 12px;
-  margin-top: 16px;
-  flex-wrap: wrap;
+  min-width: 0;
 }
 
-.sortable {
-  list-style: none;
+.fieldError {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.8125rem;
+  color: #b42318;
+}
+
+.linkPickRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+}
+
+.linkPath {
   margin: 0;
-  padding: 0;
+  flex: 1 1 160px;
+  min-width: 0;
+  font-size: 0.875rem;
+  word-break: break-all;
+  color: var(--color-gray-dark, #4a4a4a);
+}
+
+.linkHint {
+  margin: -4px 0 0;
+  font-size: 0.75rem;
+  color: var(--color-gray, #9d9d9d);
+}
+
+.checkRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 20px;
 }

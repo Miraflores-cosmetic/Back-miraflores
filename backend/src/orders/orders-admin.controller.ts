@@ -45,7 +45,10 @@ export class OrdersAdminController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('flag') flag?: string,
+    @Query('unviewed') unviewed?: string,
   ) {
+    const unviewedOnly =
+      unviewed === '1' || unviewed?.trim().toLowerCase() === 'true';
     return this.orders.list({
       q,
       status,
@@ -53,6 +56,7 @@ export class OrdersAdminController {
       limit: parseOptionalPositiveInt(limit),
       staffUserId,
       flag,
+      unviewedOnly,
     });
   }
 

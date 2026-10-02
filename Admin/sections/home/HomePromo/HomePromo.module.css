@@ -60,7 +60,6 @@
 }
 
 .stack {
-  --stack-shift: -5%;
   position: relative;
   flex: 0 1 auto;
   width: min(1200px, 92vw);
@@ -69,7 +68,6 @@
   perspective: 1600px;
   perspective-origin: 50% 50%;
   transform-style: preserve-3d;
-  transform: translateX(var(--stack-shift));
   z-index: 2;
 }
 
@@ -79,10 +77,10 @@
 
 @keyframes stackIdle {
   from {
-    transform: translateX(var(--stack-shift)) translateY(0);
+    transform: translateY(0);
   }
   to {
-    transform: translateX(var(--stack-shift)) translateY(-6px);
+    transform: translateY(-6px);
   }
 }
 
@@ -131,9 +129,6 @@
 }
 
 .cardActive {
-  --fan: 0deg;
-  --z: 220px;
-  --push: 0%;
   z-index: 16;
 }
 
@@ -170,7 +165,6 @@
 
 @media (max-width: 1024px) {
   .stack {
-    --stack-shift: -4%;
     width: min(100%, 94vw);
     height: clamp(240px, 44vw, 520px);
   }

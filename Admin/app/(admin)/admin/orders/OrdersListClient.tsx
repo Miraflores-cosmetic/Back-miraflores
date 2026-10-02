@@ -11,7 +11,12 @@ import {
 } from '@/lib/adminBackendFetch';
 import { formatAdminDateTime, formatAdminMoney } from '@/lib/adminFormat';
 import type { AdminOrderListResponse } from '@/lib/adminOrderTypes';
+import {
+  ADMIN_ORDERS_UNVIEWED_REFRESH_EVENT,
+  useAdminUnviewedOrdersCount,
+} from '@/hooks/useAdminUnviewedOrdersCount';
 import { orderStatusLabel, orderStatusBadgeClass } from '@/lib/orderStatusLabels';
+import { usePathname } from 'next/navigation';
 import catalogStyles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
 import orderStyles from './orders.module.css';
 
@@ -39,9 +44,12 @@ const STATUS_FILTERS: Array<{ value: string; label: string }> = [
 ];
 
 export function OrdersListClient() {
+  const pathname = usePathname();
+  const unviewedSidebarCount = useAdminUnviewedOrdersCount(true, pathname);
   const [q, setQ] = useState('');
   const [qDebounced, setQDebounced] = useState('');
   const [status, setStatus] = useState('');
+  const [unviewedOnly, setUnviewedOnly] = useState(false);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [fetching, setFetching] = useState(false);
@@ -67,6 +75,7 @@ export function OrdersListClient() {
       });
       if (qDebounced.trim()) sp.set('q', qDebounced.trim());
       if (status) sp.set('status', status);
+      if (unviewedOnly) sp.set('unviewed', '1');
       const res = await adminBackendJson<AdminOrderListResponse>(
         `orders/admin?${sp}`,
       );
@@ -82,16 +91,20 @@ export function OrdersListClient() {
       setLoading(false);
       if (!soft) setFetching(false);
     }
-  }, [page, qDebounced, status]);
+  }, [page, qDebounced, status, unviewedOnly]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
   useEffect(() => {
-    const onChatRefresh = () => void load({ soft: true });
-    document.addEventListener(CHAT_UNREAD_REFRESH_EVENT, onChatRefresh);
-    return () => document.removeEventListener(CHAT_UNREAD_REFRESH_EVENT, onChatRefresh);
+    const onRefresh = () => void load({ soft: true });
+    document.addEventListener(CHAT_UNREAD_REFRESH_EVENT, onRefresh);
+    document.addEventListener(ADMIN_ORDERS_UNVIEWED_REFRESH_EVENT, onRefresh);
+    return () => {
+      document.removeEventListener(CHAT_UNREAD_REFRESH_EVENT, onRefresh);
+      document.removeEventListener(ADMIN_ORDERS_UNVIEWED_REFRESH_EVENT, onRefresh);
+    };
   }, [load]);
 
   const items = data?.items ?? [];
@@ -131,7 +144,11 @@ export function OrdersListClient() {
         error={error}
         onRetry={() => void load()}
         loadingLabel="Загрузка заказов…"
-        empty="Заказов пока нет"
+        empty={
+          unviewedOnly
+            ? 'Нет непросмотренных оплаченных заказов'
+            : 'Заказов пока нет'
+        }
         isEmpty={!loading && items.length === 0}
         isFetching={fetching}
         toolbar={
@@ -162,6 +179,30 @@ export function OrdersListClient() {
                 ))}
               </select>
             </label>
+            {unviewedSidebarCount > 0 || unviewedOnly ? (
+              <button
+                type="button"
+                className={`${styles.orderUnviewedChip} ${
+                  unviewedOnly ? styles.orderUnviewedChipActive : ''
+                }`}
+                aria-pressed={unviewedOnly}
+                title="Оплаченные заказы, карточку которых ещё не открывали — как зелёная «1» у пункта «Заказы»"
+                disabled={fetching}
+                onClick={() => {
+                  setUnviewedOnly((v) => !v);
+                  setPage(1);
+                }}
+              >
+                Непросмотренные
+                <span
+                  className={`${styles.orderUnviewedChipCount} ${
+                    unviewedSidebarCount < 1 ? styles.orderUnviewedChipCountZero : ''
+                  }`}
+                >
+                  {unviewedSidebarCount > 99 ? '99+' : unviewedSidebarCount}
+                </span>
+              </button>
+            ) : null}
           </div>
         }
         pagination={
@@ -195,7 +236,16 @@ export function OrdersListClient() {
               return (
               <tr key={o.id}>
                 <td>
-                  <Link href={`/admin/orders/${o.id}`}>{o.number}</Link>
+                  <Link href={`/admin/orders/${o.id}`} className={styles.orderNumberLink}>
+                    {o.adminUnviewed ? (
+                      <span
+                        className={styles.orderUnviewedDot}
+                        title="Новый оплаченный заказ — откройте карточку, чтобы снять уведомление"
+                        aria-hidden
+                      />
+                    ) : null}
+                    <span>{o.number}</span>
+                  </Link>
                 </td>
                 <td>
                   <span

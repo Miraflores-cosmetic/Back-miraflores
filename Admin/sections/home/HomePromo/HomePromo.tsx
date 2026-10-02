@@ -115,7 +115,6 @@ export function HomePromo({
         .join(' ')}
       aria-label={label}
     >
-      {/* Desktop / tablet fan */}
       <div className={styles.stage}>
         <p className={`${styles.word} ${styles.wordLeft}`} aria-hidden>
           {titleLeft}
@@ -145,20 +144,18 @@ export function HomePromo({
 
             const style = {
               ...base,
-              ['--push' as string]: isPushed ? `${pushSteps * 10}%` : '0%',
+              ...(isActive
+                ? {
+                    ['--fan' as string]: '0deg',
+                    ['--z' as string]: '240px',
+                    ['--scale' as string]: '1.08',
+                    ['--push' as string]: '0%',
+                  }
+                : {
+                    ['--push' as string]: isPushed ? `${pushSteps * 10}%` : '0%',
+                  }),
               zIndex: isActive ? 16 : isPushed ? 5 + index : (base.zIndex as number),
             } as CSSProperties;
-
-            const img = (
-              <Image
-                src={card.imageUrl}
-                alt=""
-                fill
-                className={styles.cardImg}
-                sizes="(max-width: 1024px) 42vw, 532px"
-                unoptimized={remote}
-              />
-            );
 
             return (
               <Link
@@ -173,7 +170,14 @@ export function HomePromo({
                 onFocus={() => commitActive(index)}
                 onBlur={clearActive}
               >
-                {img}
+                <Image
+                  src={card.imageUrl}
+                  alt=""
+                  fill
+                  className={styles.cardImg}
+                  sizes="(max-width: 1024px) 42vw, 532px"
+                  unoptimized={remote}
+                />
               </Link>
             );
           })}
@@ -184,7 +188,6 @@ export function HomePromo({
         </p>
       </div>
 
-      {/* Mobile slider */}
       <div className={styles.mobileStage}>
         <div className={styles.mobileStrip} role="list" aria-label={label}>
           {items.map((card) => {
