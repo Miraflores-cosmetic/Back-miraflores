@@ -282,6 +282,7 @@ model Category {
   children       Category[] @relation("CategoryTree")
   products       Product[]
   discountLinks  DiscountCategory[]
+  promoLinks     PromoCodeCategory[]
   groupPrices    GroupCategoryPrice[]
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
@@ -349,6 +350,7 @@ model Product {
   productSetItems    ProductSetItem[]
   catalogTags        ProductCatalogTag[]
   discountLinks      DiscountProduct[]
+  promoLinks         PromoCodeProduct[]
   reviews            ProductReview[]
   homepageSets       HomepageSet[]
   menuSettings       MenuSettings[]
@@ -702,9 +704,33 @@ model PromoCode {
   oneShot        Boolean              @default(false)
   /// мин. сумма корзины (₽), null = без порога
   minOrderAmount Int?
+  /// null = весь заказ; CATEGORY / PRODUCTS — как у Discount
+  scope          DiscountScope?
+  categories     PromoCodeCategory[]
+  products       PromoCodeProduct[]
   redemptions    PromoCodeRedemption[]
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
+}
+
+model PromoCodeCategory {
+  promoCodeId String
+  categoryId  String
+  promoCode   PromoCode @relation(fields: [promoCodeId], references: [id], onDelete: Cascade)
+  category    Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([promoCodeId, categoryId])
+  @@index([categoryId])
+}
+
+model PromoCodeProduct {
+  promoCodeId String
+  productId   String
+  promoCode   PromoCode @relation(fields: [promoCodeId], references: [id], onDelete: Cascade)
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([promoCodeId, productId])
+  @@index([productId])
 }
 
 /// История применений промокода (связка с заказом)
@@ -1048,6 +1074,31 @@ model HomepageSet {
 
   @@index([active, sortOrder])
   @@index([productId])
+}
+
+/// Заголовок блока промо на главной (НАШИ / АКЦИИ)
+model HomePromoConfig {
+  id         String   @id @default("default")
+  titleLeft  String   @default("НАШИ")
+  titleRight String   @default("АКЦИИ")
+  updatedAt  DateTime @updatedAt
+}
+
+/// Карточки веера / слайдера промо на главной
+model HomePromoBanner {
+  id        String   @id @default(cuid())
+  imageUrl  String
+  /// Путь на витрине, напр. /catalog
+  href      String   @default("/catalog")
+  alt       String   @default("")
+  /// Треугольный вырез справа
+  notch     Boolean  @default(false)
+  sortOrder Int      @default(0)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([active, sortOrder])
 }
 
 /// Текст / медиа квиза подбора ухода (ключ → plain/html/media)

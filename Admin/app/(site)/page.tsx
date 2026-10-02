@@ -1,4 +1,5 @@
 import { Hero } from '@/sections/home/Hero/Hero';
+import { HomePromo } from '@/sections/home/HomePromo/HomePromo';
 import { Recommendations } from '@/sections/home/Recommendations/Recommendations';
 import { FeaturedCollections } from '@/sections/home/FeaturedCollections/FeaturedCollections';
 import { Articles } from '@/sections/home/Articles/Articles';
@@ -16,6 +17,7 @@ import {
 } from '@/lib/blogPublicServer';
 import { fetchPublicFaq } from '@/lib/faqPublicServer';
 import { fetchPublicHero } from '@/lib/heroPublicServer';
+import { fetchPublicHomePromo } from '@/lib/homePromoPublicServer';
 import { fetchPublicHomepageSets } from '@/lib/homepageSetsPublicServer';
 import { Sets } from '@/sections/home/Sets/Sets';
 
@@ -44,7 +46,7 @@ export default async function HomePage({
 }: {
   searchParams?: { q?: string };
 }) {
-  const [products, collections, blogPosts, blogCategories, faq, hero, homepageSets] =
+  const [products, collections, blogPosts, blogCategories, faq, hero, homepageSets, homePromo] =
     await Promise.all([
     fetchPublicProducts({ limit: 12 }),
     fetchPublicCollections(),
@@ -53,6 +55,7 @@ export default async function HomePage({
     fetchPublicFaq(),
     fetchPublicHero(),
     fetchPublicHomepageSets(),
+    fetchPublicHomePromo(),
   ]);
 
   const productCards = products.map(toProductCardProps);
@@ -76,6 +79,13 @@ export default async function HomePage({
   return (
     <main>
       <Hero slides={hero.items} />
+      {homePromo.items.length > 0 ? (
+        <HomePromo
+          titleLeft={homePromo.titleLeft}
+          titleRight={homePromo.titleRight}
+          items={homePromo.items}
+        />
+      ) : null}
       {firstHomepageSet ? (
         <Sets
           setImageUrl={firstHomepageSet.imageUrl}

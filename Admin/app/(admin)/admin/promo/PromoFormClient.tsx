@@ -3,18 +3,28 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AdminCheckbox } from '@/components/admin/AdminCheckbox/AdminCheckbox';
+import { adminConfirm } from '@/components/admin/AdminModal/adminConfirm';
 import { AdminCompactBtn, AdminCompactBtnLink } from '@/components/AdminCompactBtn/AdminCompactBtn';
+import { AdminPillChip, AdminPillChipList } from '@/components/AdminPillChip/AdminPillChip';
 import { AdminListPagination } from '@/components/admin/AdminListPagination/AdminListPagination';
+import { AdminTabs } from '@/components/AdminTabs/AdminTabs';
 import { AdminSelect, AdminTextField } from '@/components/AdminTextField/AdminTextField';
 import {
   AdminBackendRequestError,
   adminBackendJson,
 } from '@/lib/adminBackendFetch';
 import { formatAdminDateTime } from '@/lib/adminFormat';
-import type { AdminPromoCode, PromoType } from '@/lib/adminPromoTypes';
+import type { AdminPromoCode, PromoScope, PromoType } from '@/lib/adminPromoTypes';
 import styles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
+import {
+  DiscountCategoryPickerModal,
+  DiscountProductPickerModal,
+} from '@/app/(admin)/admin/discounts/DiscountScopePickerModal';
+import { DISCOUNT_CATEGORY_NO_DESCENDANTS_HINT } from '@/app/(admin)/admin/discounts/discountHints';
 
 const REDEMPTIONS_LIMIT = 20;
+
+type ScopeTab = 'ALL' | PromoScope;
 
 function parseMoscowParts(iso: string | null | undefined): { date: string; time: string } {
   if (!iso) return { date: '', time: '00:00' };
@@ -71,6 +81,14 @@ export function PromoFormClient({ promoId }: { promoId?: string }) {
   const [endDate, setEndDate] = useState('');
   const [endTime, setEndTime] = useState('23:59');
 
+  const [scopeTab, setScopeTab] = useState<ScopeTab>('ALL');
+  const [categoryIds, setCategoryIds] = useState<string[]>([]);
+  const [categoryLabels, setCategoryLabels] = useState<Record<string, string>>({});
+  const [productIds, setProductIds] = useState<string[]>([]);
+  const [productLabels, setProductLabels] = useState<Record<string, string>>({});
+  const [catModalOpen, setCatModalOpen] = useState(false);
+  const [prodModalOpen, setProdModalOpen] = useState(false);
+
   const applyDetail = useCallback((row: AdminPromoCode) => {
     setDetail(row);
     setCode(row.code);
@@ -86,6 +104,21 @@ export function PromoFormClient({ promoId }: { promoId?: string }) {
     setStartTime(s.time);
     setEndDate(e.date);
     setEndTime(e.time);
+
+    setScopeTab(row.scope ?? 'ALL');
+    setCategoryIds(row.categoryIds ?? []);
+    setCategoryLabels(
+      Object.fromEntries(
+        (row.categories ?? []).map((c) => [
+          c.id,
+          c.parentName ? `${c.parentName} → ${c.name}` : c.name,
+        ]),
+      ),
+    );
+    setProductIds(row.productIds ?? []);
+    setProductLabels(
+      Object.fromEntries((row.products ?? []).map((p) => [p.id, p.name])),
+    );
   }, []);
 
   useEffect(() => {
@@ -117,6 +150,34 @@ export function PromoFormClient({ promoId }: { promoId?: string }) {
     };
   }, [promoId, redemptionsPage, applyDetail]);
 
+  async function changeScopeTab(next: ScopeTab) {
+    if (next === scopeTab) return;
+    const clearingProducts = next !== 'PRODUCTS' && productIds.length > 0;
+    const clearingCategories = next !== 'CATEGORY' && categoryIds.length > 0;
+    if (clearingProducts || clearingCategories) {
+      const ok = await adminConfirm({
+        title: 'Сменить область',
+        message:
+          next === 'ALL'
+            ? 'Сменить на весь заказ? Выбор категорий и товаров будет очищен.'
+            : next === 'CATEGORY'
+              ? 'Сменить область на категории? Выбор товаров будет очищен.'
+              : 'Сменить область на товары? Выбор категорий будет очищен.',
+        confirmLabel: 'Сменить',
+      });
+      if (!ok) return;
+    }
+    if (next !== 'PRODUCTS') {
+      setProductIds([]);
+      setProductLabels({});
+    }
+    if (next !== 'CATEGORY') {
+      setCategoryIds([]);
+      setCategoryLabels({});
+    }
+    setScopeTab(next);
+  }
+
   async function onSave(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
@@ -126,6 +187,12 @@ export function PromoFormClient({ promoId }: { promoId?: string }) {
       if (!code.trim()) throw new Error('Укажите код');
       if (!Number.isFinite(n) || n < 1) throw new Error('Значение: целое число ≥ 1');
       if (type === 'PERCENT' && n > 100) throw new Error('PERCENT: максимум 100');
+      if (scopeTab === 'CATEGORY' && categoryIds.length === 0) {
+        throw new Error('Выберите категорию или подкатегорию');
+      }
+      if (scopeTab === 'PRODUCTS' && productIds.length === 0) {
+        throw new Error('Выберите хотя бы один товар');
+      }
 
       const body = {
         code: code.trim().toUpperCase(),
@@ -137,6 +204,9 @@ export function PromoFormClient({ promoId }: { promoId?: string }) {
         minOrderAmount: optionalInt(minOrderAmount),
         startsAt: combineMoscowDateTime(startDate, startTime),
         endsAt: combineMoscowDateTime(endDate, endTime),
+        scope: scopeTab === 'ALL' ? null : scopeTab,
+        categoryIds: scopeTab === 'CATEGORY' ? categoryIds : [],
+        productIds: scopeTab === 'PRODUCTS' ? productIds : [],
       };
 
       if (!isEdit) {
@@ -153,8 +223,7 @@ export function PromoFormClient({ promoId }: { promoId?: string }) {
         method: 'PATCH',
         body: JSON.stringify(body),
       });
-      setCode(updated.code);
-      setDetail((prev) => (prev ? { ...prev, ...updated } : updated));
+      applyDetail(updated);
       router.refresh();
     } catch (err) {
       setError(
@@ -224,6 +293,94 @@ export function PromoFormClient({ promoId }: { promoId?: string }) {
           required
         />
 
+        <section className={styles.section}>
+          <h2 className={styles.sectionTitle}>Настройка области</h2>
+          <AdminTabs
+            ariaLabel="Область промокода"
+            variant="underline"
+            compact
+            activeId={scopeTab}
+            onChange={(id) => void changeScopeTab(id as ScopeTab)}
+            items={[
+              { id: 'ALL', label: 'Весь заказ' },
+              { id: 'CATEGORY', label: 'Категория / подкатегория' },
+              { id: 'PRODUCTS', label: 'Конкретные товары' },
+            ]}
+          />
+          {scopeTab === 'CATEGORY' ? (
+            <p className={styles.muted}>{DISCOUNT_CATEGORY_NO_DESCENDANTS_HINT}</p>
+          ) : null}
+          {scopeTab === 'ALL' ? (
+            <p className={styles.muted}>
+              Скидка считается от суммы всех товаров в корзине (без доставки).
+            </p>
+          ) : null}
+
+          {scopeTab === 'CATEGORY' ? (
+            <div className={styles.pickerStack}>
+              <AdminCompactBtn
+                type="button"
+                variant="outline"
+                onClick={() => setCatModalOpen(true)}
+              >
+                Выбрать категории…
+              </AdminCompactBtn>
+              {categoryIds.length === 0 ? (
+                <p className={styles.muted}>Ничего не выбрано</p>
+              ) : (
+                <AdminPillChipList aria-label="Выбранные категории">
+                  {categoryIds.map((id) => {
+                    const label = categoryLabels[id] ?? id;
+                    return (
+                      <AdminPillChip
+                        key={id}
+                        onRemove={() =>
+                          setCategoryIds((prev) => prev.filter((x) => x !== id))
+                        }
+                        removeAriaLabel={`Убрать «${label}»`}
+                      >
+                        {label}
+                      </AdminPillChip>
+                    );
+                  })}
+                </AdminPillChipList>
+              )}
+            </div>
+          ) : null}
+
+          {scopeTab === 'PRODUCTS' ? (
+            <div className={styles.pickerStack}>
+              <AdminCompactBtn
+                type="button"
+                variant="outline"
+                onClick={() => setProdModalOpen(true)}
+              >
+                Выбрать товары…
+              </AdminCompactBtn>
+              {productIds.length === 0 ? (
+                <p className={styles.muted}>Ничего не выбрано</p>
+              ) : (
+                <AdminPillChipList aria-label="Выбранные товары">
+                  {productIds.map((id) => {
+                    const label = productLabels[id] ?? id;
+                    return (
+                      <AdminPillChip
+                        key={id}
+                        onRemove={() =>
+                          setProductIds((prev) => prev.filter((x) => x !== id))
+                        }
+                        removeAriaLabel={`Убрать «${label}»`}
+                      >
+                        {label}
+                      </AdminPillChip>
+                    );
+                  })}
+                </AdminPillChipList>
+              )}
+            </div>
+          ) : null}
+        </section>
+
         <label className={styles.labelCheckboxRow} htmlFor="promo-active">
           <AdminCheckbox
             id="promo-active"
@@ -251,12 +408,23 @@ export function PromoFormClient({ promoId }: { promoId?: string }) {
           onChange={(e) => setMaxUses(e.target.value)}
         />
         <AdminTextField
-          label="Мин. сумма заказа ₽ (опц.)"
+          label={
+            scopeTab === 'ALL'
+              ? 'Мин. сумма заказа ₽ (опц.)'
+              : 'Мин. сумма области ₽ (опц.)'
+          }
           type="number"
           min={1}
           value={minOrderAmount}
           onChange={(e) => setMinOrderAmount(e.target.value)}
         />
+        {minOrderAmount.trim() ? (
+          <p className={styles.muted}>
+            {scopeTab === 'ALL'
+              ? 'Порог по сумме всех товаров в корзине (без доставки).'
+              : 'Порог по сумме только выбранных категорий/товаров — той же базы, с которой считается скидка.'}
+          </p>
+        ) : null}
 
         <AdminTextField
           label="Начало (дата МСК, опц.)"
@@ -289,6 +457,26 @@ export function PromoFormClient({ promoId }: { promoId?: string }) {
             : ''}
         </p>
       </form>
+
+      <DiscountCategoryPickerModal
+        open={catModalOpen}
+        selectedIds={categoryIds}
+        onClose={() => setCatModalOpen(false)}
+        onApply={(ids, labels) => {
+          setCategoryIds(ids);
+          setCategoryLabels((prev) => ({ ...prev, ...labels }));
+        }}
+      />
+      <DiscountProductPickerModal
+        open={prodModalOpen}
+        selectedIds={productIds}
+        selectedLabels={productLabels}
+        onClose={() => setProdModalOpen(false)}
+        onApply={(ids, labels) => {
+          setProductIds(ids);
+          setProductLabels(labels);
+        }}
+      />
 
       {isEdit ? (
         <section className={styles.section} style={{ marginTop: 32 }}>

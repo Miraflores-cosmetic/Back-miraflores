@@ -16,6 +16,11 @@ import type { ReplaceFaqItemsDto } from './dto/faq.dto';
 import type { ReplaceGratitudeDto } from './dto/gratitude.dto';
 import type { ReplaceHeroSlidesDto } from './dto/hero.dto';
 import type { ReplaceHomepageSetsDto } from './dto/homepage-sets.dto';
+import type { ReplaceHomePromoDto } from './dto/home-promo.dto';
+import {
+  HOME_PROMO_HREF_PATTERN,
+  HOME_PROMO_MAX_ITEMS,
+} from './dto/home-promo.dto';
 import type { ReplaceProductAttributeOptionsDto } from './dto/product-attributes.dto';
 import type { ReplaceQuizContentDto } from './dto/quiz-content.dto';
 import type { UpdateCartSettingsDto } from './dto/cart.dto';
@@ -116,6 +121,30 @@ function serializeHero(row: {
     id: row.id,
     imageUrl: row.imageUrl,
     mobileImageUrl: row.mobileImageUrl,
+    sortOrder: row.sortOrder,
+    active: row.active,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+function serializeHomePromoBanner(row: {
+  id: string;
+  imageUrl: string;
+  href: string;
+  alt: string;
+  notch: boolean;
+  sortOrder: number;
+  active: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    id: row.id,
+    imageUrl: row.imageUrl,
+    href: row.href,
+    alt: row.alt,
+    notch: row.notch,
     sortOrder: row.sortOrder,
     active: row.active,
     createdAt: row.createdAt.toISOString(),
@@ -694,6 +723,102 @@ export class SettingsAdminService {
     });
 
     return { items: rows.map(serializeHero) };
+  }
+
+  async getHomePromo() {
+    const [config, rows] = await Promise.all([
+      this.prisma.homePromoConfig.upsert({
+        where: { id: 'default' },
+        create: { id: 'default', titleLeft: 'НАШИ', titleRight: 'АКЦИИ' },
+        update: {},
+      }),
+      this.prisma.homePromoBanner.findMany({
+        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+      }),
+    ]);
+    return {
+      titleLeft: config.titleLeft,
+      titleRight: config.titleRight,
+      items: rows.map(serializeHomePromoBanner),
+    };
+  }
+
+  async replaceHomePromo(dto: ReplaceHomePromoDto) {
+    const titleLeft = (dto.titleLeft ?? '').trim() || 'НАШИ';
+    const titleRight = (dto.titleRight ?? '').trim() || 'АКЦИИ';
+    const rawItems = dto.items ?? [];
+    if (rawItems.length > HOME_PROMO_MAX_ITEMS) {
+      throw new BadRequestException(
+        `Не больше ${HOME_PROMO_MAX_ITEMS} промо-карточек`,
+      );
+    }
+    const cleaned = rawItems.map((it) => ({
+      id: typeof it.id === 'string' && it.id.trim() ? it.id.trim() : undefined,
+      imageUrl: it.imageUrl.trim(),
+      href: (it.href ?? '/catalog').trim() || '/catalog',
+      alt: (it.alt ?? '').trim(),
+      notch: it.notch ?? false,
+      active: it.active ?? true,
+    }));
+    const incomplete = cleaned.filter((it) => !it.imageUrl);
+    if (incomplete.length > 0) {
+      throw new BadRequestException(
+        incomplete.length === 1
+          ? 'У карточки нет картинки'
+          : `Есть карточки без картинки (${incomplete.length})`,
+      );
+    }
+    const badHref = cleaned.find((it) => !HOME_PROMO_HREF_PATTERN.test(it.href));
+    if (badHref) {
+      throw new BadRequestException(
+        'Ссылка должна быть относительным путём на сайте (например /catalog)',
+      );
+    }
+
+    const rows = await this.prisma.$transaction(async (tx) => {
+      await tx.homePromoConfig.upsert({
+        where: { id: 'default' },
+        create: { id: 'default', titleLeft, titleRight },
+        update: { titleLeft, titleRight },
+      });
+
+      const existing = await tx.homePromoBanner.findMany({ select: { id: true } });
+      const existingIds = new Set(existing.map((r) => r.id));
+      const keepIds = new Set(
+        cleaned
+          .map((it) => it.id)
+          .filter((id): id is string => Boolean(id && existingIds.has(id))),
+      );
+      const toDelete = [...existingIds].filter((id) => !keepIds.has(id));
+      if (toDelete.length > 0) {
+        await tx.homePromoBanner.deleteMany({ where: { id: { in: toDelete } } });
+      }
+
+      const out = [];
+      for (let i = 0; i < cleaned.length; i++) {
+        const it = cleaned[i]!;
+        const data = {
+          imageUrl: it.imageUrl,
+          href: it.href,
+          alt: it.alt,
+          notch: it.notch,
+          active: it.active,
+          sortOrder: i,
+        };
+        if (it.id && existingIds.has(it.id)) {
+          out.push(await tx.homePromoBanner.update({ where: { id: it.id }, data }));
+        } else {
+          out.push(await tx.homePromoBanner.create({ data }));
+        }
+      }
+      return out;
+    });
+
+    return {
+      titleLeft,
+      titleRight,
+      items: rows.map(serializeHomePromoBanner),
+    };
   }
 
   async listHomepageSets() {
@@ -1335,6 +1460,28 @@ export class SettingsPublicService {
       },
     });
     return { items: rows };
+  }
+
+  async getHomePromo() {
+    const [config, rows] = await Promise.all([
+      this.prisma.homePromoConfig.findUnique({ where: { id: 'default' } }),
+      this.prisma.homePromoBanner.findMany({
+        where: { active: true },
+        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+        select: {
+          id: true,
+          imageUrl: true,
+          href: true,
+          alt: true,
+          notch: true,
+        },
+      }),
+    ]);
+    return {
+      titleLeft: config?.titleLeft?.trim() || 'НАШИ',
+      titleRight: config?.titleRight?.trim() || 'АКЦИИ',
+      items: rows,
+    };
   }
 
   async listHomepageSets() {

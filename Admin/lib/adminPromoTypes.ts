@@ -1,5 +1,7 @@
 export type PromoType = 'PERCENT' | 'FIXED';
 
+export type PromoScope = 'CATEGORY' | 'PRODUCTS';
+
 export type AdminPromoRedemption = {
   id: string;
   orderId: string;
@@ -10,6 +12,20 @@ export type AdminPromoRedemption = {
   guestId: string | null;
   createdAt: string;
   order?: { number: string; total: number; status: string };
+};
+
+export type AdminPromoCategory = {
+  id: string;
+  name: string;
+  slug: string;
+  parentId: string | null;
+  parentName: string | null;
+};
+
+export type AdminPromoProduct = {
+  id: string;
+  name: string;
+  slug: string;
 };
 
 export type AdminPromoCode = {
@@ -23,6 +39,12 @@ export type AdminPromoCode = {
   maxUses: number | null;
   oneShot: boolean;
   minOrderAmount: number | null;
+  /** null = весь заказ */
+  scope: PromoScope | null;
+  categoryIds?: string[];
+  categories?: AdminPromoCategory[];
+  productIds?: string[];
+  products?: AdminPromoProduct[];
   usedCount?: number;
   redemptions?: AdminPromoRedemption[];
   redemptionsTotal?: number;
@@ -54,4 +76,10 @@ export function formatPromoReward(type: string, value: number): string {
     return `${value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} ₽`;
   }
   return `${type}: ${value}`;
+}
+
+export function promoScopeLabel(scope: PromoScope | null | undefined): string {
+  if (scope === 'CATEGORY') return 'Категории';
+  if (scope === 'PRODUCTS') return 'Товары';
+  return 'Весь заказ';
 }

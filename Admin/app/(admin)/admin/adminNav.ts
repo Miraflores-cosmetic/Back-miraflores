@@ -94,10 +94,12 @@ export const ADMIN_NAV: NavItem[] = [
       '/admin/homepage-sets',
       '/admin/settings/home',
       '/admin/settings/menu',
+      '/admin/settings/promo',
     ],
     children: [
       { href: '/admin/hero', label: 'Hero', section: 'settings' },
       { href: '/admin/homepage-sets', label: 'Наборы на главной', section: 'settings' },
+      { href: '/admin/settings/promo', label: 'Промо', section: 'settings' },
       { href: '/admin/faq', label: 'FAQ', section: 'settings' },
       { href: '/admin/quiz', label: 'Квиз', section: 'settings' },
       { href: '/admin/settings/menu', label: 'Меню', section: 'settings' },
@@ -129,6 +131,7 @@ export const ADMIN_NAV: NavItem[] = [
       '/admin/settings/staff/me',
       '/admin/settings/home',
       '/admin/settings/menu',
+      '/admin/settings/promo',
     ],
     children: [
       { href: '/admin/settings/seo', label: 'SEO', section: 'settings' },

@@ -365,13 +365,13 @@ export class DashboardAdminService {
 
   /** Пробелы контента: summary + top highlights (без полных массивов). */
   async getContentGaps(opts?: {
-    scopes?: Array<'faq' | 'pages' | 'blog' | 'hero'>;
+    scopes?: Array<'faq' | 'pages' | 'blog' | 'hero' | 'home-promo'>;
     highlightLimit?: number;
   }) {
     const scopes = new Set(
       opts?.scopes?.length
         ? opts.scopes
-        : (['faq', 'pages', 'blog', 'hero'] as const),
+        : (['faq', 'pages', 'blog', 'hero', 'home-promo'] as const),
     );
     const highlightLimit = Math.min(12, Math.max(3, opts?.highlightLimit ?? 8));
 
@@ -379,8 +379,17 @@ export class DashboardAdminService {
     const needPages = scopes.has('pages');
     const needBlog = scopes.has('blog');
     const needHero = scopes.has('hero');
+    const needHomePromo = scopes.has('home-promo');
 
-    const [faqs, pages, posts, heroesActive, heroesTotal] = await Promise.all([
+    const [
+      faqs,
+      pages,
+      posts,
+      heroesActive,
+      heroesTotal,
+      homePromoActive,
+      homePromoTotal,
+    ] = await Promise.all([
       needFaq
         ? this.prisma.faqItem.findMany({
             select: {
@@ -423,10 +432,14 @@ export class DashboardAdminService {
         ? this.prisma.heroSlide.count({ where: { active: true } })
         : Promise.resolve(0),
       needHero ? this.prisma.heroSlide.count() : Promise.resolve(0),
+      needHomePromo
+        ? this.prisma.homePromoBanner.count({ where: { active: true } })
+        : Promise.resolve(0),
+      needHomePromo ? this.prisma.homePromoBanner.count() : Promise.resolve(0),
     ]);
 
     type Highlight = {
-      area: 'faq' | 'pages' | 'blog' | 'hero';
+      area: 'faq' | 'pages' | 'blog' | 'hero' | 'home-promo';
       title: string;
       reason: string;
       adminLink: string;
@@ -492,6 +505,24 @@ export class DashboardAdminService {
       });
     }
 
+    const homePromoGap =
+      needHomePromo && homePromoActive === 0
+        ? {
+            activeBanners: 0,
+            totalBanners: homePromoTotal,
+            reason: homePromoTotal === 0 ? 'no_banners' : 'none_active',
+            adminLink: '/admin/settings/promo',
+          }
+        : null;
+    if (homePromoGap) {
+      highlights.push({
+        area: 'home-promo',
+        title: 'Промо на главной',
+        reason: homePromoGap.reason,
+        adminLink: '/admin/settings/promo',
+      });
+    }
+
     return {
       scopes: [...scopes],
       summary: {
@@ -499,15 +530,18 @@ export class DashboardAdminService {
         pageGaps: needPages ? pageGaps.length : null,
         blogGaps: needBlog ? postGaps.length : null,
         heroIssue: needHero ? Boolean(heroGap) : null,
+        homePromoIssue: needHomePromo ? Boolean(homePromoGap) : null,
         totalHighlights: highlights.length,
       },
       highlights: highlights.slice(0, highlightLimit),
       hero: heroGap,
+      homePromo: homePromoGap,
       adminLinks: {
         ...(needFaq ? { faq: '/admin/faq' } : {}),
         ...(needPages ? { pages: '/admin/pages' } : {}),
         ...(needBlog ? { blog: '/admin/blog' } : {}),
         ...(needHero ? { hero: '/admin/hero' } : {}),
+        ...(needHomePromo ? { homePromo: '/admin/settings/promo' } : {}),
       },
     };
   }

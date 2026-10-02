@@ -260,6 +260,12 @@ export function DiscountFormClient({ discountId }: { discountId?: string }) {
       if (!name.trim()) throw new Error('Укажите название');
       if (!startsDate) throw new Error('Укажите дату начала');
       if (hasEndsAt && !endsDate) throw new Error('Укажите дату окончания или снимите галочку');
+      if (scope === 'CATEGORY' && categoryIds.length === 0) {
+        throw new Error('Выберите категорию или подкатегорию');
+      }
+      if (scope === 'PRODUCTS' && productIds.length === 0) {
+        throw new Error('Выберите хотя бы один товар');
+      }
 
       const normalizedRules: AdminDiscountRule[] = rules.map((r) => {
         if (!r.name.trim()) throw new Error('У каждого правила должно быть название');

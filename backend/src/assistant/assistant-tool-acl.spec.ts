@@ -31,11 +31,13 @@ describe('assistant-tool-acl', () => {
       'faq',
       'pages',
       'hero',
+      'home-promo',
     ]);
     expect(contentGapScopesForStaff(['blog', 'settings'], false)).toEqual([
       'faq',
       'pages',
       'hero',
+      'home-promo',
       'blog',
     ]);
     expect(contentGapScopesForStaff([], true)).toEqual([
@@ -43,6 +45,7 @@ describe('assistant-tool-acl', () => {
       'pages',
       'blog',
       'hero',
+      'home-promo',
     ]);
   });
 

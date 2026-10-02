@@ -1170,6 +1170,7 @@ export class CatalogPublicService {
       const displayList = Math.max(r.compareAt ?? r.listPrice, r.listPrice);
       return {
         productId: r.productId,
+        categoryId: r.categoryId,
         variantId: r.variantId,
         shadeId: r.shadeId,
         shadeName: r.shadeName,

@@ -50,12 +50,12 @@ export function filterAssistantToolNames(
 export function contentGapScopesForStaff(
   sections: readonly string[],
   isSuperAdmin: boolean,
-): Array<'faq' | 'pages' | 'blog' | 'hero'> {
-  if (isSuperAdmin) return ['faq', 'pages', 'blog', 'hero'];
+): Array<'faq' | 'pages' | 'blog' | 'hero' | 'home-promo'> {
+  if (isSuperAdmin) return ['faq', 'pages', 'blog', 'hero', 'home-promo'];
   const set = new Set(sections);
-  const scopes: Array<'faq' | 'pages' | 'blog' | 'hero'> = [];
+  const scopes: Array<'faq' | 'pages' | 'blog' | 'hero' | 'home-promo'> = [];
   if (set.has('settings')) {
-    scopes.push('faq', 'pages', 'hero');
+    scopes.push('faq', 'pages', 'hero', 'home-promo');
   }
   if (set.has('blog')) {
     scopes.push('blog');

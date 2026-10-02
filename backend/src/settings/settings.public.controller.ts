@@ -17,6 +17,11 @@ export class SettingsPublicController {
     return this.settings.listHero();
   }
 
+  @Get('home-promo')
+  getHomePromo() {
+    return this.settings.getHomePromo();
+  }
+
   @Get('homepage-sets')
   listHomepageSets() {
     return this.settings.listHomepageSets();

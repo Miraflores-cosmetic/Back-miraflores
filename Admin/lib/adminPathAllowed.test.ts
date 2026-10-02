@@ -73,6 +73,7 @@ describe('adminPathAllowed', () => {
     expect(adminPathAllowed('/admin/homepage-sets', moderatorSettings)).toBe(true);
     expect(adminPathAllowed('/admin/hero', moderatorSettings)).toBe(true);
     expect(adminPathAllowed('/admin/faq', moderatorSettings)).toBe(true);
+    expect(adminPathAllowed('/admin/settings/promo', moderatorSettings)).toBe(true);
   });
 
   it('discounts — нужен grant discounts', () => {

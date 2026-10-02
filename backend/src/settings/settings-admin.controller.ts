@@ -18,6 +18,7 @@ import { ReplaceFaqItemsDto } from './dto/faq.dto';
 import { ReplaceGratitudeDto } from './dto/gratitude.dto';
 import { ReplaceHeroSlidesDto } from './dto/hero.dto';
 import { ReplaceHomepageSetsDto } from './dto/homepage-sets.dto';
+import { ReplaceHomePromoDto } from './dto/home-promo.dto';
 import { ReplaceProductAttributeOptionsDto } from './dto/product-attributes.dto';
 import { ReplaceQuizContentDto } from './dto/quiz-content.dto';
 import { DiscardCartUploadsDto, UpdateCartSettingsDto } from './dto/cart.dto';
@@ -65,6 +66,16 @@ export class SettingsAdminController {
   @Put('hero')
   replaceHero(@Body() dto: ReplaceHeroSlidesDto) {
     return this.settings.replaceHero(dto);
+  }
+
+  @Get('home-promo')
+  getHomePromo() {
+    return this.settings.getHomePromo();
+  }
+
+  @Put('home-promo')
+  replaceHomePromo(@Body() dto: ReplaceHomePromoDto) {
+    return this.settings.replaceHomePromo(dto);
   }
 
   @Get('homepage-sets')

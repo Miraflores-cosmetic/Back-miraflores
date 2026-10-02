@@ -40,6 +40,16 @@ function makePrisma() {
       update: vi.fn(),
       deleteMany: vi.fn(),
     },
+    homePromoConfig: {
+      findUnique: vi.fn(),
+      upsert: vi.fn(),
+    },
+    homePromoBanner: {
+      findMany: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      deleteMany: vi.fn(),
+    },
     quizContentEntry: {
       findMany: vi.fn(),
       upsert: vi.fn(),
@@ -288,6 +298,113 @@ describe('SettingsAdminService', () => {
     await expect(
       svc.replaceHero({ items: [{ imageUrl: '   ', active: true }] }),
     ).rejects.toThrow(/картинк/i);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('replaceHomePromo обновляет существующие, создаёт новые, удаляет лишние', async () => {
+    const now = new Date('2026-01-01T00:00:00.000Z');
+    const updatedA = {
+      id: 'a',
+      imageUrl: 'https://x/a.jpg',
+      href: '/catalog',
+      alt: 'A',
+      notch: false,
+      sortOrder: 0,
+      active: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const createdC = {
+      id: 'c',
+      imageUrl: 'https://x/c.jpg',
+      href: '/about',
+      alt: '',
+      notch: true,
+      sortOrder: 1,
+      active: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const tx = {
+      homePromoConfig: {
+        upsert: vi.fn().mockResolvedValue({
+          id: 'default',
+          titleLeft: 'НАШИ',
+          titleRight: 'АКЦИИ',
+          updatedAt: now,
+        }),
+      },
+      homePromoBanner: {
+        findMany: vi.fn().mockResolvedValue([{ id: 'a' }, { id: 'b' }]),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+        update: vi.fn().mockResolvedValue(updatedA),
+        create: vi.fn().mockResolvedValue(createdC),
+      },
+    };
+    prisma.$transaction.mockImplementation(async (fn: (t: typeof tx) => unknown) => fn(tx));
+
+    const res = await svc.replaceHomePromo({
+      titleLeft: 'НАШИ',
+      titleRight: 'АКЦИИ',
+      items: [
+        { id: 'a', imageUrl: 'https://x/a.jpg', href: '/catalog', alt: 'A', active: true },
+        {
+          imageUrl: 'https://x/c.jpg',
+          href: '/about',
+          notch: true,
+          active: true,
+        },
+      ],
+    });
+
+    expect(res.items.map((i) => i.id)).toEqual(['a', 'c']);
+    expect(res.titleLeft).toBe('НАШИ');
+    expect(tx.homePromoBanner.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ['b'] } },
+    });
+    expect(tx.homePromoBanner.update).toHaveBeenCalled();
+    expect(tx.homePromoBanner.create).toHaveBeenCalled();
+    expect(tx.homePromoConfig.upsert).toHaveBeenCalled();
+  });
+
+  it('replaceHomePromo отклоняет карточку без картинки', async () => {
+    await expect(
+      svc.replaceHomePromo({
+        titleLeft: 'НАШИ',
+        titleRight: 'АКЦИИ',
+        items: [{ imageUrl: '  ', href: '/catalog', active: true }],
+      }),
+    ).rejects.toThrow(/картинк/i);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('replaceHomePromo отклоняет больше 5 карточек', async () => {
+    const items = Array.from({ length: 6 }, (_, i) => ({
+      imageUrl: `https://x/${i}.jpg`,
+      href: '/catalog',
+      active: true,
+    }));
+    await expect(
+      svc.replaceHomePromo({ titleLeft: 'НАШИ', titleRight: 'АКЦИИ', items }),
+    ).rejects.toThrow(/5/);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('replaceHomePromo отклоняет внешний или опасный href', async () => {
+    await expect(
+      svc.replaceHomePromo({
+        titleLeft: 'НАШИ',
+        titleRight: 'АКЦИИ',
+        items: [{ imageUrl: 'https://x/a.jpg', href: 'https://evil.test', active: true }],
+      }),
+    ).rejects.toThrow(/относительн/i);
+    await expect(
+      svc.replaceHomePromo({
+        titleLeft: 'НАШИ',
+        titleRight: 'АКЦИИ',
+        items: [{ imageUrl: 'https://x/a.jpg', href: 'javascript:alert(1)', active: true }],
+      }),
+    ).rejects.toThrow(/относительн/i);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
@@ -618,5 +735,32 @@ describe('SettingsPublicService', () => {
     expect(res.content.greeting.plain).toBe('From DB');
     expect(res.content.choose_care.plain).toBeTruthy();
     expect(res.content.file_1.plain).toBe('');
+  });
+
+  it('getHomePromo отдаёт только active баннеры', async () => {
+    const prisma = makePrisma();
+    prisma.homePromoConfig.findUnique.mockResolvedValue({
+      id: 'default',
+      titleLeft: 'НАШИ',
+      titleRight: 'АКЦИИ',
+      updatedAt: new Date(),
+    });
+    prisma.homePromoBanner.findMany.mockResolvedValue([
+      {
+        id: 'a',
+        imageUrl: 'https://x/a.jpg',
+        href: '/catalog',
+        alt: '',
+        notch: false,
+      },
+    ]);
+    const svc = new SettingsPublicService(prisma as never);
+    const res = await svc.getHomePromo();
+    expect(prisma.homePromoBanner.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { active: true } }),
+    );
+    expect(res.titleLeft).toBe('НАШИ');
+    expect(res.items).toHaveLength(1);
+    expect(res.items[0]!.id).toBe('a');
   });
 });

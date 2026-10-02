@@ -16,6 +16,7 @@ function makePrisma() {
     cmsPage: { findMany: vi.fn() },
     blogPost: { findMany: vi.fn() },
     heroSlide: { count: vi.fn() },
+    homePromoBanner: { count: vi.fn() },
     $queryRawUnsafe: vi.fn(),
   };
 }
@@ -146,13 +147,37 @@ describe('DashboardAdminService', () => {
     prisma.heroSlide.count
       .mockResolvedValueOnce(0) // active
       .mockResolvedValueOnce(3); // total
+    prisma.homePromoBanner.count
+      .mockResolvedValueOnce(0) // active
+      .mockResolvedValueOnce(2); // total
 
     const res = await svc.getContentGaps();
 
     expect(res.summary.faqGaps).toBe(2);
     expect(res.highlights[0].reason).toBe('empty_answer');
     expect(res.hero?.reason).toBe('none_active');
+    expect(res.summary.homePromoIssue).toBe(true);
+    expect(res.homePromo?.reason).toBe('none_active');
+    expect(res.homePromo?.activeBanners).toBe(0);
+    expect(res.homePromo?.totalBanners).toBe(2);
+    expect(res.adminLinks.homePromo).toBe('/admin/settings/promo');
     expect(res).not.toHaveProperty('faq');
+  });
+
+  it('getContentGaps: home-promo no_banners когда вообще нет карточек', async () => {
+    prisma.faqItem.findMany.mockResolvedValue([]);
+    prisma.cmsPage.findMany.mockResolvedValue([]);
+    prisma.blogPost.findMany.mockResolvedValue([]);
+    prisma.heroSlide.count.mockResolvedValue(1);
+    prisma.homePromoBanner.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+
+    const res = await svc.getContentGaps({ scopes: ['home-promo'] });
+
+    expect(res.homePromo?.reason).toBe('no_banners');
+    expect(res.summary.homePromoIssue).toBe(true);
+    expect(res.highlights.some((h) => h.area === 'home-promo')).toBe(true);
   });
 
   it('getContentGaps режет scopes (только blog)', async () => {

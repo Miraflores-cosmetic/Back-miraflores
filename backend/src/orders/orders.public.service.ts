@@ -445,12 +445,25 @@ export class OrdersPublicService {
       if (synced.pricing && !synced.pricing.allowPromoCodes) {
         throw new BadRequestException('Промокод недоступен для вашей группы');
       }
+      const scopeLines = items
+        .filter((l) => !(l as { isGiftDenom?: boolean }).isGiftDenom)
+        .map((l) => ({
+          productId: (l as { productId?: string }).productId ?? '',
+          categoryId: (l as { categoryId?: string }).categoryId ?? '',
+          amount: Math.max(0, Math.floor(l.price * l.qty)),
+        }))
+        .filter((l) => l.productId && l.categoryId);
       // Precheck вне tx (быстрый UX-reject); лимиты повторно под FOR UPDATE ниже.
-      promoApply = await this.promoPublic.applyForCheckout(promoRaw, subtotal, {
-        email,
-        userId: userId ?? null,
-        guestId,
-      });
+      promoApply = await this.promoPublic.applyForCheckout(
+        promoRaw,
+        subtotal,
+        {
+          email,
+          userId: userId ?? null,
+          guestId,
+        },
+        scopeLines,
+      );
       discountTotal = promoApply.discountAmount;
       promoCode = promoApply.code;
     }

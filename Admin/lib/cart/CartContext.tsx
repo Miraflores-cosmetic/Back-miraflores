@@ -15,7 +15,6 @@ import { cartLineKey, productCartHref } from './cartUtils';
 import {
   computeCatalogDiscount,
   computeListSubtotal,
-  computeLocalDiscount,
   computePayableTotal,
   computeSubtotal,
 } from './cartTotals';
@@ -27,7 +26,6 @@ export { cartLineKey, productCartHref } from './cartUtils';
 export {
   computeCatalogDiscount,
   computeListSubtotal,
-  computeLocalDiscount,
   computePayableTotal,
   computeSubtotal,
 } from './cartTotals';
@@ -357,6 +355,9 @@ export function CartProvider({ children }: { children: ReactNode }) {
             code: trimmed,
             subtotal: goods,
             guestId: getOrCreateGuestId() || undefined,
+            lines: itemsRef.current
+              .filter((l) => !l.variantId.startsWith('gift-denom:'))
+              .map((l) => ({ variantId: l.variantId, qty: l.qty })),
           }),
           cache: 'no-store',
         });
@@ -701,8 +702,10 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
   const discountAmount = useMemo(() => {
     if (!promo) return 0;
-    if (promo.kind === 'gift') return Math.max(0, Math.floor(promo.discountAmount));
-    return computeLocalDiscount(promo.type, promo.value, subtotal);
+    // Всегда берём сумму с сервера (validate / refresh). Локальный PERCENT×subtotal
+    // завышает scoped-промо (скидка только с области, не со всей корзины).
+    const server = Math.max(0, Math.floor(promo.discountAmount));
+    return Math.min(server, Math.max(0, Math.floor(subtotal)));
   }, [promo, subtotal]);
 
   const total = useMemo(

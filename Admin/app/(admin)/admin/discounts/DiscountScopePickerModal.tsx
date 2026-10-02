@@ -15,10 +15,36 @@ import styles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
 import { DISCOUNT_CATEGORY_NO_DESCENDANTS_HINT } from './discountHints';
 
 const PRODUCT_PAGE_SIZE = 50;
+/** Стабильная ссылка: `excludeIds = []` в параметрах даёт новый массив на каждый рендер и рвёт fetch. */
+const EMPTY_ID_LIST: string[] = [];
 
 function categoryLabel(c: AdminCategory): string {
   if (c.parent?.name) return `${c.parent.name} → ${c.name}`;
   return c.name;
+}
+
+function idsKey(ids: string[]): string {
+  return ids.join('\0');
+}
+
+/** Все потомки категории в плоском списке (по parentId). */
+function descendantIds(rootId: string, cats: AdminCategory[]): string[] {
+  const byParent = new Map<string, string[]>();
+  for (const c of cats) {
+    if (!c.parentId) continue;
+    const list = byParent.get(c.parentId);
+    if (list) list.push(c.id);
+    else byParent.set(c.parentId, [c.id]);
+  }
+  const out: string[] = [];
+  const stack = [...(byParent.get(rootId) ?? [])];
+  while (stack.length) {
+    const id = stack.pop()!;
+    out.push(id);
+    const kids = byParent.get(id);
+    if (kids) stack.push(...kids);
+  }
+  return out;
 }
 
 export function DiscountCategoryPickerModal({
@@ -28,7 +54,7 @@ export function DiscountCategoryPickerModal({
   onApply,
   single = false,
   leafOnly = false,
-  excludeIds = [],
+  excludeIds = EMPTY_ID_LIST,
 }: {
   open: boolean;
   selectedIds: string[];
@@ -46,7 +72,9 @@ export function DiscountCategoryPickerModal({
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<AdminCategory[]>([]);
   const [draft, setDraft] = useState<Set<string>>(new Set());
-  const excludeSet = useMemo(() => new Set(excludeIds), [excludeIds]);
+  const excludeKey = idsKey(excludeIds);
+  const selectedKey = idsKey(selectedIds);
+  const excludeSet = useMemo(() => new Set(excludeIds), [excludeKey]); // eslint-disable-line react-hooks/exhaustive-deps -- content key
 
   useEffect(() => {
     if (!open) return;
@@ -60,12 +88,12 @@ export function DiscountCategoryPickerModal({
       try {
         const cats = await adminBackendJson<AdminCategory[]>('catalog/admin/categories');
         if (cancelled) return;
-        let list = cats;
+        let list = Array.isArray(cats) ? cats : [];
         if (leafOnly) {
           const parentIds = new Set(
-            cats.map((c) => c.parentId).filter((id): id is string => Boolean(id)),
+            list.map((c) => c.parentId).filter((id): id is string => Boolean(id)),
           );
-          list = cats.filter((c) => !parentIds.has(c.id));
+          list = list.filter((c) => !parentIds.has(c.id));
         }
         setRows(
           list.slice().sort((a, b) => categoryLabel(a).localeCompare(categoryLabel(b), 'ru')),
@@ -87,7 +115,9 @@ export function DiscountCategoryPickerModal({
     return () => {
       cancelled = true;
     };
-  }, [open, selectedIds, single, excludeSet]);
+    // selectedKey / excludeKey — стабильные ключи содержимого массивов
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ids compared by content
+  }, [open, selectedKey, single, excludeKey, leafOnly]);
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -106,9 +136,18 @@ export function DiscountCategoryPickerModal({
       if (single) {
         return prev.has(id) ? new Set() : new Set([id]);
       }
+      // Выбор родителя включает всех потомков (сервер матчит только явные id).
+      const kids = leafOnly ? [] : descendantIds(id, rows);
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(id)) {
+        next.delete(id);
+        for (const kid of kids) next.delete(kid);
+      } else {
+        next.add(id);
+        for (const kid of kids) {
+          if (!excludeSet.has(kid)) next.add(kid);
+        }
+      }
       return next;
     });
   }
@@ -182,7 +221,9 @@ export function DiscountCategoryPickerModal({
               </tr>
             </thead>
             <tbody>
-              {filtered.map((c) => (
+              {filtered.map((c) => {
+                const kids = leafOnly ? [] : descendantIds(c.id, rows);
+                return (
                 <tr key={c.id}>
                   <td>
                     {single ? (
@@ -203,9 +244,18 @@ export function DiscountCategoryPickerModal({
                       />
                     )}
                   </td>
-                  <td>{categoryLabel(c)}</td>
+                  <td>
+                    {categoryLabel(c)}
+                    {kids.length > 0 ? (
+                      <span className={styles.mutedInline}>
+                        {' '}
+                        · +{kids.length} подкат.
+                      </span>
+                    ) : null}
+                  </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
           {filtered.length === 0 ? (
@@ -231,7 +281,7 @@ export function DiscountProductPickerModal({
   onApply,
   /** Один товар вместо чекбоксов. */
   single = false,
-  excludeIds = [],
+  excludeIds = EMPTY_ID_LIST,
 }: {
   open: boolean;
   selectedIds: string[];
@@ -251,7 +301,9 @@ export function DiscountProductPickerModal({
   const [rows, setRows] = useState<AdminProductListItem[]>([]);
   const [draft, setDraft] = useState<Set<string>>(new Set());
   const [labels, setLabels] = useState<Record<string, string>>({});
-  const excludeSet = useMemo(() => new Set(excludeIds), [excludeIds]);
+  const excludeKey = idsKey(excludeIds);
+  const selectedKey = idsKey(selectedIds);
+  const excludeSet = useMemo(() => new Set(excludeIds), [excludeKey]); // eslint-disable-line react-hooks/exhaustive-deps -- content key
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -269,7 +321,8 @@ export function DiscountProductPickerModal({
     setQ('');
     setQDebounced('');
     setPage(1);
-  }, [open, selectedIds, selectedLabels, single, excludeSet]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ids/labels compared by content keys
+  }, [open, selectedKey, single, excludeKey]);
 
   useEffect(() => {
     if (!open) return;
@@ -346,7 +399,7 @@ export function DiscountProductPickerModal({
       title={single ? 'Товар' : 'Товары'}
       wide
       onClose={onClose}
-      footer={<AdminModalActions onCancel={onClose} onConfirm={apply} />}
+      footer={<AdminModalActions onCancel={onClose} onConfirm={apply} confirmDisabled={draft.size === 0} />}
     >
       <AdminSearchBox
         placeholder="Поиск товара"

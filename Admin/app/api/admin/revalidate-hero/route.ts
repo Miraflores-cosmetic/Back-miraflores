@@ -10,6 +10,7 @@ export async function POST() {
 
   revalidateTag('hero');
   revalidateTag('homepage-sets');
+  revalidateTag('home-promo');
   revalidatePath('/');
 
   return NextResponse.json({ revalidated: true });

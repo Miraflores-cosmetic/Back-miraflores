@@ -276,7 +276,7 @@ export class AssistantToolsService {
         function: {
           name: 'content_gaps',
           description:
-            'Пробелы контента (summary + до 8 highlights). Области режутся по ACL staff: settings→FAQ/страницы/hero, blog→посты. Без полных массивов.',
+            'Пробелы контента (summary + до 8 highlights). Области режутся по ACL staff: settings→FAQ/страницы/hero/home-promo, blog→посты. Без полных массивов.',
           parameters: {
             type: 'object',
             properties: {},

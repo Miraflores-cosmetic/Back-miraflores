@@ -29,6 +29,7 @@ export class PromoPublicController {
         userId: buyerUserId,
       },
       buyerUserId,
+      dto.lines,
     );
   }
 }
