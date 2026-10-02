@@ -10,6 +10,80 @@
   color: var(--color-gray-dark, #5b6166);
 }
 
+/* Full-bleed sticky bar (как productNew_stickyToolbar). */
+.stickyToolbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  box-sizing: border-box;
+  width: calc(100% + 56px);
+  margin: -24px -28px 20px;
+  padding: 12px 28px 14px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 20px;
+  row-gap: 8px;
+  background: #fff;
+  border-bottom: 1px solid rgba(5, 24, 38, 0.08);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.8) inset,
+    0 10px 28px -18px rgba(5, 24, 38, 0.28);
+}
+
+.stickyToolbarMain {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.stickyToolbarNav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+}
+
+.stickyToolbarTitle {
+  margin: 0;
+  font-family: var(--font-commissioner, system-ui);
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  color: var(--color-black, #111);
+}
+
+.stickyToolbarActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.dirtyHintInline {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--color-gray, #9d9d9d);
+}
+
+.storefrontLink {
+  font-size: 0.8125rem;
+  line-height: 1.3;
+  color: #297230;
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, #297230 35%, transparent);
+  padding-bottom: 1px;
+}
+
+.storefrontLink:hover {
+  color: #1f5a26;
+  border-bottom-color: #1f5a26;
+}
+
 .statusBar {
   display: flex;
   flex-direction: column;
@@ -330,6 +404,12 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
+  min-width: 0;
+}
+
+.altFieldFull {
+  grid-column: 1 / -1;
+  width: 100%;
   min-width: 0;
 }
 

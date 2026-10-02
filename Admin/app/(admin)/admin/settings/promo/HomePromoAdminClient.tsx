@@ -17,7 +17,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AdminCheckbox } from '@/components/admin/AdminCheckbox/AdminCheckbox';
-import { AdminCompactBtn } from '@/components/AdminCompactBtn/AdminCompactBtn';
+import { AdminCompactBtn, AdminCompactBtnLink } from '@/components/AdminCompactBtn/AdminCompactBtn';
 import { AdminConfirmDialog } from '@/components/admin/AdminModal/AdminConfirmDialog';
 import { AdminSettingsListErrors } from '@/components/admin/AdminSettingsListErrors/AdminSettingsListErrors';
 import { useToast } from '@/components/Toast/ToastProvider';
@@ -25,7 +25,6 @@ import { adminBackendFetch, adminBackendJson } from '@/lib/adminBackendFetch';
 import { useAdminSettingsListShell } from '@/lib/useAdminSettingsListShell';
 import { revalidateHomeStorefront } from '@/lib/revalidateHomeStorefront';
 import catalogStyles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
-import settingsStyles from '@/app/(admin)/admin/settings/Settings.module.css';
 import { HomePromoLinkField, isPromoHrefComplete } from './HomePromoLinkField';
 import styles from './HomePromoAdmin.module.css';
 
@@ -292,17 +291,6 @@ function SortablePromoRow({
             />
           </div>
 
-          <label className={catalogStyles.field}>
-            <span className={catalogStyles.label}>Подпись для accessibility (alt)</span>
-            <input
-              className={catalogStyles.input}
-              value={item.alt}
-              disabled={disabled}
-              placeholder="Например: Скидки на уход"
-              onChange={(e) => onChange({ alt: e.target.value })}
-            />
-          </label>
-
           <div className={styles.optionsRow}>
             <label className={styles.activeLabel}>
               <AdminCheckbox
@@ -310,10 +298,21 @@ function SortablePromoRow({
                 onChange={(e) => onChange({ notch: e.target.checked })}
                 disabled={disabled}
               />
-              Вырез справа (форма карточки на главной)
+              Вырез справа
             </label>
           </div>
         </div>
+
+        <label className={`${catalogStyles.field} ${styles.altFieldFull}`}>
+          <span className={catalogStyles.label}>Подпись для accessibility (alt)</span>
+          <input
+            className={catalogStyles.input}
+            value={item.alt}
+            disabled={disabled}
+            placeholder="Например: Скидки на уход"
+            onChange={(e) => onChange({ alt: e.target.value })}
+          />
+        </label>
       </div>
     </li>
   );
@@ -361,7 +360,6 @@ export function HomePromoAdminClient() {
 
   const statusLines = useMemo(() => {
     const lines: { text: string; tone: 'info' | 'warn' }[] = [];
-    if (dirty) lines.push({ text: 'Есть несохранённые изменения', tone: 'info' });
     if (uploading) lines.push({ text: 'Загрузка изображения…', tone: 'info' });
     if (incompleteCount > 0) {
       lines.push({
@@ -502,22 +500,6 @@ export function HomePromoAdminClient() {
 
   return (
     <div className={styles.page}>
-      <div className={settingsStyles.hubHeader}>
-        <h1 className={`${catalogStyles.title} ${settingsStyles.hubHeaderTitle}`}>Промо на главной</h1>
-        <a
-          className={settingsStyles.storefrontLink}
-          href="/"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Открыть главную ↗
-        </a>
-      </div>
-      <p className={styles.lead}>
-        Заголовок секции и до {MAX_ITEMS} кликабельных карточек: на десктопе — веер, на телефоне —
-        горизонтальный слайдер.
-      </p>
-
       <AdminSettingsListErrors
         loadError={loadError}
         actionError={actionError}
@@ -535,6 +517,31 @@ export function HomePromoAdminClient() {
         </p>
       ) : (
         <form onSubmit={(e) => void onSave(e)}>
+          <div className={styles.stickyToolbar}>
+            <div className={styles.stickyToolbarMain}>
+              <div className={styles.stickyToolbarNav}>
+                <AdminCompactBtnLink href="/admin/settings" variant="outline">
+                  ← Настройки
+                </AdminCompactBtnLink>
+                <a
+                  className={styles.storefrontLink}
+                  href="/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Главная ↗
+                </a>
+                {dirty ? <span className={styles.dirtyHintInline}>Несохранённые изменения</span> : null}
+              </div>
+              <h1 className={styles.stickyToolbarTitle}>Промо на главной</h1>
+            </div>
+            <div className={styles.stickyToolbarActions}>
+              <AdminCompactBtn type="submit" variant="accent" disabled={!canSave}>
+                {saving ? 'Сохранение…' : 'Сохранить'}
+              </AdminCompactBtn>
+            </div>
+          </div>
+
           {statusLines.length > 0 ? (
             <div
               className={`${styles.statusBar} ${
@@ -662,17 +669,6 @@ export function HomePromoAdminClient() {
                   </div>
                 ) : null}
               </section>
-
-              <div className={styles.pageFooter}>
-                <p className={styles.pageFooterHint}>
-                  {dirty ? 'Не забудьте сохранить перед выходом' : 'Все изменения на сайте'}
-                </p>
-                <div className={styles.pageFooterActions}>
-                  <AdminCompactBtn type="submit" variant="accent" disabled={!canSave}>
-                    {saving ? 'Сохранение…' : 'Сохранить'}
-                  </AdminCompactBtn>
-                </div>
-              </div>
             </div>
 
             <LayoutPreview titleLeft={titleLeft} titleRight={titleRight} items={items} />
