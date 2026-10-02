@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { AdminCompactBtn, AdminCompactBtnLink } from '@/components/AdminCompactBtn/AdminCompactBtn';
@@ -8,6 +9,7 @@ import { AdminBackendRequestError, adminBackendJson } from '@/lib/adminBackendFe
 import catalogStyles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
 import pn from '@/app/(admin)/admin/catalog/products/productNew.module.css';
 import styles from './delivery.module.css';
+import { CdekSettingsCard } from './CdekSettingsCard';
 import { OzonCatalogDimsCard } from './OzonCatalogDimsCard';
 import { OzonHealthCard } from './OzonHealthCard';
 import { OzonTariffCard } from './OzonTariffCard';
@@ -36,8 +38,44 @@ function formatDate(iso: string | null): string {
   });
 }
 
+function authLabel(mode: OzonStatus['mode']): string {
+  if (mode === 'oauth') return 'OAuth';
+  if (mode === 'api-key') return 'API-ключ';
+  return '—';
+}
+
 function errMessage(e: unknown, fallback: string): string {
   return e instanceof AdminBackendRequestError ? e.message : fallback;
+}
+
+function OzonOAuthFacts({
+  status,
+  onCopyRedirect,
+}: {
+  status: OzonStatus;
+  onCopyRedirect: () => void;
+}) {
+  return (
+    <dl className={styles.facts}>
+      <div className={styles.fact}>
+        <dt>Scope</dt>
+        <dd>
+          <code>{status.scope}</code>
+        </dd>
+      </div>
+      <div className={`${styles.fact} ${styles.factWide}`}>
+        <dt>Redirect URI</dt>
+        <dd className={styles.redirectRow}>
+          <code className={styles.redirectCode}>{status.redirectUri ?? 'не задан'}</code>
+          {status.redirectUri ? (
+            <AdminCompactBtn type="button" variant="outline" onClick={() => void onCopyRedirect()}>
+              Копировать
+            </AdminCompactBtn>
+          ) : null}
+        </dd>
+      </div>
+    </dl>
+  );
 }
 
 export function DeliverySettingsClient() {
@@ -149,6 +187,8 @@ export function DeliverySettingsClient() {
         ? { cls: styles.pillError, text: 'Требуется переподключение' }
         : { cls: styles.pillIdle, text: 'Не подключено' };
 
+  const oauthMode = status?.mode === 'oauth';
+
   return (
     <div className={`${catalogStyles.form} ${catalogStyles.formWide} ${styles.page}`}>
       <div className={pn.stickyToolbar}>
@@ -171,6 +211,8 @@ export function DeliverySettingsClient() {
         </div>
       ) : null}
 
+      <CdekSettingsCard />
+
       <section className={styles.card}>
         <header className={styles.cardHead}>
           <span className={styles.logo} aria-hidden>
@@ -178,9 +220,7 @@ export function DeliverySettingsClient() {
           </span>
           <div className={styles.cardHeadText}>
             <h2 className={styles.cardTitle}>Ozon Доставка</h2>
-            <p className={styles.cardSub}>
-              Пункты выдачи и постаматы Ozon на витрине, курьер до двери
-            </p>
+            <p className={styles.cardSub}>Дополнительный перевозчик: ПВЗ и курьер Ozon на checkout</p>
           </div>
           {pill ? <span className={`${styles.pill} ${pill.cls}`}>{pill.text}</span> : null}
         </header>
@@ -199,57 +239,27 @@ export function DeliverySettingsClient() {
                 <span>Последняя ошибка: {status.lastError}</span>
               </div>
             ) : null}
-            {!status.appConfigured && status.mode !== 'api-key' ? (
+            {oauthMode && !status.appConfigured ? (
               <div className={catalogStyles.warningBanner} role="status">
                 <span>
-                  На сервере не заданы <code>OZON_CLIENT_ID</code> / <code>OZON_CLIENT_SECRET</code>{' '}
-                  (backend/.env).
+                  Для OAuth на API нужны <code>OZON_CLIENT_ID</code> и <code>OZON_CLIENT_SECRET</code>.
                 </span>
               </div>
             ) : null}
 
-            <dl className={styles.facts}>
-              <div className={styles.fact}>
-                <dt>Авторизация</dt>
-                <dd>
-                  {status.mode === 'oauth'
-                    ? 'OAuth-приложение'
-                    : status.mode === 'api-key'
-                      ? 'API-ключ продавца'
-                      : '—'}
-                </dd>
-              </div>
-              <div className={styles.fact}>
-                <dt>Подключено</dt>
-                <dd>{formatDate(status.connectedAt)}</dd>
-              </div>
-              <div className={styles.fact}>
-                <dt>Токен обновлён</dt>
-                <dd>{formatDate(status.lastRefreshAt)}</dd>
-              </div>
-              <div className={styles.fact}>
-                <dt>Scope</dt>
-                <dd>
-                  <code>{status.scope}</code>
-                </dd>
-              </div>
-              <div className={`${styles.fact} ${styles.factWide}`}>
-                <dt>Redirect URI</dt>
-                <dd className={styles.redirectRow}>
-                  <code className={styles.redirectCode}>{status.redirectUri ?? 'не задан'}</code>
-                  {status.redirectUri ? (
-                    <AdminCompactBtn type="button" variant="outline" onClick={() => void copyRedirect()}>
-                      Копировать
-                    </AdminCompactBtn>
-                  ) : null}
-                </dd>
-              </div>
-            </dl>
+            {status.connected ? (
+              <p className={styles.metaLine}>
+                {authLabel(status.mode)} · подключено {formatDate(status.connectedAt)} · токен{' '}
+                {formatDate(status.lastRefreshAt)}
+              </p>
+            ) : status.mode === 'api-key' ? (
+              <p className={styles.metaLine}>Авторизация API-ключом на сервере (OAuth не используется)</p>
+            ) : null}
 
             {testResult ? <p className={styles.testOk}>{testResult}</p> : null}
 
             <div className={styles.actions}>
-              {status.mode !== 'api-key' ? (
+              {oauthMode ? (
                 <AdminCompactBtn
                   type="button"
                   variant="accent"
@@ -271,7 +281,7 @@ export function DeliverySettingsClient() {
               >
                 {busy === 'test' ? 'Проверяем…' : 'Проверить API'}
               </AdminCompactBtn>
-              {status.mode === 'oauth' ? (
+              {oauthMode ? (
                 <AdminCompactBtn
                   type="button"
                   variant="danger"
@@ -283,38 +293,54 @@ export function DeliverySettingsClient() {
               ) : null}
             </div>
 
-            {!status.connected ? (
-              <ol className={styles.steps}>
-                <li>
-                  В кабинете разработчика Ozon (dev.ozon.ru) откройте приложение «Ozon Доставка» →
-                  настройки и укажите Redirect URI из блока выше.
-                </li>
-                <li>
-                  Нажмите «Подключить Ozon», войдите в кабинет продавца и разрешите доступ. Вкладка
-                  вернёт вас обратно.
-                </li>
-                <li>Нажмите «Проверить API» — должен загрузиться справочник пунктов выдачи.</li>
-              </ol>
+            {!status.connected && oauthMode ? (
+              <details className={styles.advancedBlock} open>
+                <summary className={styles.advancedSummary}>Как подключить OAuth</summary>
+                <div className={styles.advancedInner}>
+                  <OzonOAuthFacts status={status} onCopyRedirect={() => void copyRedirect()} />
+                  <ol className={styles.steps}>
+                    <li>
+                      В dev.ozon.ru укажите Redirect URI из блока выше и scope{' '}
+                      <code>{status.scope}</code>.
+                    </li>
+                    <li>«Подключить Ozon» → вход в кабинет продавца → разрешить доступ.</li>
+                    <li>«Проверить API» — должен загрузиться справочник ПВЗ.</li>
+                  </ol>
+                </div>
+              </details>
             ) : null}
 
-            <div className={styles.note}>
-              <p>
-                <strong>Стоимость</strong> считается по собственной тарифной сетке (вес и габариты
-                товаров), бесплатная доставка в ПВЗ действует от порога из раздела «Корзина».
+            {status.connected && oauthMode ? (
+              <details className={styles.advancedBlock}>
+                <summary className={styles.advancedSummary}>OAuth и redirect URI</summary>
+                <div className={styles.advancedInner}>
+                  <OzonOAuthFacts status={status} onCopyRedirect={() => void copyRedirect()} />
+                </div>
+              </details>
+            ) : null}
+
+            {status.connected ? (
+              <p className={styles.hint}>
+                Тариф на checkout — своя сетка (см. блок ниже). Отправления создаются в кабинете Ozon, трек —
+                в{' '}
+                <Link href="/admin/orders">карточке заказа</Link>. Порог бесплатной доставки — в{' '}
+                <Link href="/admin/cart">корзине</Link>.
               </p>
-              <p>
-                <strong>Отправления</strong> оформляются вручную в кабинете Ozon: в заказе указан
-                выбранный покупателем пункт. После отправки введите трек в карточке заказа (служба
-                «Ozon»).
-              </p>
-            </div>
+            ) : null}
           </>
         ) : null}
       </section>
 
-      {status && (status.connected || status.connectedAt) ? <OzonHealthCard reloadKey={healthKey} /> : null}
-      <OzonTariffCard />
-      <OzonCatalogDimsCard />
+      {status ? (
+        <details className={styles.advancedBlock}>
+          <summary className={styles.advancedSummary}>Ozon: тариф, габариты каталога, мониторинг</summary>
+          <div className={`${styles.advancedInner} ${styles.advancedStack}`}>
+            {status.connected || status.connectedAt ? <OzonHealthCard reloadKey={healthKey} /> : null}
+            <OzonTariffCard />
+            <OzonCatalogDimsCard />
+          </div>
+        </details>
+      ) : null}
     </div>
   );
 }
