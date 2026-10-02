@@ -25,6 +25,11 @@ import {
   reserveStockForLines,
 } from './order-stock';
 import { lockOrderForUpdate } from './order-lock';
+import {
+  DELIVERY_SURCHARGE_DEFAULTS,
+  normalizeDeliverySurchargeRow,
+  type DeliverySurchargeRub,
+} from './delivery-surcharge';
 import { resolveShippingFromQuote, buildQuoteCost, resolvePvzCode, requireCheckoutShipmentProvider } from './order-shipping.resolve';
 import {
   hashCartLines,
@@ -234,6 +239,19 @@ export class OrdersPublicService {
     this.assertCheckoutStatusAccess(order, opts);
   }
 
+  private async loadDeliverySurcharges(): Promise<DeliverySurchargeRub> {
+    const row = await this.prisma.deliverySettings.findUnique({
+      where: { id: 'default' },
+      select: {
+        cdekSurchargeRub: true,
+        ozonSurchargeRub: true,
+        yandexSurchargeRub: true,
+      },
+    });
+    if (!row) return { ...DELIVERY_SURCHARGE_DEFAULTS };
+    return normalizeDeliverySurchargeRow(row);
+  }
+
   /**
    * Подписанный расчёт доставки: Nest фиксирует cost (free-PVZ или clientEstimate)
    * в HMAC-токене. Create order принимает только этот quote.
@@ -287,6 +305,8 @@ export class OrdersPublicService {
       throw new BadRequestException(OZON_UNAVAILABLE_MESSAGE);
     }
 
+    const surcharges = await this.loadDeliverySurcharges();
+
     const { cost, method, freePvz } = buildQuoteCost({
       shippingMethod: dto.shippingMethod,
       shippingComment: shippingAddress.comment,
@@ -304,6 +324,7 @@ export class OrdersPublicService {
         (this.shippingServerEstimate.requireServerReprice() &&
           dto.shippingMethod.trim().toUpperCase() === 'CDEK' &&
           this.shippingServerEstimate.isCdekConfigured()),
+      surcharges,
     });
 
     const linesForHash = items.map((l) => ({

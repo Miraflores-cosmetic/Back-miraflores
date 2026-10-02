@@ -21,6 +21,7 @@ import { ReplaceHomepageSetsDto } from './dto/homepage-sets.dto';
 import { ReplaceProductAttributeOptionsDto } from './dto/product-attributes.dto';
 import { ReplaceQuizContentDto } from './dto/quiz-content.dto';
 import { DiscardCartUploadsDto, UpdateCartSettingsDto } from './dto/cart.dto';
+import { UpdateDeliverySettingsDto } from './dto/delivery.dto';
 import { UpdateEmailNotificationTemplateDto, PreviewEmailNotificationDto } from './dto/email-notifications.dto';
 import { UpdateMenuSettingsDto } from './dto/menu.dto';
 import { UpdateSiteSeoSettingsDto } from './dto/site-seo.dto';
@@ -84,6 +85,16 @@ export class SettingsAdminController {
   @Put('cart')
   updateCart(@Body() dto: UpdateCartSettingsDto) {
     return this.settings.updateCart(dto);
+  }
+
+  @Get('delivery')
+  getDelivery() {
+    return this.settings.getDelivery();
+  }
+
+  @Put('delivery')
+  updateDelivery(@Body() dto: UpdateDeliverySettingsDto) {
+    return this.settings.updateDelivery(dto);
   }
 
   @Post('cart/discard-uploads')

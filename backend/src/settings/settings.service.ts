@@ -19,6 +19,7 @@ import type { ReplaceHomepageSetsDto } from './dto/homepage-sets.dto';
 import type { ReplaceProductAttributeOptionsDto } from './dto/product-attributes.dto';
 import type { ReplaceQuizContentDto } from './dto/quiz-content.dto';
 import type { UpdateCartSettingsDto } from './dto/cart.dto';
+import type { UpdateDeliverySettingsDto } from './dto/delivery.dto';
 import type { UpdateMenuSettingsDto } from './dto/menu.dto';
 import type { UpdateSiteSeoSettingsDto } from './dto/site-seo.dto';
 import {
@@ -276,6 +277,29 @@ const CART_DEFAULTS = {
   progressSuccessText: 'Бесплатная доставка до ПВЗ!',
   legalHtml: '<p></p>',
 } as const;
+
+const DELIVERY_SETTINGS_DEFAULTS = {
+  id: 'default',
+  cdekSurchargeRub: 0,
+  ozonSurchargeRub: 0,
+  yandexSurchargeRub: 0,
+} as const;
+
+function serializeDeliverySettings(row: {
+  id: string;
+  cdekSurchargeRub: number;
+  ozonSurchargeRub: number;
+  yandexSurchargeRub: number;
+  updatedAt: Date;
+}) {
+  return {
+    id: row.id,
+    cdekSurchargeRub: row.cdekSurchargeRub,
+    ozonSurchargeRub: row.ozonSurchargeRub,
+    yandexSurchargeRub: row.yandexSurchargeRub,
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
 
 const SITE_SEO_DEFAULTS = {
   titleSuffix: 'Miraflores',
@@ -832,6 +856,37 @@ export class SettingsAdminService {
     return serializeCart(row);
   }
 
+  async getDelivery() {
+    const row = await this.prisma.deliverySettings.findUnique({
+      where: { id: 'default' },
+    });
+    if (!row) {
+      return {
+        ...DELIVERY_SETTINGS_DEFAULTS,
+        updatedAt: null as string | null,
+      };
+    }
+    return serializeDeliverySettings(row);
+  }
+
+  async updateDelivery(dto: UpdateDeliverySettingsDto) {
+    const row = await this.prisma.deliverySettings.upsert({
+      where: { id: 'default' },
+      create: {
+        id: 'default',
+        cdekSurchargeRub: dto.cdekSurchargeRub,
+        ozonSurchargeRub: dto.ozonSurchargeRub,
+        yandexSurchargeRub: dto.yandexSurchargeRub,
+      },
+      update: {
+        cdekSurchargeRub: dto.cdekSurchargeRub,
+        ozonSurchargeRub: dto.ozonSurchargeRub,
+        yandexSurchargeRub: dto.yandexSurchargeRub,
+      },
+    });
+    return serializeDeliverySettings(row);
+  }
+
   async getMenu() {
     const row = await this.prisma.menuSettings.findUnique({
       where: { id: 'default' },
@@ -1346,6 +1401,29 @@ export class SettingsPublicService {
       progressContentText: row.progressContentText,
       progressSuccessText: row.progressSuccessText,
       legalHtml: sanitizeProductRichHtml(row.legalHtml),
+    };
+  }
+
+  async getDeliverySurcharges() {
+    const row = await this.prisma.deliverySettings.findUnique({
+      where: { id: 'default' },
+      select: {
+        cdekSurchargeRub: true,
+        ozonSurchargeRub: true,
+        yandexSurchargeRub: true,
+      },
+    });
+    if (!row) {
+      return {
+        cdekSurchargeRub: DELIVERY_SETTINGS_DEFAULTS.cdekSurchargeRub,
+        ozonSurchargeRub: DELIVERY_SETTINGS_DEFAULTS.ozonSurchargeRub,
+        yandexSurchargeRub: DELIVERY_SETTINGS_DEFAULTS.yandexSurchargeRub,
+      };
+    }
+    return {
+      cdekSurchargeRub: row.cdekSurchargeRub,
+      ozonSurchargeRub: row.ozonSurchargeRub,
+      yandexSurchargeRub: row.yandexSurchargeRub,
     };
   }
 

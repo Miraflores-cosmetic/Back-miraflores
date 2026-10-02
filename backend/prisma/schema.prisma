@@ -1173,6 +1173,16 @@ model GratitudeGiftTier {
   @@index([active, sortOrder])
 }
 
+/// Добавочная стоимость доставки по перевозчикам (singleton id=default)
+model DeliverySettings {
+  id                 String   @id @default("default")
+  /// Плюсуется к тарифу на checkout (СДЭК), ₽
+  cdekSurchargeRub   Int      @default(0)
+  ozonSurchargeRub   Int      @default(0)
+  yandexSurchargeRub Int      @default(0)
+  updatedAt          DateTime @updatedAt
+}
+
 /// Настройки корзины: progress-bar + legal/accordion текст (singleton id=default)
 model CartSettings {
   id                       String   @id @default("default")

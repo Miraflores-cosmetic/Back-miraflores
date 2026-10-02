@@ -238,6 +238,18 @@ describe('Ozon', () => {
         requireServerReprice: true,
       }),
     ).toEqual({ cost: 79, method: 'OZON', freePvz: false });
+    expect(
+      buildQuoteCost({
+        shippingMethod: 'OZON',
+        shippingComment: pvzComment,
+        pvzCode: '1011000000123',
+        goodsSubtotal: 3000,
+        freeShippingThresholdRub: 10_000,
+        clientEstimate: 79,
+        serverEstimate: 79,
+        surcharges: { cdek: 0, ozon: 100, yandex: 0 },
+      }),
+    ).toEqual({ cost: 179, method: 'OZON', freePvz: false });
     expect(() =>
       buildQuoteCost({
         shippingMethod: 'OZON',

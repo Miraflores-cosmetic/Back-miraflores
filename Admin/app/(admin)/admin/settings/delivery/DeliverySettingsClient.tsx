@@ -9,7 +9,13 @@ import { AdminBackendRequestError, adminBackendJson } from '@/lib/adminBackendFe
 import catalogStyles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
 import pn from '@/app/(admin)/admin/catalog/products/productNew.module.css';
 import styles from './delivery.module.css';
+import {
+  DELIVERY_SURCHARGE_DEFAULTS,
+  normalizeDeliverySurcharges,
+  type DeliverySurcharges,
+} from '@/lib/deliverySurcharge';
 import { CdekSettingsCard } from './CdekSettingsCard';
+import { DeliverySurchargeField } from './DeliverySurchargeField';
 import { OzonCatalogDimsCard } from './OzonCatalogDimsCard';
 import { OzonHealthCard } from './OzonHealthCard';
 import { OzonTariffCard } from './OzonTariffCard';
@@ -87,6 +93,34 @@ export function DeliverySettingsClient() {
   const [testResult, setTestResult] = useState<string | null>(null);
   const [callbackError, setCallbackError] = useState<string | null>(null);
   const [healthKey, setHealthKey] = useState(0);
+  const [surchargeLoading, setSurchargeLoading] = useState(true);
+  const [surchargeSaving, setSurchargeSaving] = useState(false);
+  const [surchargeDirty, setSurchargeDirty] = useState(false);
+  const [cdekSurcharge, setCdekSurcharge] = useState(
+    String(DELIVERY_SURCHARGE_DEFAULTS.cdekSurchargeRub),
+  );
+  const [ozonSurcharge, setOzonSurcharge] = useState(
+    String(DELIVERY_SURCHARGE_DEFAULTS.ozonSurchargeRub),
+  );
+  const [yandexSurcharge, setYandexSurcharge] = useState(
+    String(DELIVERY_SURCHARGE_DEFAULTS.yandexSurchargeRub),
+  );
+
+  const loadSurcharges = useCallback(async () => {
+    setSurchargeLoading(true);
+    try {
+      const raw = await adminBackendJson<DeliverySurcharges>('settings/admin/delivery');
+      const data = normalizeDeliverySurcharges(raw);
+      setCdekSurcharge(String(data.cdekSurchargeRub));
+      setOzonSurcharge(String(data.ozonSurchargeRub));
+      setYandexSurcharge(String(data.yandexSurchargeRub));
+      setSurchargeDirty(false);
+    } catch (e) {
+      showToast(errMessage(e, 'Не удалось загрузить добавочные стоимости'));
+    } finally {
+      setSurchargeLoading(false);
+    }
+  }, [showToast]);
 
   const load = useCallback(async () => {
     try {
@@ -99,10 +133,52 @@ export function DeliverySettingsClient() {
 
   useEffect(() => {
     void load();
-    const onFocus = () => void load();
+    void loadSurcharges();
+    const onFocus = () => {
+      void load();
+      void loadSurcharges();
+    };
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
-  }, [load]);
+  }, [load, loadSurcharges]);
+
+  function parseSurchargeInput(raw: string): number | null {
+    const n = Number.parseInt(raw.trim(), 10);
+    if (!Number.isFinite(n) || n < 0 || n > 500_000) return null;
+    return n;
+  }
+
+  async function saveSurcharges() {
+    const cdek = parseSurchargeInput(cdekSurcharge);
+    const ozon = parseSurchargeInput(ozonSurcharge);
+    const yandex = parseSurchargeInput(yandexSurcharge);
+    if (cdek == null || ozon == null || yandex == null) {
+      showToast('Добавочная стоимость: целое число от 0 до 500 000');
+      return;
+    }
+    setSurchargeSaving(true);
+    try {
+      const saved = normalizeDeliverySurcharges(
+        await adminBackendJson<DeliverySurcharges>('settings/admin/delivery', {
+          method: 'PUT',
+          body: JSON.stringify({
+            cdekSurchargeRub: cdek,
+            ozonSurchargeRub: ozon,
+            yandexSurchargeRub: yandex,
+          }),
+        }),
+      );
+      setCdekSurcharge(String(saved.cdekSurchargeRub));
+      setOzonSurcharge(String(saved.ozonSurchargeRub));
+      setYandexSurcharge(String(saved.yandexSurchargeRub));
+      setSurchargeDirty(false);
+      showToast('Добавочные стоимости сохранены');
+    } catch (e) {
+      showToast(errMessage(e, 'Не удалось сохранить'));
+    } finally {
+      setSurchargeSaving(false);
+    }
+  }
 
   useEffect(() => {
     const flag = searchParams.get('ozon');
@@ -199,6 +275,16 @@ export function DeliverySettingsClient() {
             </AdminCompactBtnLink>
           </div>
           <h1 className={pn.stickyToolbarTitle}>Службы доставки</h1>
+          {surchargeDirty ? (
+            <AdminCompactBtn
+              type="button"
+              variant="accent"
+              disabled={surchargeSaving || surchargeLoading}
+              onClick={() => void saveSurcharges()}
+            >
+              {surchargeSaving ? 'Сохраняем…' : 'Сохранить добавочные стоимости'}
+            </AdminCompactBtn>
+          ) : null}
         </div>
       </div>
 
@@ -211,7 +297,14 @@ export function DeliverySettingsClient() {
         </div>
       ) : null}
 
-      <CdekSettingsCard />
+      <CdekSettingsCard
+        surchargeRub={cdekSurcharge}
+        onSurchargeChange={(v) => {
+          setCdekSurcharge(v);
+          setSurchargeDirty(true);
+        }}
+        surchargeDisabled={surchargeLoading || surchargeSaving}
+      />
 
       <section className={styles.card}>
         <header className={styles.cardHead}>
@@ -224,6 +317,16 @@ export function DeliverySettingsClient() {
           </div>
           {pill ? <span className={`${styles.pill} ${pill.cls}`}>{pill.text}</span> : null}
         </header>
+
+        <DeliverySurchargeField
+          label="Добавочная стоимость, ₽"
+          value={ozonSurcharge}
+          disabled={surchargeLoading || surchargeSaving}
+          onChange={(v) => {
+            setOzonSurcharge(v);
+            setSurchargeDirty(true);
+          }}
+        />
 
         {!status && !loadError ? <p className={catalogStyles.lead}>Загрузка…</p> : null}
 

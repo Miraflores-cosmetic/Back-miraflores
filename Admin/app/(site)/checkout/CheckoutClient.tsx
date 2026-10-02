@@ -41,6 +41,13 @@ import {
   shippingSelectionToAddressPayload,
 } from '@/lib/shipping/buyerAddressHelpers';
 import { estimateShippingCostRub } from '@/lib/shipping/estimateShippingCost';
+import {
+  clientEstimateBaseRub,
+  DELIVERY_SURCHARGE_DEFAULTS,
+  normalizeDeliverySurcharges,
+  type DeliverySurcharges,
+  withDeliverySurcharge,
+} from '@/lib/deliverySurcharge';
 import { calcPayableTotal } from '@/lib/payableTotal';
 import { readApiError } from '@/lib/readApiError';
 import { useBuyerAuth } from '@/lib/BuyerAuthProvider';
@@ -198,12 +205,28 @@ export function CheckoutClient() {
   const [shippingEditId, setShippingEditId] = useState<string | null>(null);
   const [shippingMeta, setShippingMeta] = useState<JcosAddressMeta | null>(null);
   const [shippingCost, setShippingCost] = useState<number | null>(null);
+  const [deliverySurcharges, setDeliverySurcharges] = useState<DeliverySurcharges>(
+    DELIVERY_SURCHARGE_DEFAULTS,
+  );
   const addressByIdRef = useRef<Map<string, AccountAddressDto>>(new Map());
   const profilePrefillDone = useRef(false);
 
   useEffect(() => {
     setPromoInput(promo?.code ?? '');
   }, [promo?.code]);
+
+  useEffect(() => {
+    void fetch('/api/public/delivery-surcharges', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : DELIVERY_SURCHARGE_DEFAULTS))
+      .then((d) => setDeliverySurcharges(normalizeDeliverySurcharges(d)))
+      .catch(() => {});
+  }, []);
+
+  const displayShippingCost = useCallback(
+    (baseRub: number | null, carrier: JcosAddressMeta['carrier'] | undefined) =>
+      withDeliverySurcharge(baseRub, carrier, deliverySurcharges),
+    [deliverySurcharges],
+  );
 
   const ingestAddressList = useCallback((list: AccountAddressDto[]) => {
     const mapped = list.map(toSavedAddress);
@@ -248,7 +271,7 @@ export function CheckoutClient() {
         lat: meta.lat,
         lon: meta.lon,
         pvzId: meta.pvzId,
-      }).then((cost) => setShippingCost(cost));
+      }).then((cost) => setShippingCost(displayShippingCost(cost, meta.carrier)));
 
       if (raw) {
         setContact((c) => ({
@@ -267,7 +290,7 @@ export function CheckoutClient() {
       });
       return true;
     },
-    [savedAddresses],
+    [savedAddresses, displayShippingCost],
   );
 
   const selectSavedAddressOrEdit = useCallback(
@@ -347,13 +370,15 @@ export function CheckoutClient() {
         selection.shippingCostHint != null &&
         selection.shippingCostHint > 0
       ) {
-        setShippingCost(selection.shippingCostHint);
+        setShippingCost(
+          displayShippingCost(selection.shippingCostHint, selection.carrier),
+        );
         return;
       }
       const cost = await estimateShippingCostRub(selection);
-      setShippingCost(cost);
+      setShippingCost(displayShippingCost(cost, selection.carrier));
     },
-    [],
+    [displayShippingCost],
   );
 
   const persistAndApplyShipping = useCallback(
@@ -724,7 +749,14 @@ export function CheckoutClient() {
             lines: linesPayload,
             shippingMethod,
             shippingAddress,
-            clientEstimate: shippingCost,
+            clientEstimate:
+              shippingMeta?.carrier != null
+                ? clientEstimateBaseRub(
+                    shippingCost,
+                    shippingMeta.carrier,
+                    deliverySurcharges,
+                  )
+                : shippingCost,
           }),
           cache: 'no-store',
         });

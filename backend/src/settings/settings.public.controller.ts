@@ -32,6 +32,11 @@ export class SettingsPublicController {
     return this.settings.getCart();
   }
 
+  @Get('delivery-surcharges')
+  getDeliverySurcharges() {
+    return this.settings.getDeliverySurcharges();
+  }
+
   @Get('seo')
   getSiteSeo() {
     return this.settings.getSiteSeo();

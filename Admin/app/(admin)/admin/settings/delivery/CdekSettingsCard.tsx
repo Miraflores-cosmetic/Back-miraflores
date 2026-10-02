@@ -3,10 +3,17 @@
 import Link from 'next/link';
 import { AdminCompactBtnLink } from '@/components/AdminCompactBtn/AdminCompactBtn';
 import { CDEK_ORIGIN_LABEL } from '@/lib/shipping/cdekOrigin';
+import { DeliverySurchargeField } from './DeliverySurchargeField';
 import styles from './delivery.module.css';
 
+type Props = {
+  surchargeRub: string;
+  onSurchargeChange: (value: string) => void;
+  surchargeDisabled?: boolean;
+};
+
 /** СДЭК — основная служба на витрине; настройки ключей только на API-сервере. */
-export function CdekSettingsCard() {
+export function CdekSettingsCard({ surchargeRub, onSurchargeChange, surchargeDisabled }: Props) {
   return (
     <section className={styles.card}>
       <header className={styles.cardHead}>
@@ -19,6 +26,13 @@ export function CdekSettingsCard() {
         </div>
         <span className={`${styles.pill} ${styles.pillOk}`}>На витрине</span>
       </header>
+
+      <DeliverySurchargeField
+        label="Добавочная стоимость, ₽"
+        value={surchargeRub}
+        onChange={onSurchargeChange}
+        disabled={surchargeDisabled}
+      />
 
       <dl className={styles.facts}>
         <div className={styles.fact}>

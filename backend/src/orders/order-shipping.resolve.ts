@@ -1,5 +1,10 @@
 import { BadRequestException } from '@nestjs/common';
 import { ShipmentProvider } from '@prisma/client';
+import {
+  DELIVERY_SURCHARGE_DEFAULTS,
+  type DeliverySurchargeRub,
+  surchargeRubForCheckoutCarrier,
+} from './delivery-surcharge';
 import type { ShippingQuotePayload } from './shipping-quote.service';
 import {
   hashCartLines,
@@ -351,6 +356,8 @@ export function buildQuoteCost(opts: {
   clientEstimate?: number | null;
   serverEstimate?: number | null;
   requireServerReprice?: boolean;
+  /** Добавочная стоимость по перевозчикам (не входит в client/server estimate). */
+  surcharges?: DeliverySurchargeRub;
 }): { cost: number; method: CheckoutCarrier; freePvz: boolean } {
   const method = requireCheckoutShipmentProvider(opts.shippingMethod);
   assertShippingCommentMatchesCarrier(opts.shippingComment, method);
@@ -402,6 +409,12 @@ export function buildQuoteCost(opts: {
       'Не рассчитана стоимость доставки. Обновите расчёт и попробуйте снова.',
     );
   }
+
+  const surcharge = surchargeRubForCheckoutCarrier(
+    method,
+    opts.surcharges ?? DELIVERY_SURCHARGE_DEFAULTS,
+  );
+  cost += surcharge;
 
   if (cost < 1) {
     throw new BadRequestException(
