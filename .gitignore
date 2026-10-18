@@ -18,6 +18,7 @@ node_modules/
 backend/.env
 Admin/.env.local
 deploy/deploy.env
+deploy/backup-s3.env
 
 # Build / cache
 dist/

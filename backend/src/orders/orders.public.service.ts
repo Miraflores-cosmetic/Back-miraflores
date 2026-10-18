@@ -28,7 +28,6 @@ import { lockOrderForUpdate } from './order-lock';
 import {
   DELIVERY_SURCHARGE_DEFAULTS,
   normalizeDeliverySurchargeRow,
-  type DeliverySurchargeRub,
 } from './delivery-surcharge';
 import { resolveShippingFromQuote, buildQuoteCost, resolvePvzCode, requireCheckoutShipmentProvider } from './order-shipping.resolve';
 import {
@@ -53,6 +52,9 @@ import {
 } from '../gift-certificates/gift-certificate-purchase.util';
 
 import { allocateNextOrderNumber } from './order-number';
+import { shouldSyncOrderToYourich } from '../yourich/yourich-lead';
+import { YourichSyncService } from '../yourich/yourich-sync.service';
+import { YourichClient } from '../yourich/yourich.client';
 
 type SyncedCartItem = {
   variantId: string;
@@ -107,6 +109,8 @@ export class OrdersPublicService {
     private readonly lifecycle: OrderLifecycleService,
     private readonly orderChat: OrderChatService,
     @Optional() private readonly ozonAuth?: OzonAuthService,
+    @Optional() private readonly yourichSync?: YourichSyncService,
+    @Optional() private readonly yourichClient?: YourichClient,
   ) {}
 
   /**
@@ -239,13 +243,16 @@ export class OrdersPublicService {
     this.assertCheckoutStatusAccess(order, opts);
   }
 
-  private async loadDeliverySurcharges(): Promise<DeliverySurchargeRub> {
+  private async loadDeliverySurcharges() {
     const row = await this.prisma.deliverySettings.findUnique({
       where: { id: 'default' },
       select: {
-        cdekSurchargeRub: true,
-        ozonSurchargeRub: true,
-        yandexSurchargeRub: true,
+        cdekSurchargeKind: true,
+        cdekSurchargeValue: true,
+        ozonSurchargeKind: true,
+        ozonSurchargeValue: true,
+        yandexSurchargeKind: true,
+        yandexSurchargeValue: true,
       },
     });
     if (!row) return { ...DELIVERY_SURCHARGE_DEFAULTS };
@@ -459,6 +466,7 @@ export class OrdersPublicService {
         subtotal,
         {
           email,
+          phone,
           userId: userId ?? null,
           guestId,
         },
@@ -467,6 +475,16 @@ export class OrdersPublicService {
       discountTotal = promoApply.discountAmount;
       promoCode = promoApply.code;
     }
+
+    const refHash = dto.affiliate?.refHash?.trim() || null;
+    const extUserId = dto.affiliate?.extUserId?.trim() || null;
+    const wantYourich =
+      !giftOnly &&
+      shouldSyncOrderToYourich({
+        giftPurchaseDenominationId: null,
+        refHash,
+        affiliatePromo: Boolean(promoApply?.affiliate),
+      });
 
     const payableAfterPromo = Math.max(0, subtotal - discountTotal);
 
@@ -769,6 +787,34 @@ export class OrdersPublicService {
         });
       }
 
+      if (wantYourich) {
+        const giftPurchaseDenominationId = (() => {
+          for (const l of itemsForOrder) {
+            const denomId = parseGiftDenomCartVariantId(l.variantId);
+            if (denomId) return denomId;
+            const fromSku = parseGiftPurchaseSkuDenomId(l.sku);
+            if (fromSku) return fromSku;
+          }
+          return null;
+        })();
+        if (!giftPurchaseDenominationId) {
+          await tx.orderAffiliateLead.create({
+            data: {
+              orderId: created.id,
+              leadCrmId: created.number,
+              refHash,
+              extUserId,
+              promoCodeRaw: promoApply?.affiliate
+                ? promoApply.codeRaw
+                : null,
+              offerId: this.yourichClient?.fallbackOfferId() ?? null,
+              state: 'PENDING',
+              nextAttemptAt: new Date(),
+            },
+          });
+        }
+      }
+
       return created;
     });
 
@@ -777,6 +823,11 @@ export class OrdersPublicService {
     scheduleAfterRlsCommitWithBypass(this.prisma, () =>
       this.orderChat.seedCustomerNoteFromOrder(order.id),
     );
+    if (wantYourich && this.yourichSync) {
+      scheduleAfterRlsCommitWithBypass(this.prisma, () =>
+        this.yourichSync!.touch(order.id),
+      );
+    }
 
     if (
       order.status === OrderStatus.AWAITING_PAYMENT &&
@@ -846,6 +897,11 @@ export class OrdersPublicService {
       scheduleAfterRlsCommitWithBypass(this.prisma, () =>
         this.orderChat.applyRetentionForOrder(result.id, OrderStatus.CANCELLED),
       );
+      if (this.yourichSync) {
+        scheduleAfterRlsCommitWithBypass(this.prisma, () =>
+          this.yourichSync!.touch(result.id),
+        );
+      }
     }
     return {
       id: result.id,
@@ -907,6 +963,11 @@ export class OrdersPublicService {
       scheduleAfterRlsCommitWithBypass(this.prisma, () =>
         this.orderChat.applyRetentionForOrder(order.id, OrderStatus.CANCELLED),
       );
+      if (this.yourichSync) {
+        scheduleAfterRlsCommitWithBypass(this.prisma, () =>
+          this.yourichSync!.touch(order.id),
+        );
+      }
       cancelled += 1;
     }
     return cancelled;
@@ -1484,6 +1545,11 @@ export class OrdersPublicService {
 
     if (txResult.kind === 'already') return 'already';
     if (txResult.kind === 'paid') {
+      if (this.yourichSync) {
+        scheduleAfterRlsCommitWithBypass(this.prisma, () =>
+          this.yourichSync!.touch(orderId),
+        );
+      }
       if (txResult.isGiftPurchase) {
         await this.notifyGiftPurchasePaid(txResult.orderId, txResult.number);
       } else {

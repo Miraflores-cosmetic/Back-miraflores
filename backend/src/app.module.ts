@@ -27,6 +27,7 @@ import { UserGroupsModule } from './user-groups/user-groups.module';
 import { NewsletterModule } from './newsletter/newsletter.module';
 import { OrderChatModule } from './order-chat/order-chat.module';
 import { OzonModule } from './ozon/ozon.module';
+import { YourichModule } from './yourich/yourich.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RlsInterceptor } from './rls/rls.interceptor';
 
@@ -70,6 +71,7 @@ import { RlsInterceptor } from './rls/rls.interceptor';
     NewsletterModule,
     OrderChatModule,
     OzonModule,
+    YourichModule,
   ],
   controllers: [HealthController],
   providers: [

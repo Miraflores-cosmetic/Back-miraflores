@@ -144,6 +144,20 @@ export class ShippingAddressDto {
   carrierQuote?: ShippingCarrierQuoteDto;
 }
 
+export class OrderAffiliateDto {
+  /** Cookie _yr_rlh / ?yr= */
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  refHash?: string | null;
+
+  /** Cookie _yr_uid (отпечаток) */
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  extUserId?: string | null;
+}
+
 export class CreateOrderDto {
   @IsArray()
   @ArrayMaxSize(100)
@@ -188,6 +202,12 @@ export class CreateOrderDto {
   @IsString()
   @MaxLength(64)
   promoCode?: string | null;
+
+  /** Атрибуция YouRich (рефералка). */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => OrderAffiliateDto)
+  affiliate?: OrderAffiliateDto | null;
 
   /** Подарочный сертификат (взаимоисключающе с promoCode). */
   @IsOptional()

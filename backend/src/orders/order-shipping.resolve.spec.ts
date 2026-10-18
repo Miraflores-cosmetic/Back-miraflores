@@ -247,7 +247,11 @@ describe('Ozon', () => {
         freeShippingThresholdRub: 10_000,
         clientEstimate: 79,
         serverEstimate: 79,
-        surcharges: { cdek: 0, ozon: 100, yandex: 0 },
+        surcharges: {
+          cdek: { kind: 'FIXED', value: 0 },
+          ozon: { kind: 'FIXED', value: 100 },
+          yandex: { kind: 'FIXED', value: 0 },
+        },
       }),
     ).toEqual({ cost: 179, method: 'OZON', freePvz: false });
     expect(() =>

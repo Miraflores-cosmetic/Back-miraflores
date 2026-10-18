@@ -11,7 +11,9 @@ import pn from '@/app/(admin)/admin/catalog/products/productNew.module.css';
 import styles from './delivery.module.css';
 import {
   DELIVERY_SURCHARGE_DEFAULTS,
+  deliverySurchargesToApiPayload,
   normalizeDeliverySurcharges,
+  type DeliverySurchargeKind,
   type DeliverySurcharges,
 } from '@/lib/deliverySurcharge';
 import { CdekSettingsCard } from './CdekSettingsCard';
@@ -96,24 +98,40 @@ export function DeliverySettingsClient() {
   const [surchargeLoading, setSurchargeLoading] = useState(true);
   const [surchargeSaving, setSurchargeSaving] = useState(false);
   const [surchargeDirty, setSurchargeDirty] = useState(false);
-  const [cdekSurcharge, setCdekSurcharge] = useState(
-    String(DELIVERY_SURCHARGE_DEFAULTS.cdekSurchargeRub),
+  const [cdekSurchargeKind, setCdekSurchargeKind] = useState<DeliverySurchargeKind>(
+    DELIVERY_SURCHARGE_DEFAULTS.cdek.kind,
   );
-  const [ozonSurcharge, setOzonSurcharge] = useState(
-    String(DELIVERY_SURCHARGE_DEFAULTS.ozonSurchargeRub),
+  const [cdekSurchargeValue, setCdekSurchargeValue] = useState(
+    String(DELIVERY_SURCHARGE_DEFAULTS.cdek.value),
   );
-  const [yandexSurcharge, setYandexSurcharge] = useState(
-    String(DELIVERY_SURCHARGE_DEFAULTS.yandexSurchargeRub),
+  const [ozonSurchargeKind, setOzonSurchargeKind] = useState<DeliverySurchargeKind>(
+    DELIVERY_SURCHARGE_DEFAULTS.ozon.kind,
   );
+  const [ozonSurchargeValue, setOzonSurchargeValue] = useState(
+    String(DELIVERY_SURCHARGE_DEFAULTS.ozon.value),
+  );
+  const [yandexSurchargeKind, setYandexSurchargeKind] = useState<DeliverySurchargeKind>(
+    DELIVERY_SURCHARGE_DEFAULTS.yandex.kind,
+  );
+  const [yandexSurchargeValue, setYandexSurchargeValue] = useState(
+    String(DELIVERY_SURCHARGE_DEFAULTS.yandex.value),
+  );
+
+  function applySurchargesFromApi(raw: DeliverySurcharges) {
+    setCdekSurchargeKind(raw.cdek.kind);
+    setCdekSurchargeValue(String(raw.cdek.value));
+    setOzonSurchargeKind(raw.ozon.kind);
+    setOzonSurchargeValue(String(raw.ozon.value));
+    setYandexSurchargeKind(raw.yandex.kind);
+    setYandexSurchargeValue(String(raw.yandex.value));
+  }
 
   const loadSurcharges = useCallback(async () => {
     setSurchargeLoading(true);
     try {
-      const raw = await adminBackendJson<DeliverySurcharges>('settings/admin/delivery');
+      const raw = await adminBackendJson<Record<string, unknown>>('settings/admin/delivery');
       const data = normalizeDeliverySurcharges(raw);
-      setCdekSurcharge(String(data.cdekSurchargeRub));
-      setOzonSurcharge(String(data.ozonSurchargeRub));
-      setYandexSurcharge(String(data.yandexSurchargeRub));
+      applySurchargesFromApi(data);
       setSurchargeDirty(false);
     } catch (e) {
       showToast(errMessage(e, 'Не удалось загрузить добавочные стоимости'));
@@ -142,35 +160,36 @@ export function DeliverySettingsClient() {
     return () => window.removeEventListener('focus', onFocus);
   }, [load, loadSurcharges]);
 
-  function parseSurchargeInput(raw: string): number | null {
+  function parseSurchargeInput(kind: DeliverySurchargeKind, raw: string): number | null {
     const n = Number.parseInt(raw.trim(), 10);
-    if (!Number.isFinite(n) || n < 0 || n > 500_000) return null;
+    if (!Number.isFinite(n) || n < 0) return null;
+    const max = kind === 'PERCENT' ? 100 : 500_000;
+    if (n > max) return null;
     return n;
   }
 
   async function saveSurcharges() {
-    const cdek = parseSurchargeInput(cdekSurcharge);
-    const ozon = parseSurchargeInput(ozonSurcharge);
-    const yandex = parseSurchargeInput(yandexSurcharge);
-    if (cdek == null || ozon == null || yandex == null) {
-      showToast('Добавочная стоимость: целое число от 0 до 500 000');
+    const cdekVal = parseSurchargeInput(cdekSurchargeKind, cdekSurchargeValue);
+    const ozonVal = parseSurchargeInput(ozonSurchargeKind, ozonSurchargeValue);
+    const yandexVal = parseSurchargeInput(yandexSurchargeKind, yandexSurchargeValue);
+    if (cdekVal == null || ozonVal == null || yandexVal == null) {
+      showToast('Добавочная стоимость: для % — 0–100, для фикса — 0–500 000');
       return;
     }
+    const payload = deliverySurchargesToApiPayload({
+      cdek: { kind: cdekSurchargeKind, value: cdekVal },
+      ozon: { kind: ozonSurchargeKind, value: ozonVal },
+      yandex: { kind: yandexSurchargeKind, value: yandexVal },
+    });
     setSurchargeSaving(true);
     try {
       const saved = normalizeDeliverySurcharges(
-        await adminBackendJson<DeliverySurcharges>('settings/admin/delivery', {
+        await adminBackendJson<Record<string, unknown>>('settings/admin/delivery', {
           method: 'PUT',
-          body: JSON.stringify({
-            cdekSurchargeRub: cdek,
-            ozonSurchargeRub: ozon,
-            yandexSurchargeRub: yandex,
-          }),
+          body: JSON.stringify(payload),
         }),
       );
-      setCdekSurcharge(String(saved.cdekSurchargeRub));
-      setOzonSurcharge(String(saved.ozonSurchargeRub));
-      setYandexSurcharge(String(saved.yandexSurchargeRub));
+      applySurchargesFromApi(saved);
       setSurchargeDirty(false);
       showToast('Добавочные стоимости сохранены');
     } catch (e) {
@@ -298,9 +317,14 @@ export function DeliverySettingsClient() {
       ) : null}
 
       <CdekSettingsCard
-        surchargeRub={cdekSurcharge}
-        onSurchargeChange={(v) => {
-          setCdekSurcharge(v);
+        surchargeKind={cdekSurchargeKind}
+        onSurchargeKindChange={(k) => {
+          setCdekSurchargeKind(k);
+          setSurchargeDirty(true);
+        }}
+        surchargeValue={cdekSurchargeValue}
+        onSurchargeValueChange={(v) => {
+          setCdekSurchargeValue(v);
           setSurchargeDirty(true);
         }}
         surchargeDisabled={surchargeLoading || surchargeSaving}
@@ -319,11 +343,16 @@ export function DeliverySettingsClient() {
         </header>
 
         <DeliverySurchargeField
-          label="Добавочная стоимость, ₽"
-          value={ozonSurcharge}
+          label="Ozon"
+          kind={ozonSurchargeKind}
+          onKindChange={(k) => {
+            setOzonSurchargeKind(k);
+            setSurchargeDirty(true);
+          }}
+          value={ozonSurchargeValue}
           disabled={surchargeLoading || surchargeSaving}
           onChange={(v) => {
-            setOzonSurcharge(v);
+            setOzonSurchargeValue(v);
             setSurchargeDirty(true);
           }}
         />

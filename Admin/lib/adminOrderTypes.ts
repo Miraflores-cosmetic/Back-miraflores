@@ -140,6 +140,23 @@ export type AdminOrderDetail = {
   balanceDue?: number;
   refundSuggested?: number;
   promoCode: string | null;
+  /** Партнёрка YouRich */
+  affiliate?: {
+    leadCrmId: string;
+    refHash: string | null;
+    extUserId: string | null;
+    promoCodeRaw: string | null;
+    offerId: number | null;
+    leadId: number | null;
+    lastSentEvent: string | null;
+    lastSentSum: number | null;
+    state: string;
+    attempts: number;
+    nextAttemptAt: string;
+    lastError: string | null;
+    lastHttpStatus: number | null;
+    syncedAt: string | null;
+  } | null;
   pricingGroupId?: string | null;
   pricingGroupName?: string | null;
   pricingContext?: string | null;

@@ -7,6 +7,7 @@ import { dedupeIdsPreserveOrder } from '../catalog/catalog-admin.helpers';
 import { ADMIN_LIST_MAX_LIMIT } from '../catalog/catalog.constants';
 import type { CreatePromoCodeDto, PromoType, UpdatePromoCodeDto } from './dto/promo.dto';
 import { PROMO_TYPES } from './dto/promo.dto';
+import { hasPriorGoodsPurchase } from '../yourich/yourich-first-order';
 import { promoConsumingRedemptionWhere } from './promo-redemption.util';
 
 function normalizeCode(raw: string): string {
@@ -61,6 +62,7 @@ export function computePromoDiscount(type: string, value: number, subtotal: numb
 
 export type PromoIdentity = {
   email?: string | null;
+  phone?: string | null;
   userId?: string | null;
   guestId?: string | null;
 };
@@ -75,6 +77,8 @@ export type PromoScopeLine = {
 export type PromoApplyResult = {
   promoCodeId: string;
   code: string;
+  /** Исходное написание для YouRich */
+  codeRaw: string;
   type: string;
   value: number;
   discountAmount: number;
@@ -84,6 +88,8 @@ export type PromoApplyResult = {
   total: number;
   maxUses: number | null;
   oneShot: boolean;
+  firstOrderOnly: boolean;
+  affiliate: boolean;
   minOrderAmount: number | null;
   usedCount: number;
   scope: DiscountScope | null;
@@ -245,10 +251,12 @@ export class PromoAdminService {
       throw new BadRequestException('Дата окончания раньше начала');
     }
     const prepared = await this.prepareScope(dto.scope ?? null, dto.categoryIds, dto.productIds);
+    const codeRaw = (dto.codeRaw?.trim() || dto.code.trim() || code) || code;
     try {
       const row = await this.prisma.promoCode.create({
         data: {
           code,
+          codeRaw,
           type: dto.type,
           value: dto.value,
           active: dto.active ?? true,
@@ -256,6 +264,8 @@ export class PromoAdminService {
           endsAt,
           maxUses: parseOptionalInt(dto.maxUses) ?? null,
           oneShot: dto.oneShot ?? false,
+          firstOrderOnly: dto.firstOrderOnly ?? false,
+          affiliate: dto.affiliate ?? false,
           minOrderAmount: parseOptionalInt(dto.minOrderAmount) ?? null,
           scope: prepared.scope,
           categories:
@@ -334,6 +344,15 @@ export class PromoAdminService {
               ? { maxUses: parseOptionalInt(dto.maxUses) ?? null }
               : {}),
             ...(dto.oneShot !== undefined ? { oneShot: dto.oneShot } : {}),
+            ...(dto.firstOrderOnly !== undefined
+              ? { firstOrderOnly: dto.firstOrderOnly }
+              : {}),
+            ...(dto.affiliate !== undefined ? { affiliate: dto.affiliate } : {}),
+            ...(dto.codeRaw !== undefined
+              ? { codeRaw: dto.codeRaw?.trim() || null }
+              : dto.code !== undefined
+                ? { codeRaw: dto.code.trim() }
+                : {}),
             ...(dto.minOrderAmount !== undefined
               ? { minOrderAmount: parseOptionalInt(dto.minOrderAmount) ?? null }
               : {}),
@@ -394,6 +413,7 @@ export class PromoAdminService {
     return {
       id: row.id,
       code: row.code,
+      codeRaw: row.codeRaw ?? row.code,
       type: row.type,
       value: row.value,
       active: row.active,
@@ -401,6 +421,9 @@ export class PromoAdminService {
       endsAt: row.endsAt,
       maxUses: row.maxUses,
       oneShot: row.oneShot,
+      firstOrderOnly: row.firstOrderOnly,
+      affiliate: row.affiliate,
+      yourichPromoId: row.yourichPromoId,
       minOrderAmount: row.minOrderAmount,
       scope: row.scope,
       categoryIds: row.categories.map((c) => c.categoryId),
@@ -585,6 +608,26 @@ export class PromoPublicService {
       }
     }
 
+    if (row.firstOrderOnly) {
+      if (!email && opts.enforceIdentity) {
+        throw new BadRequestException('Для промокода на первый заказ нужен email');
+      }
+      if (email) {
+        const hadPrior = await this.prisma.runIsolatedRlsTransaction(
+          { userId: '', bypass: true },
+          () =>
+            hasPriorGoodsPurchase(this.prisma, {
+              email,
+              phone: identity.phone ?? null,
+              userId,
+            }),
+        );
+        if (hadPrior) {
+          throw new BadRequestException('Промокод действует только на первый заказ');
+        }
+      }
+    }
+
     const eligible = eligiblePromoSubtotal(
       row.scope,
       row.categories.map((c) => c.categoryId),
@@ -606,6 +649,7 @@ export class PromoPublicService {
     return {
       promoCodeId: row.id,
       code: row.code,
+      codeRaw: row.codeRaw?.trim() || row.code,
       type: row.type,
       value: row.value,
       discountAmount,
@@ -614,6 +658,8 @@ export class PromoPublicService {
       total: Math.max(0, sub - discountAmount),
       maxUses: row.maxUses,
       oneShot: row.oneShot,
+      firstOrderOnly: row.firstOrderOnly,
+      affiliate: row.affiliate,
       minOrderAmount: row.minOrderAmount,
       usedCount,
       scope: row.scope,

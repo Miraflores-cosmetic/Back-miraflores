@@ -19,6 +19,7 @@ import { MailModule } from '../mail/mail.module';
 import { UserGroupsModule } from '../user-groups/user-groups.module';
 import { OrderChatModule } from '../order-chat/order-chat.module';
 import { OzonModule } from '../ozon/ozon.module';
+import { YourichModule } from '../yourich/yourich.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { OzonModule } from '../ozon/ozon.module';
     MailModule,
     OrderChatModule,
     OzonModule,
+    YourichModule,
   ],
   controllers: [OrdersPublicController, OrdersAdminController],
   providers: [

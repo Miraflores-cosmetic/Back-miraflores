@@ -238,7 +238,7 @@ export function buildOrderPaidEmail(params: {
       : '',
     mailCtaButton(ordersUrl, 'Смотреть заказ'),
     mailMutedNote(
-      'Мы пришлём письмо, когда заказ будет отправлен. Вопросы — на info@miraflores.ru.',
+      'Мы пришлём письмо, когда заказ будет отправлен. Вопросы — на info@miraflores-shop.ru.',
     ),
   ].join('');
 
@@ -372,14 +372,14 @@ export function buildOrderCancelledEmail(params: {
   const text = [
     `Заказ ${number} отменён.`,
     '',
-    'Если у вас остались вопросы — напишите на info@miraflores.ru.',
+    'Если у вас остались вопросы — напишите на info@miraflores-shop.ru.',
     site,
   ].join('\n');
 
   const bodyHtml = [
     eyebrow('Заказ'),
     title('Заказ отменён'),
-    `<p style="margin:0 0 16px;">Заказ <strong>${escapeHtml(number)}</strong> отменён. Если это произошло по ошибке или нужна помощь — ответьте на это письмо или напишите на info@miraflores.ru.</p>`,
+    `<p style="margin:0 0 16px;">Заказ <strong>${escapeHtml(number)}</strong> отменён. Если это произошло по ошибке или нужна помощь — ответьте на это письмо или напишите на info@miraflores-shop.ru.</p>`,
     orderNumberCard(number),
     mailCtaButton(site, 'На сайт Miraflores'),
     mailMutedNote('Новый заказ можно оформить в любое время на сайте.'),
@@ -422,7 +422,7 @@ export function buildOrderUpdatedEmail(params: {
     `<p style="margin:0 0 16px;white-space:pre-line;">${escapeHtml(summary)}</p>`,
     orderNumberCard(number),
     mailCtaButton(profileUrl(site), 'Смотреть заказ'),
-    mailMutedNote('Если у вас есть вопросы — напишите на info@miraflores.ru.'),
+    mailMutedNote('Если у вас есть вопросы — напишите на info@miraflores-shop.ru.'),
   ].join('');
 
   return {
@@ -466,7 +466,7 @@ export function buildOrderSurchargeEmail(params: {
     payUrl
       ? mailCtaButton(payUrl, 'Оплатить доплату')
       : mailCtaButton(profileUrl(site), 'Смотреть заказ'),
-    mailMutedNote('Вопросы — на info@miraflores.ru.'),
+    mailMutedNote('Вопросы — на info@miraflores-shop.ru.'),
   ].join('');
 
   return {
@@ -530,7 +530,7 @@ export function buildOrderRefundEmail(params: {
     lead,
     orderNumberCard(number, amountExtra),
     mailCtaButton(profileUrl(site), 'Личный кабинет'),
-    mailMutedNote('Вопросы по возврату — на info@miraflores.ru.'),
+    mailMutedNote('Вопросы по возврату — на info@miraflores-shop.ru.'),
   ].join('');
 
   return {
@@ -756,7 +756,7 @@ export function buildGiftBuyerCopyEmail(params: {
     `<p style="margin:0 0 16px;">Оплата заказа <strong>${escapeHtml(number)}</strong> прошла успешно. Код отправлен на <strong>${escapeHtml(recipient)}</strong>.</p>`,
     orderNumberCard(number),
     mailCtaButton(site, 'На сайт Miraflores'),
-    mailMutedNote('Если адрес получателя указан неверно — напишите на info@miraflores.ru.'),
+    mailMutedNote('Если адрес получателя указан неверно — напишите на info@miraflores-shop.ru.'),
   ].join('');
 
   return {

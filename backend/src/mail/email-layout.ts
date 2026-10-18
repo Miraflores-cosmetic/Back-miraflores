@@ -9,7 +9,7 @@ export const MAIL_BRAND = {
   line: '#e5e3dc',
   sand: '#f7f5f0',
   white: '#ffffff',
-  replyHint: 'info@miraflores.ru',
+  replyHint: 'info@miraflores-shop.ru',
 } as const;
 
 function esc(s: string): string {

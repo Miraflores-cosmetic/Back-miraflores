@@ -31,6 +31,8 @@ export type AdminPromoProduct = {
 export type AdminPromoCode = {
   id: string;
   code: string;
+  /** Исходное написание для YouRich */
+  codeRaw?: string | null;
   type: string;
   value: number;
   active: boolean;
@@ -38,6 +40,9 @@ export type AdminPromoCode = {
   endsAt: string | null;
   maxUses: number | null;
   oneShot: boolean;
+  firstOrderOnly?: boolean;
+  affiliate?: boolean;
+  yourichPromoId?: number | null;
   minOrderAmount: number | null;
   /** null = весь заказ */
   scope: PromoScope | null;

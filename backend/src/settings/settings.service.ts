@@ -309,23 +309,32 @@ const CART_DEFAULTS = {
 
 const DELIVERY_SETTINGS_DEFAULTS = {
   id: 'default',
-  cdekSurchargeRub: 0,
-  ozonSurchargeRub: 0,
-  yandexSurchargeRub: 0,
+  cdekSurchargeKind: 'FIXED' as const,
+  cdekSurchargeValue: 0,
+  ozonSurchargeKind: 'FIXED' as const,
+  ozonSurchargeValue: 0,
+  yandexSurchargeKind: 'FIXED' as const,
+  yandexSurchargeValue: 0,
 } as const;
 
 function serializeDeliverySettings(row: {
   id: string;
-  cdekSurchargeRub: number;
-  ozonSurchargeRub: number;
-  yandexSurchargeRub: number;
+  cdekSurchargeKind: string;
+  cdekSurchargeValue: number;
+  ozonSurchargeKind: string;
+  ozonSurchargeValue: number;
+  yandexSurchargeKind: string;
+  yandexSurchargeValue: number;
   updatedAt: Date;
 }) {
   return {
     id: row.id,
-    cdekSurchargeRub: row.cdekSurchargeRub,
-    ozonSurchargeRub: row.ozonSurchargeRub,
-    yandexSurchargeRub: row.yandexSurchargeRub,
+    cdekSurchargeKind: row.cdekSurchargeKind,
+    cdekSurchargeValue: row.cdekSurchargeValue,
+    ozonSurchargeKind: row.ozonSurchargeKind,
+    ozonSurchargeValue: row.ozonSurchargeValue,
+    yandexSurchargeKind: row.yandexSurchargeKind,
+    yandexSurchargeValue: row.yandexSurchargeValue,
     updatedAt: row.updatedAt.toISOString(),
   };
 }
@@ -995,18 +1004,29 @@ export class SettingsAdminService {
   }
 
   async updateDelivery(dto: UpdateDeliverySettingsDto) {
+    const clampValue = (kind: string, value: number) => {
+      const n = Math.floor(value);
+      if (kind === 'PERCENT') return Math.max(0, Math.min(100, n));
+      return Math.max(0, Math.min(500_000, n));
+    };
     const row = await this.prisma.deliverySettings.upsert({
       where: { id: 'default' },
       create: {
         id: 'default',
-        cdekSurchargeRub: dto.cdekSurchargeRub,
-        ozonSurchargeRub: dto.ozonSurchargeRub,
-        yandexSurchargeRub: dto.yandexSurchargeRub,
+        cdekSurchargeKind: dto.cdekSurchargeKind,
+        cdekSurchargeValue: clampValue(dto.cdekSurchargeKind, dto.cdekSurchargeValue),
+        ozonSurchargeKind: dto.ozonSurchargeKind,
+        ozonSurchargeValue: clampValue(dto.ozonSurchargeKind, dto.ozonSurchargeValue),
+        yandexSurchargeKind: dto.yandexSurchargeKind,
+        yandexSurchargeValue: clampValue(dto.yandexSurchargeKind, dto.yandexSurchargeValue),
       },
       update: {
-        cdekSurchargeRub: dto.cdekSurchargeRub,
-        ozonSurchargeRub: dto.ozonSurchargeRub,
-        yandexSurchargeRub: dto.yandexSurchargeRub,
+        cdekSurchargeKind: dto.cdekSurchargeKind,
+        cdekSurchargeValue: clampValue(dto.cdekSurchargeKind, dto.cdekSurchargeValue),
+        ozonSurchargeKind: dto.ozonSurchargeKind,
+        ozonSurchargeValue: clampValue(dto.ozonSurchargeKind, dto.ozonSurchargeValue),
+        yandexSurchargeKind: dto.yandexSurchargeKind,
+        yandexSurchargeValue: clampValue(dto.yandexSurchargeKind, dto.yandexSurchargeValue),
       },
     });
     return serializeDeliverySettings(row);
@@ -1555,22 +1575,31 @@ export class SettingsPublicService {
     const row = await this.prisma.deliverySettings.findUnique({
       where: { id: 'default' },
       select: {
-        cdekSurchargeRub: true,
-        ozonSurchargeRub: true,
-        yandexSurchargeRub: true,
+        cdekSurchargeKind: true,
+        cdekSurchargeValue: true,
+        ozonSurchargeKind: true,
+        ozonSurchargeValue: true,
+        yandexSurchargeKind: true,
+        yandexSurchargeValue: true,
       },
     });
     if (!row) {
       return {
-        cdekSurchargeRub: DELIVERY_SETTINGS_DEFAULTS.cdekSurchargeRub,
-        ozonSurchargeRub: DELIVERY_SETTINGS_DEFAULTS.ozonSurchargeRub,
-        yandexSurchargeRub: DELIVERY_SETTINGS_DEFAULTS.yandexSurchargeRub,
+        cdekSurchargeKind: DELIVERY_SETTINGS_DEFAULTS.cdekSurchargeKind,
+        cdekSurchargeValue: DELIVERY_SETTINGS_DEFAULTS.cdekSurchargeValue,
+        ozonSurchargeKind: DELIVERY_SETTINGS_DEFAULTS.ozonSurchargeKind,
+        ozonSurchargeValue: DELIVERY_SETTINGS_DEFAULTS.ozonSurchargeValue,
+        yandexSurchargeKind: DELIVERY_SETTINGS_DEFAULTS.yandexSurchargeKind,
+        yandexSurchargeValue: DELIVERY_SETTINGS_DEFAULTS.yandexSurchargeValue,
       };
     }
     return {
-      cdekSurchargeRub: row.cdekSurchargeRub,
-      ozonSurchargeRub: row.ozonSurchargeRub,
-      yandexSurchargeRub: row.yandexSurchargeRub,
+      cdekSurchargeKind: row.cdekSurchargeKind,
+      cdekSurchargeValue: row.cdekSurchargeValue,
+      ozonSurchargeKind: row.ozonSurchargeKind,
+      ozonSurchargeValue: row.ozonSurchargeValue,
+      yandexSurchargeKind: row.yandexSurchargeKind,
+      yandexSurchargeValue: row.yandexSurchargeValue,
     };
   }
 

@@ -74,6 +74,8 @@ export function PromoFormClient({ promoId }: { promoId?: string }) {
   const [value, setValue] = useState('10');
   const [active, setActive] = useState(true);
   const [oneShot, setOneShot] = useState(false);
+  const [firstOrderOnly, setFirstOrderOnly] = useState(false);
+  const [affiliate, setAffiliate] = useState(false);
   const [maxUses, setMaxUses] = useState('');
   const [minOrderAmount, setMinOrderAmount] = useState('');
   const [startDate, setStartDate] = useState('');
@@ -96,6 +98,8 @@ export function PromoFormClient({ promoId }: { promoId?: string }) {
     setValue(String(row.value));
     setActive(row.active);
     setOneShot(row.oneShot ?? false);
+    setFirstOrderOnly(row.firstOrderOnly ?? false);
+    setAffiliate(row.affiliate ?? false);
     setMaxUses(row.maxUses != null ? String(row.maxUses) : '');
     setMinOrderAmount(row.minOrderAmount != null ? String(row.minOrderAmount) : '');
     const s = parseMoscowParts(row.startsAt);
@@ -194,12 +198,16 @@ export function PromoFormClient({ promoId }: { promoId?: string }) {
         throw new Error('Выберите хотя бы один товар');
       }
 
+      const codeTrim = code.trim();
       const body = {
-        code: code.trim().toUpperCase(),
+        code: codeTrim.toUpperCase(),
+        codeRaw: codeTrim,
         type,
         value: n,
         active,
         oneShot,
+        firstOrderOnly,
+        affiliate,
         maxUses: optionalInt(maxUses),
         minOrderAmount: optionalInt(minOrderAmount),
         startsAt: combineMoscowDateTime(startDate, startTime),
@@ -399,6 +407,30 @@ export function PromoFormClient({ promoId }: { promoId?: string }) {
           />
           One-shot (один раз на email / guest)
         </label>
+        <label className={styles.labelCheckboxRow} htmlFor="promo-first">
+          <AdminCheckbox
+            id="promo-first"
+            className={styles.adminCheckboxForm}
+            checked={firstOrderOnly}
+            onChange={(e) => setFirstOrderOnly(e.target.checked)}
+          />
+          Только первый заказ
+        </label>
+        <label className={styles.labelCheckboxRow} htmlFor="promo-affiliate">
+          <AdminCheckbox
+            id="promo-affiliate"
+            className={styles.adminCheckboxForm}
+            checked={affiliate}
+            onChange={(e) => setAffiliate(e.target.checked)}
+          />
+          Партнёрский (YouRich) — заказ уходит в рефералку
+        </label>
+        {detail?.yourichPromoId != null ? (
+          <p className={styles.muted}>Синхронизирован из YouRich (id {detail.yourichPromoId})</p>
+        ) : null}
+        {detail?.codeRaw && detail.codeRaw !== detail.code ? (
+          <p className={styles.muted}>В YouRich код: {detail.codeRaw}</p>
+        ) : null}
 
         <AdminTextField
           label="Max uses (пусто = без лимита)"

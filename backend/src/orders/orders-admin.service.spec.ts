@@ -101,10 +101,13 @@ const detailOrder = {
   shipments: [],
   events: [],
   promoRedemption: { id: 'r1' } as { id: string } | null,
+  affiliateLead: null,
+  checklistMarks: [],
 };
 
 const prisma = {
   $transaction: vi.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
+  runInRlsTransaction: vi.fn(async (_ctx: unknown, fn: () => unknown) => fn()),
   order: {
     findUnique: vi.fn(),
     findUniqueOrThrow: vi.fn(),

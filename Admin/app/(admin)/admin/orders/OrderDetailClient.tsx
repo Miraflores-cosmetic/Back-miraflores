@@ -886,6 +886,66 @@ export function OrderDetailClient({
             </dl>
           </OrderAccordion>
 
+          {order.affiliate ? (
+            <div className={styles.orderAccordion}>
+              <div className={styles.orderAccordionHead}>
+                <span className={styles.orderAccordionTitle}>Партнёрка YouRich</span>
+              </div>
+              <div className={styles.orderAccordionBody}>
+                <dl className={styles.detailDl}>
+                  <div className={styles.detailDlRow}>
+                    <dt>Статус синка</dt>
+                    <dd>
+                      {order.affiliate.state}
+                      {order.affiliate.lastSentEvent
+                        ? ` · ${order.affiliate.lastSentEvent}`
+                        : ''}
+                      {order.affiliate.lastSentSum != null
+                        ? ` · ${order.affiliate.lastSentSum} ₽`
+                        : ''}
+                    </dd>
+                  </div>
+                  <div className={styles.detailDlRow}>
+                    <dt>leadCrmId</dt>
+                    <dd>{order.affiliate.leadCrmId}</dd>
+                  </div>
+                  {order.affiliate.leadId != null ? (
+                    <div className={styles.detailDlRow}>
+                      <dt>leadId</dt>
+                      <dd>{order.affiliate.leadId}</dd>
+                    </div>
+                  ) : null}
+                  {order.affiliate.refHash ? (
+                    <div className={styles.detailDlRow}>
+                      <dt>refHash</dt>
+                      <dd>{order.affiliate.refHash}</dd>
+                    </div>
+                  ) : null}
+                  {order.affiliate.promoCodeRaw ? (
+                    <div className={styles.detailDlRow}>
+                      <dt>Промо (raw)</dt>
+                      <dd>{order.affiliate.promoCodeRaw}</dd>
+                    </div>
+                  ) : null}
+                  {order.affiliate.lastError ? (
+                    <div className={styles.detailDlRow}>
+                      <dt>Ошибка</dt>
+                      <dd>
+                        {order.affiliate.lastHttpStatus
+                          ? `HTTP ${order.affiliate.lastHttpStatus}: `
+                          : ''}
+                        {order.affiliate.lastError}
+                        {order.affiliate.attempts
+                          ? ` (попыток: ${order.affiliate.attempts})`
+                          : ''}
+                      </dd>
+                    </div>
+                  ) : null}
+                </dl>
+              </div>
+            </div>
+          ) : null}
+
           {order.promoCode ||
           order.giftCertificateCode ||
           order.giftPurchaseDenominationId ? (

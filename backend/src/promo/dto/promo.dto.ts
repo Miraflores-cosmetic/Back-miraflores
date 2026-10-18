@@ -61,6 +61,20 @@ export class CreatePromoCodeDto {
   oneShot?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  firstOrderOnly?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  affiliate?: boolean;
+
+  /** Исходное написание для YouRich; если не задано — как code после нормализации */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  codeRaw?: string | null;
+
+  @IsOptional()
   @ValidateIf((_, v) => v !== null && v !== undefined)
   @Type(() => Number)
   @IsInt()
@@ -125,6 +139,19 @@ export class UpdatePromoCodeDto {
   @IsOptional()
   @IsBoolean()
   oneShot?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  firstOrderOnly?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  affiliate?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  codeRaw?: string | null;
 
   @IsOptional()
   @ValidateIf((_, v) => v !== null && v !== undefined)

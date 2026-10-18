@@ -47,6 +47,10 @@ function baseRow(over: Record<string, unknown> = {}) {
     endsAt: null,
     maxUses: null,
     oneShot: false,
+    firstOrderOnly: false,
+    affiliate: false,
+    codeRaw: null,
+    yourichPromoId: null,
     minOrderAmount: null,
     scope: null,
     categories: [],
@@ -98,6 +102,8 @@ describe('PromoPublicService', () => {
       {
         promoCode,
         promoCodeRedemption,
+        order: { count: vi.fn().mockResolvedValue(0) },
+        runIsolatedRlsTransaction: vi.fn(async (_ctx: unknown, fn: () => unknown) => fn()),
       } as never,
       commerceContext as never,
       catalogPublic as never,
@@ -120,6 +126,25 @@ describe('PromoPublicService', () => {
     const res = await service.validate('sale10', 2000);
     expect(res.discountAmount).toBe(200);
     expect(res.total).toBe(1800);
+  });
+
+  it('firstOrderOnly блокирует повторную покупку', async () => {
+    promoCode.findUnique.mockResolvedValue(baseRow({ firstOrderOnly: true }));
+    const orderCount = vi.fn().mockResolvedValue(1);
+    service = new PromoPublicService(
+      {
+        promoCode,
+        promoCodeRedemption,
+        order: { count: orderCount },
+        runIsolatedRlsTransaction: vi.fn(async (_ctx: unknown, fn: () => unknown) => fn()),
+      } as never,
+      commerceContext as never,
+      catalogPublic as never,
+    );
+    await expect(
+      service.applyForCheckout('sale10', 2000, { email: 'a@b.co' }),
+    ).rejects.toThrow(/первый заказ/);
+    expect(orderCount).toHaveBeenCalled();
   });
 
   it('minOrderAmount блокирует маленькую корзину', async () => {

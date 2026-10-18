@@ -54,12 +54,18 @@ const orderEvent = {
   create: vi.fn(),
 };
 
+const orderAffiliateLead = {
+  create: vi.fn().mockResolvedValue({ id: 'al1' }),
+};
+
 const tx = {
   order,
   payment,
   promoCodeRedemption,
   orderEvent,
-  $queryRaw: vi.fn().mockResolvedValue([{ id: 'x' }]),
+  orderAffiliateLead,
+  $executeRaw: vi.fn().mockResolvedValue(undefined),
+  $queryRaw: vi.fn().mockResolvedValue([{ max_n: 1 }]),
 };
 
 const prisma = {
@@ -72,6 +78,8 @@ const prisma = {
     findFirst: vi.fn(),
   },
   $transaction: vi.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
+  runInRlsTransaction: vi.fn(async (_ctx: unknown, fn: () => unknown) => fn()),
+  runIsolatedRlsTransaction: vi.fn(async (_ctx: unknown, fn: () => unknown) => fn()),
 };
 
 const catalogPublic = {
@@ -131,7 +139,10 @@ function makeService() {
       shippingQuotes,
       shippingServerEstimate as never,
       lifecycle as never,
-      { seedCustomerNoteFromOrder: vi.fn() } as never,
+      {
+        seedCustomerNoteFromOrder: vi.fn(),
+        applyRetentionForOrder: vi.fn(async () => undefined),
+      } as never,
     ),
     lifecycle,
     payTokens,
@@ -158,7 +169,23 @@ describe('OrdersPublicService', () => {
       return undefined;
     });
     order.findMany.mockResolvedValue([]);
+    order.findUnique.mockResolvedValue(null);
     yookassa.isConfigured.mockReturnValue(true);
+    catalogPublic.syncCartLines.mockResolvedValue({
+      items: [
+        {
+          variantId: 'v1',
+          shadeId: null,
+          shadeName: null,
+          name: 'Товар',
+          variantName: '50 мл',
+          sku: 'SKU-1',
+          price: 1000,
+          qty: 1,
+        },
+      ],
+      pricing: null,
+    });
     const made = makeService();
     service = made.service;
     payTokens = made.payTokens;

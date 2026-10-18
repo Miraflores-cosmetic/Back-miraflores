@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -68,6 +69,7 @@ import { estimateOzonDelivery } from '../ozon/ozon-tariff';
 import { loadOzonTariffLines } from '../ozon/ozon-variant-dims';
 import { ozonFlagWhere, ozonRowFlags, parseOzonFlagFilter } from './order-ozon-flags';
 import { isManualChecklistStep, serializeChecklistMarks } from './order-checklist';
+import { YourichSyncService } from '../yourich/yourich-sync.service';
 
 const LIST_MAX = 100;
 const LIST_DEFAULT = 20;
@@ -106,7 +108,13 @@ export class OrdersAdminService {
     private readonly carrier: CarrierShipmentService,
     private readonly config: ConfigService,
     private readonly orderChat: OrderChatService,
+    @Optional() private readonly yourichSync?: YourichSyncService,
   ) {}
+
+  private scheduleYourichTouch(orderId: string) {
+    if (!this.yourichSync) return;
+    scheduleAfterRlsCommitWithBypass(this.prisma, () => this.yourichSync!.touch(orderId));
+  }
 
   private async enrichEvents(
     events: Array<{
@@ -376,6 +384,27 @@ export class OrdersAdminService {
           select: { checklist: true, stepId: true, doneAt: true, doneByUserId: true },
         },
         promoRedemption: { select: { id: true } },
+        affiliateLead: {
+          select: {
+            id: true,
+            leadCrmId: true,
+            refHash: true,
+            extUserId: true,
+            promoCodeRaw: true,
+            offerId: true,
+            leadId: true,
+            lastSentEvent: true,
+            lastSentSum: true,
+            state: true,
+            attempts: true,
+            nextAttemptAt: true,
+            lastError: true,
+            lastHttpStatus: true,
+            syncedAt: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
       },
     });
     if (!order) throw new NotFoundException('Заказ не найден');
@@ -477,6 +506,24 @@ export class OrdersAdminService {
       createdAt: order.createdAt,
       updatedAt: order.updatedAt,
       hasPromoRedemption: Boolean(order.promoRedemption),
+      affiliate: order.affiliateLead
+        ? {
+            leadCrmId: order.affiliateLead.leadCrmId,
+            refHash: order.affiliateLead.refHash,
+            extUserId: order.affiliateLead.extUserId,
+            promoCodeRaw: order.affiliateLead.promoCodeRaw,
+            offerId: order.affiliateLead.offerId,
+            leadId: order.affiliateLead.leadId,
+            lastSentEvent: order.affiliateLead.lastSentEvent,
+            lastSentSum: order.affiliateLead.lastSentSum,
+            state: order.affiliateLead.state,
+            attempts: order.affiliateLead.attempts,
+            nextAttemptAt: order.affiliateLead.nextAttemptAt,
+            lastError: order.affiliateLead.lastError,
+            lastHttpStatus: order.affiliateLead.lastHttpStatus,
+            syncedAt: order.affiliateLead.syncedAt,
+          }
+        : null,
       items: order.items.map((i) => {
         const shadeImageUrl = i.shade?.imageUrl ?? null;
         const variantImageUrl =
@@ -598,6 +645,8 @@ export class OrdersAdminService {
       // already — редкий гонка; всё равно отдаём detail
       return this.getById(id);
     }
+
+    this.scheduleYourichTouch(id);
 
     if (result.isGiftPurchase) {
       const order = await this.prisma.order.findUnique({
@@ -1342,6 +1391,7 @@ export class OrdersAdminService {
     scheduleAfterRlsCommitWithBypass(this.prisma, () =>
       this.orderChat.applyRetentionForOrder(id, OrderStatus.CANCELLED),
     );
+    this.scheduleYourichTouch(id);
 
     // Полный detail (как packing/ship) — UI делает setOrder(row), slim ломает items/actions.
     const detail = await this.getById(id);
@@ -1589,6 +1639,7 @@ export class OrdersAdminService {
         this.orderChat.applyRetentionForOrder(id, OrderStatus.REFUNDED),
       );
     }
+    this.scheduleYourichTouch(id);
 
     return this.getById(id);
   }

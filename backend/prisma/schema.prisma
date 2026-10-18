@@ -691,7 +691,10 @@ model DiscountRule {
 
 model PromoCode {
   id             String               @id @default(cuid())
+  /// Нормализованный код (UPPER) для поиска в checkout
   code           String               @unique
+  /// Исходное написание для YouRich (регистр важен); null = как code
+  codeRaw        String?
   /// PERCENT 1–100 или FIXED в рублях (как DiscountRule.rewardValue FIXED) — не копейки
   type           PromoCodeType
   value          Int
@@ -702,6 +705,12 @@ model PromoCode {
   maxUses        Int?
   /// один раз на email / user / guestId
   oneShot        Boolean              @default(false)
+  /// только если у покупателя ещё не было товарного оплаченного заказа
+  firstOrderOnly Boolean              @default(false)
+  /// партнёрский код YouRich — заказ уходит в рефералку даже без refHash
+  affiliate      Boolean              @default(false)
+  /// id промокода в YouRich (для автосинка)
+  yourichPromoId Int?                 @unique
   /// мин. сумма корзины (₽), null = без порога
   minOrderAmount Int?
   /// null = весь заказ; CATEGORY / PRODUCTS — как у Discount
@@ -793,6 +802,7 @@ model Order {
   checklistMarks  OrderChecklistMark[]
   events          OrderEvent[]
   promoRedemption PromoCodeRedemption?
+  affiliateLead   OrderAffiliateLead?
   /// Сумма уже возвращённых средств (₽)
   refundedAmount  Int           @default(0)
   /// Когда админ открыл карточку заказа (для badge в sidebar)
@@ -811,6 +821,41 @@ model Order {
   @@index([giftCertificateId])
   @@index([giftPurchaseDenominationId])
   @@index([onecExportedAt, status])
+  @@index([email])
+  @@index([phone])
+}
+
+/// Исходящая синхронизация заказа с партнёркой YouRich (рефералка)
+model OrderAffiliateLead {
+  id              String    @id @default(cuid())
+  orderId         String    @unique
+  order           Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  /// Номер заказа (= leadCrmId в YouRich)
+  leadCrmId       String
+  refHash         String?
+  /// Отпечаток трекера (_yr_uid)
+  extUserId       String?
+  /// Промокод как в кабинете YouRich (регистр важен)
+  promoCodeRaw    String?
+  /// Запасной offerId из env, если слали
+  offerId         Int?
+  /// id лида в YouRich (для админки)
+  leadId          Int?
+  /// Последний отправленный event: NEW | DEAL | CANCEL
+  lastSentEvent   String?
+  lastSentSum     Int?
+  /// PENDING | SYNCED | ERROR | SKIPPED
+  state           String    @default("PENDING")
+  attempts        Int       @default(0)
+  nextAttemptAt   DateTime  @default(now())
+  lastError       String?   @db.Text
+  lastHttpStatus  Int?
+  syncedAt        DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([state, nextAttemptAt])
+  @@index([leadCrmId])
 }
 
 model ChatConversation {
@@ -1224,14 +1269,22 @@ model GratitudeGiftTier {
   @@index([active, sortOrder])
 }
 
+enum DeliverySurchargeKind {
+  FIXED
+  PERCENT
+}
+
 /// Добавочная стоимость доставки по перевозчикам (singleton id=default)
 model DeliverySettings {
-  id                 String   @id @default("default")
-  /// Плюсуется к тарифу на checkout (СДЭК), ₽
-  cdekSurchargeRub   Int      @default(0)
-  ozonSurchargeRub   Int      @default(0)
-  yandexSurchargeRub Int      @default(0)
-  updatedAt          DateTime @updatedAt
+  id                  String                 @id @default("default")
+  cdekSurchargeKind   DeliverySurchargeKind  @default(FIXED)
+  /// FIXED — ₽; PERCENT — целые проценты от тарифа (0–100)
+  cdekSurchargeValue  Int                    @default(0)
+  ozonSurchargeKind   DeliverySurchargeKind  @default(FIXED)
+  ozonSurchargeValue  Int                    @default(0)
+  yandexSurchargeKind DeliverySurchargeKind  @default(FIXED)
+  yandexSurchargeValue Int                   @default(0)
+  updatedAt           DateTime               @updatedAt
 }
 
 /// Настройки корзины: progress-bar + legal/accordion текст (singleton id=default)

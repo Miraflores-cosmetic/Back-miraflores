@@ -19,6 +19,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
       get(target, prop, receiver) {
         if (
           prop === 'runInRlsTransaction' ||
+          prop === 'runIsolatedRlsTransaction' ||
           prop === 'onModuleInit' ||
           prop === 'onModuleDestroy'
         ) {
@@ -87,5 +88,26 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     );
     flushAfterRlsCommit(afterCommit);
     return result;
+  }
+
+  /**
+   * Всегда отдельная корневая транзакция (даже внутри чужого RLS ALS).
+   * Нужна для firstOrderOnly / служебных проверок с bypass, не расширяя права текущего запроса.
+   */
+  async runIsolatedRlsTransaction<T>(ctx: RlsCtx, fn: () => Promise<T>): Promise<T> {
+    const afterCommit: Array<() => void | Promise<void>> = [];
+    const result = await PrismaClient.prototype.$transaction.call(
+      this,
+      async (tx: Prisma.TransactionClient) => {
+        await tx.$executeRaw`SELECT set_config('app.user_id', ${ctx.userId}, true)`;
+        await tx.$executeRaw`
+          SELECT set_config('app.rls_bypass', ${ctx.bypass ? 'on' : 'off'}, true)
+        `;
+        return rlsAls.run({ tx, afterCommit }, fn);
+      },
+      { maxWait: 15_000, timeout: 30_000 },
+    );
+    flushAfterRlsCommit(afterCommit);
+    return result as T;
   }
 }

@@ -6,14 +6,24 @@ import { CDEK_ORIGIN_LABEL } from '@/lib/shipping/cdekOrigin';
 import { DeliverySurchargeField } from './DeliverySurchargeField';
 import styles from './delivery.module.css';
 
+import type { DeliverySurchargeKind } from '@/lib/deliverySurcharge';
+
 type Props = {
-  surchargeRub: string;
-  onSurchargeChange: (value: string) => void;
+  surchargeKind: DeliverySurchargeKind;
+  onSurchargeKindChange: (kind: DeliverySurchargeKind) => void;
+  surchargeValue: string;
+  onSurchargeValueChange: (value: string) => void;
   surchargeDisabled?: boolean;
 };
 
 /** СДЭК — основная служба на витрине; настройки ключей только на API-сервере. */
-export function CdekSettingsCard({ surchargeRub, onSurchargeChange, surchargeDisabled }: Props) {
+export function CdekSettingsCard({
+  surchargeKind,
+  onSurchargeKindChange,
+  surchargeValue,
+  onSurchargeValueChange,
+  surchargeDisabled,
+}: Props) {
   return (
     <section className={styles.card}>
       <header className={styles.cardHead}>
@@ -28,9 +38,11 @@ export function CdekSettingsCard({ surchargeRub, onSurchargeChange, surchargeDis
       </header>
 
       <DeliverySurchargeField
-        label="Добавочная стоимость, ₽"
-        value={surchargeRub}
-        onChange={onSurchargeChange}
+        label="СДЭК"
+        kind={surchargeKind}
+        onKindChange={onSurchargeKindChange}
+        value={surchargeValue}
+        onChange={onSurchargeValueChange}
         disabled={surchargeDisabled}
       />
 

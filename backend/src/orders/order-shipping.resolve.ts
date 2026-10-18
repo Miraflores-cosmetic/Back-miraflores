@@ -2,7 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import { ShipmentProvider } from '@prisma/client';
 import {
   DELIVERY_SURCHARGE_DEFAULTS,
-  type DeliverySurchargeRub,
+  type DeliverySurchargesConfig,
   surchargeRubForCheckoutCarrier,
 } from './delivery-surcharge';
 import type { ShippingQuotePayload } from './shipping-quote.service';
@@ -357,7 +357,7 @@ export function buildQuoteCost(opts: {
   serverEstimate?: number | null;
   requireServerReprice?: boolean;
   /** Добавочная стоимость по перевозчикам (не входит в client/server estimate). */
-  surcharges?: DeliverySurchargeRub;
+  surcharges?: DeliverySurchargesConfig;
 }): { cost: number; method: CheckoutCarrier; freePvz: boolean } {
   const method = requireCheckoutShipmentProvider(opts.shippingMethod);
   assertShippingCommentMatchesCarrier(opts.shippingComment, method);
@@ -412,6 +412,7 @@ export function buildQuoteCost(opts: {
 
   const surcharge = surchargeRubForCheckoutCarrier(
     method,
+    cost,
     opts.surcharges ?? DELIVERY_SURCHARGE_DEFAULTS,
   );
   cost += surcharge;
