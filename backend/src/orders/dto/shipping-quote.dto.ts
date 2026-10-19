@@ -44,4 +44,25 @@ export class ShippingQuoteRequestDto {
   @ValidateNested()
   @Type(() => ShippingCarrierQuoteDto)
   carrierQuote?: ShippingCarrierQuoteDto;
+
+  /** Промокод для порога бесплатной доставки (скидка вычитается из subtotal). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  promoCode?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  guestId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(320)
+  email?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  phone?: string | null;
 }

@@ -4,6 +4,7 @@ import { ShipmentProvider } from '@prisma/client';
 import {
   buildQuoteCost,
   computeFreePvzShipping,
+  goodsSubtotalForFreePvzThreshold,
   isPvzShippingComment,
   requireCheckoutShipmentProvider,
   resolveShippingFromQuote,
@@ -39,6 +40,13 @@ describe('requireCheckoutShipmentProvider', () => {
     expect(() => requireCheckoutShipmentProvider('PICKUP')).toThrow(
       BadRequestException,
     );
+  });
+});
+
+describe('goodsSubtotalForFreePvzThreshold', () => {
+  it('вычитает скидку промокода из subtotal для порога', () => {
+    expect(goodsSubtotalForFreePvzThreshold(10_600, 1_120)).toBe(9480);
+    expect(goodsSubtotalForFreePvzThreshold(10_600, 0)).toBe(10_600);
   });
 });
 
@@ -200,6 +208,19 @@ describe('resolveShippingFromQuote', () => {
       freeShippingThresholdRub: 10_000,
     });
     expect(r.cost).toBe(0);
+  });
+
+  it('отклоняет free quote если после промо порог не выполнен', () => {
+    expect(() =>
+      resolveShippingFromQuote({
+        quote: quote({ cost: 0, freePvz: true }),
+        shippingMethod: method,
+        shippingAddress: addr,
+        lines,
+        goodsSubtotal: 9480,
+        freeShippingThresholdRub: 10_000,
+      }),
+    ).toThrow(BadRequestException);
   });
 });
 

@@ -29,7 +29,13 @@ import {
   DELIVERY_SURCHARGE_DEFAULTS,
   normalizeDeliverySurchargeRow,
 } from './delivery-surcharge';
-import { resolveShippingFromQuote, buildQuoteCost, resolvePvzCode, requireCheckoutShipmentProvider } from './order-shipping.resolve';
+import {
+  resolveShippingFromQuote,
+  buildQuoteCost,
+  resolvePvzCode,
+  requireCheckoutShipmentProvider,
+  goodsSubtotalForFreePvzThreshold,
+} from './order-shipping.resolve';
 import {
   hashCartLines,
   hashShippingAddress,
@@ -283,6 +289,45 @@ export class OrdersPublicService {
     }
 
     const subtotal = items.reduce((sum, l) => sum + l.price * l.qty, 0);
+
+    let promoDiscountForFreePvz = 0;
+    const promoRaw = dto.promoCode?.trim();
+    if (promoRaw) {
+      if (synced.pricing && !synced.pricing.allowPromoCodes) {
+        throw new BadRequestException('Промокод недоступен для вашей группы');
+      }
+      const guestId = dto.guestId?.trim() || '';
+      if (!guestId) {
+        throw new BadRequestException('guestId обязателен при расчёте с промокодом');
+      }
+      const email = dto.email?.trim() || '';
+      const phone = dto.phone?.trim() || '';
+      const scopeLines = items
+        .filter((l) => !(l as { isGiftDenom?: boolean }).isGiftDenom)
+        .map((l) => ({
+          productId: (l as { productId?: string }).productId ?? '',
+          categoryId: (l as { categoryId?: string }).categoryId ?? '',
+          amount: Math.max(0, Math.floor(l.price * l.qty)),
+        }))
+        .filter((l) => l.productId && l.categoryId);
+      const promoApply = await this.promoPublic.applyForCheckout(
+        promoRaw,
+        subtotal,
+        {
+          email,
+          phone,
+          userId: userId ?? null,
+          guestId,
+        },
+        scopeLines,
+      );
+      promoDiscountForFreePvz = promoApply.discountAmount;
+    }
+    const goodsSubtotalForFreePvz = goodsSubtotalForFreePvzThreshold(
+      subtotal,
+      promoDiscountForFreePvz,
+    );
+
     const cartSettings = await this.prisma.cartSettings.findUnique({
       where: { id: 'default' },
       select: { freeShippingThresholdRub: true },
@@ -318,7 +363,7 @@ export class OrdersPublicService {
       shippingMethod: dto.shippingMethod,
       shippingComment: shippingAddress.comment,
       pvzCode: shippingAddress.pvzCode,
-      goodsSubtotal: subtotal,
+      goodsSubtotal: goodsSubtotalForFreePvz,
       freeShippingThresholdRub,
       clientEstimate: dto.clientEstimate,
       serverEstimate: await this.shippingServerEstimate.estimate({
@@ -346,7 +391,7 @@ export class OrdersPublicService {
       method,
       addrHash: hashShippingAddress(shippingAddress, method),
       linesHash: hashCartLines(linesForHash),
-      goodsSubtotal: subtotal,
+      goodsSubtotal: goodsSubtotalForFreePvz,
       freePvz,
       ...(cq?.tariffId != null ? { tariffId: cq.tariffId } : {}),
       ...(cq?.tariffName ? { tariffName: cq.tariffName } : {}),
@@ -528,7 +573,7 @@ export class OrdersPublicService {
           shadeId: l.shadeId,
           qty: l.qty,
         })),
-        goodsSubtotal: subtotal,
+        goodsSubtotal: payableAfterPromo,
         freeShippingThresholdRub,
       });
       shippingCost = resolved.cost;

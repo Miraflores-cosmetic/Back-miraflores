@@ -757,6 +757,14 @@ export function CheckoutClient() {
                     deliverySurcharges,
                   )
                 : shippingCost,
+            ...(promo?.kind === 'promo' && promo.code
+              ? {
+                  promoCode: promo.code,
+                  guestId: getOrCreateGuestId(),
+                  email: contact.email.trim(),
+                  phone: contact.phone.trim(),
+                }
+              : {}),
           }),
           cache: 'no-store',
         });

@@ -242,10 +242,19 @@ export function resolvePvzCode(
   return v.trim();
 }
 
+/** Сумма товаров для порога free PVZ: после скидки промокода (сертификат не учитываем). */
+export function goodsSubtotalForFreePvzThreshold(
+  goodsSubtotalBeforePromo: number,
+  promoDiscountRub: number,
+): number {
+  const sub = Math.max(0, Math.floor(goodsSubtotalBeforePromo || 0));
+  const disc = Math.max(0, Math.floor(promoDiscountRub || 0));
+  return Math.max(0, sub - Math.min(disc, sub));
+}
+
 /**
- * Free PVZ: порог по **goodsSubtotal до промо/сертификата** (симметрия с Front
- * `qualifiesForFreePvzShipping`). Промокод не открывает бесплатную доставку —
- * quote подписывается по составу корзины до apply скидки.
+ * Free PVZ: порог по сумме товаров **после промокода** (симметрия с Front
+ * `qualifiesForFreePvzShipping`). Подарочный сертификат порог не меняет.
  */
 export function computeFreePvzShipping(opts: {
   shippingComment?: string | null;
