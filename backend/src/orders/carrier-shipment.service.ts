@@ -327,25 +327,31 @@ export class CarrierShipmentService {
   }
 
   private buildCdekPackages(order: OrderForCarrierRegister) {
-    const lines = order.items.filter((i) => !i.isGratitudeGift);
-    const items = (lines.length ? lines : order.items).map((l, idx) => ({
-      name: (l.title || 'Товар').slice(0, 255),
-      ware_key: (l.sku || `sku-${idx + 1}`).slice(0, 50),
-      payment: { value: 0 },
-      cost: Math.max(0, l.unitPrice),
-      amount: Math.max(1, l.qty),
-      weight: 300,
-    }));
-    const weight = items.reduce((s, i) => s + i.weight * i.amount, 0);
-    return [
-      {
-        number: '1',
-        weight: Math.max(1, weight),
-        length: 20,
-        width: 15,
-        height: 10,
-        items,
-      },
-    ];
+    return buildCdekPackagesFromOrderItems(order.items);
   }
+}
+
+/** Позиции для СДЭК: все линии заказа, включая подарки благодарности (0 ₽). */
+export function buildCdekPackagesFromOrderItems(
+  lines: OrderForCarrierRegister['items'],
+) {
+  const items = lines.map((l, idx) => ({
+    name: (l.title || 'Товар').slice(0, 255),
+    ware_key: (l.sku || `sku-${idx + 1}`).slice(0, 50),
+    payment: { value: 0 },
+    cost: Math.max(0, l.unitPrice),
+    amount: Math.max(1, l.qty),
+    weight: 300,
+  }));
+  const weight = items.reduce((s, i) => s + i.weight * i.amount, 0);
+  return [
+    {
+      number: '1',
+      weight: Math.max(1, weight),
+      length: 20,
+      width: 15,
+      height: 10,
+      items,
+    },
+  ];
 }
