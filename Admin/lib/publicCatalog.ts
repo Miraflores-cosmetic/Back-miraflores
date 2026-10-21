@@ -55,6 +55,17 @@ export type PublicProduct = {
   maxPrice: number | null;
 };
 
+/** Объёмы на карточке — паритет с Nest `toProductCard().variants`. */
+export type PublicCardVolumeOption = {
+  id: string;
+  name: string;
+  price: number;
+  oldPrice: number | null;
+  available: number;
+  minQty: number;
+  maxQty: number;
+};
+
 export type PublicSetSibling = {
   id: string;
   variantId?: string | null;
@@ -75,6 +86,8 @@ export type PublicSetSibling = {
   imageUrl: string | null;
   imageUrls?: string[];
   mediaType?: 'image' | 'video' | null;
+  /** Все sellable-объёмы (PLP / home / sets). */
+  variants?: PublicCardVolumeOption[];
 };
 
 export type PublicProductCard = PublicSetSibling;
@@ -142,6 +155,7 @@ export function toProductCardProps(p: PublicProductCard): ProductCardProps {
     imageUrl: p.imageUrl,
     imageUrls: p.imageUrls,
     mediaType: p.mediaType,
+    variants: p.variants,
   };
 }
 

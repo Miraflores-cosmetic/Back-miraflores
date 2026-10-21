@@ -98,6 +98,55 @@
   border-radius: var(--radius-4) 0 0 0;
 }
 
+.sizeRow {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.sizeRow::-webkit-scrollbar {
+  display: none;
+}
+
+.sizePill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 52px;
+  height: 36px;
+  padding: 8px 10px;
+  border: none;
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--color-white, #fff);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
+  box-sizing: border-box;
+}
+
+.productVolumes {
+  align-self: stretch;
+  font-size: 13px;
+  font-weight: 300;
+  line-height: 1.35;
+  color: var(--color-gray);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  word-break: break-word;
+}
+
 .favoriteBtn {
   position: absolute;
   top: 8px;

@@ -10,6 +10,10 @@ import {
   catalogSellablePrices,
   pickCatalogCardVariant,
 } from '../catalog/catalog-price.util';
+import {
+  cardVariantQty,
+  toCardVolumeOptions,
+} from '../catalog/catalog-card.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { LocalStorageService } from '../storage/local-storage.service';
 import type { ReplaceFaqItemsDto } from './dto/faq.dto';
@@ -216,15 +220,9 @@ function toHomepageSetProductCard(p: HomepageSetProductSource) {
     compareAt != null && compareAt > price
       ? Math.round(((compareAt - price) / compareAt) * 100)
       : null;
-  const available = v ? Math.max(0, v.stock - v.stockReserve) : 0;
-  const minQty = Math.max(1, v?.orderMinQty ?? 1);
-  let maxQty =
-    v == null
-      ? 0
-      : v.orderMaxQty != null
-        ? Math.min(v.orderMaxQty, available)
-        : available;
-  if (maxQty > 0 && minQty > maxQty) maxQty = 0;
+  const { available, minQty, maxQty } = v
+    ? cardVariantQty(v)
+    : { available: 0, minQty: 1, maxQty: 0 };
   const shade = v?.shades?.[0] ?? null;
   const imageUrls = p.images.map((img) => img.url).filter(Boolean);
   const cover = p.images[0];
@@ -250,6 +248,8 @@ function toHomepageSetProductCard(p: HomepageSetProductSource) {
     imageUrl: cover?.url || shade?.imageUrl || null,
     imageUrls,
     mediaType: cover?.mediaType === 'video' ? ('video' as const) : ('image' as const),
+    /** Паритет с PLP / collections: все sellable-объёмы. */
+    variants: toCardVolumeOptions(variants),
   };
 }
 

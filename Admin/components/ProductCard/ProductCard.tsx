@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { formatRub } from '@/lib/publicCatalog';
+import { formatRub, type PublicCardVolumeOption } from '@/lib/publicCatalog';
 import { productCartHref } from '@/lib/cart/cartUtils';
 import { ProductCardMedia } from './ProductCardMedia';
 import styles from './ProductCard.module.css';
@@ -26,6 +26,8 @@ export type ProductCardProps = {
   /** Верхний предел qty (stock ∩ orderMaxQty) */
   maxQty?: number | null;
   available?: number | null;
+  /** Все объёмы товара — sizeRow + модалка ATC. */
+  variants?: PublicCardVolumeOption[] | null;
 };
 
 /** Server-friendly оболочка; scrub/qty — в `ProductCardMedia`. */
@@ -47,8 +49,16 @@ export function ProductCard({
   mediaType,
   minQty,
   maxQty,
+  variants,
 }: ProductCardProps) {
   const href = productCartHref(slug, variantId, shadeId);
+  const volumeLabels = (variants ?? [])
+    .map((v) => v.name?.trim())
+    .filter((n): n is string => Boolean(n));
+  const volumeSubtitle =
+    volumeLabels.length <= 3
+      ? volumeLabels.join(' · ')
+      : `${volumeLabels.slice(0, 3).join(' · ')} · +${volumeLabels.length - 3}`;
 
   return (
     <article className={styles.productCard}>
@@ -68,10 +78,14 @@ export function ProductCard({
         mediaType={mediaType}
         minQty={minQty}
         maxQty={maxQty}
+        variants={variants}
       />
 
       <Link href={href} className={styles.productTitles}>
         <span className={styles.productName}>{name}</span>
+        {volumeSubtitle ? (
+          <span className={styles.productVolumes}>{volumeSubtitle}</span>
+        ) : null}
         {shortDescription ? (
           <span className={styles.productShort}>{shortDescription}</span>
         ) : null}

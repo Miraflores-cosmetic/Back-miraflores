@@ -5,6 +5,12 @@ import {
 } from '@nestjs/common';
 import { DiscountsPublicService } from '../discounts/discounts-public.service';
 import { applyCampaignToDetailVariants } from '../catalog/catalog-campaign-price.util';
+import {
+  toCardVolumeOptions,
+  type CatalogCardVariantSource,
+  type CatalogCardVolumeOption,
+} from '../catalog/catalog-card.util';
+import { catalogSellablePrices } from '../catalog/catalog-price.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { CatalogVisibilityService } from '../user-groups/catalog-visibility.service';
 import { CommerceContextService } from '../user-groups/commerce-context.service';
@@ -40,6 +46,7 @@ function cardFromFavorite(
   },
   resolvedPrice: number,
   compareAt: number | null,
+  volumeOptions: CatalogCardVolumeOption[],
 ) {
   const v = row.variant;
   const p = v.product;
@@ -56,6 +63,9 @@ function cardFromFavorite(
     compareAt != null && compareAt > price
       ? Math.round(((compareAt - price) / compareAt) * 100)
       : null;
+  const volumePrices = volumeOptions.map((o) => o.price);
+  const minVol = volumePrices.length ? Math.min(...volumePrices) : price;
+  const maxVol = volumePrices.length ? Math.max(...volumePrices) : price;
 
   return {
     id: p.id,
@@ -70,13 +80,15 @@ function cardFromFavorite(
     price,
     oldPrice: compareAt != null && compareAt > price ? compareAt : null,
     discountPercent,
-    priceFrom: false,
+    priceFrom: maxVol > minVol,
     available,
     minQty,
     maxQty,
     imageUrl: cover?.url || shade?.imageUrl || null,
     imageUrls,
     mediaType: cover?.mediaType === 'video' ? ('video' as const) : ('image' as const),
+    /** Паритет с каталогом: все sellable-объёмы для sizeRow / модалки. */
+    variants: volumeOptions,
   };
 }
 
@@ -156,24 +168,141 @@ export class FavoritesService {
       ? await this.discountsPublic.loadRunningCampaigns()
       : [];
 
-    const priceInputs = eligible.map((r) => ({
-      variantId: r.variantId,
-      categoryId: r.variant.product.categoryId,
-      basePrice: r.variant.price,
-    }));
-    const priceMap = await this.groupPricing.resolveVariantPrices(ctx, priceInputs);
+    const productIds = [...new Set(eligible.map((r) => r.variant.product.id))];
+    const siblingRows = productIds.length
+      ? await this.prisma.productVariant.findMany({
+          where: { productId: { in: productIds }, active: true },
+          orderBy: [{ price: 'asc' }, { createdAt: 'asc' }],
+          select: {
+            id: true,
+            productId: true,
+            name: true,
+            price: true,
+            compareAt: true,
+            orderMinQty: true,
+            orderMaxQty: true,
+            stock: true,
+            stockReserve: true,
+          },
+        })
+      : [];
+
+    const siblingsByProduct = new Map<string, typeof siblingRows>();
+    for (const sv of siblingRows) {
+      const list = siblingsByProduct.get(sv.productId) ?? [];
+      list.push(sv);
+      siblingsByProduct.set(sv.productId, list);
+    }
+
+    const priceInputById = new Map<
+      string,
+      { variantId: string; categoryId: string; basePrice: number }
+    >();
+    for (const row of eligible) {
+      const categoryId = row.variant.product.categoryId;
+      const siblings = siblingsByProduct.get(row.variant.product.id) ?? [];
+      for (const sv of siblings) {
+        if (!priceInputById.has(sv.id)) {
+          priceInputById.set(sv.id, {
+            variantId: sv.id,
+            categoryId,
+            basePrice: sv.price,
+          });
+        }
+      }
+      if (!priceInputById.has(row.variantId)) {
+        priceInputById.set(row.variantId, {
+          variantId: row.variantId,
+          categoryId,
+          basePrice: row.variant.price,
+        });
+      }
+    }
+    const priceMap = await this.groupPricing.resolveVariantPrices(
+      ctx,
+      [...priceInputById.values()],
+    );
 
     const items = [];
     for (const row of eligible) {
       const p = row.variant.product;
+      const siblings = siblingsByProduct.get(p.id) ?? [];
+      const siblingIds = siblings.map((v) => v.id);
       const visibleIds = await this.catalogVisibility.filterVisibleVariantIds(ctx, {
         productId: p.id,
         categoryId: p.categoryId,
-        variantIds: [row.variantId],
+        variantIds: siblingIds.length ? siblingIds : [row.variantId],
       });
       if (!visibleIds.includes(row.variantId)) continue;
 
-      const groupPrice = priceMap.get(row.variantId)?.groupPrice ?? row.variant.price;
+      const visibleSet = new Set(visibleIds);
+      const pricedSiblings: CatalogCardVariantSource[] = siblings
+        .filter((sv) => visibleSet.has(sv.id))
+        .map((sv) => {
+          const groupPrice = priceMap.get(sv.id)?.groupPrice ?? sv.price;
+          return {
+            id: sv.id,
+            name: sv.name,
+            price: groupPrice,
+            compareAt: sv.compareAt,
+            orderMinQty: sv.orderMinQty,
+            orderMaxQty: sv.orderMaxQty,
+            stock: sv.stock,
+            stockReserve: sv.stockReserve,
+          };
+        });
+
+      let volumeOptions = toCardVolumeOptions(pricedSiblings);
+      if (ctx.allowCatalogDiscounts && campaigns.length && volumeOptions.length) {
+        const variantPriced = applyCampaignToDetailVariants(
+          volumeOptions.map((v) => ({
+            id: v.id,
+            price: v.price,
+            compareAt: v.oldPrice,
+          })),
+          p.id,
+          p.categoryId,
+          campaigns,
+        );
+        const byId = new Map(variantPriced.map((v) => [v.id, v]));
+        volumeOptions = volumeOptions.map((v) => {
+          const vp = byId.get(v.id);
+          if (!vp) return v;
+          return {
+            ...v,
+            price: vp.price,
+            oldPrice:
+              vp.compareAt != null && vp.compareAt > vp.price
+                ? vp.compareAt
+                : null,
+          };
+        });
+      }
+
+      if (!volumeOptions.length) {
+        const favoritedPrice =
+          priceMap.get(row.variantId)?.groupPrice ?? row.variant.price;
+        if (
+          catalogSellablePrices([{ price: favoritedPrice, name: row.variant.name }])
+            .length
+        ) {
+          volumeOptions = toCardVolumeOptions([
+            {
+              id: row.variant.id,
+              name: row.variant.name,
+              price: favoritedPrice,
+              compareAt: row.variant.compareAt,
+              orderMinQty: row.variant.orderMinQty,
+              orderMaxQty: row.variant.orderMaxQty,
+              stock: row.variant.stock,
+              stockReserve: row.variant.stockReserve,
+            },
+          ]);
+        }
+      }
+
+      const groupPrice =
+        priceMap.get(row.variantId)?.groupPrice ?? row.variant.price;
       let price = groupPrice;
       let compareAt = row.variant.compareAt;
       if (ctx.allowCatalogDiscounts && campaigns.length) {
@@ -187,7 +316,18 @@ export class FavoritesService {
         compareAt = priced[0]?.compareAt ?? compareAt;
       }
 
-      items.push(cardFromFavorite(row, price, compareAt));
+      volumeOptions = volumeOptions.map((v) =>
+        v.id === row.variantId
+          ? {
+              ...v,
+              price,
+              oldPrice:
+                compareAt != null && compareAt > price ? compareAt : null,
+            }
+          : v,
+      );
+
+      items.push(cardFromFavorite(row, price, compareAt, volumeOptions));
     }
 
     return { items };

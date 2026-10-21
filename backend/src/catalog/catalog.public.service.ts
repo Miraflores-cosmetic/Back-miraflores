@@ -22,6 +22,10 @@ import {
   applyCampaignToDetailVariants,
 } from './catalog-campaign-price.util';
 import {
+  cardVariantQty,
+  toCardVolumeOptions,
+} from './catalog-card.util';
+import {
   giftPurchaseSkuForDenom,
   parseGiftDenomCartVariantId,
 } from '../gift-certificates/gift-certificate-purchase.util';
@@ -94,16 +98,9 @@ function toProductCard(p: ProductCardSource) {
     compareAt != null && compareAt > price
       ? Math.round(((compareAt - price) / compareAt) * 100)
       : null;
-  const available = v ? Math.max(0, v.stock - v.stockReserve) : 0;
-  const minQty = Math.max(1, v?.orderMinQty ?? 1);
-  let maxQty =
-    v == null
-      ? 0
-      : v.orderMaxQty != null
-        ? Math.min(v.orderMaxQty, available)
-        : available;
-  // Нельзя купить, если min > доступного максимума
-  if (maxQty > 0 && minQty > maxQty) maxQty = 0;
+  const { available, minQty, maxQty } = v
+    ? cardVariantQty(v)
+    : { available: 0, minQty: 1, maxQty: 0 };
   const shade = v?.shades?.[0] ?? null;
   const imageUrls = p.images.map((img) => img.url).filter(Boolean);
   const cover = p.images[0];
@@ -128,6 +125,8 @@ function toProductCard(p: ProductCardSource) {
     imageUrl: cover?.url || shade?.imageUrl || null,
     imageUrls,
     mediaType: cover?.mediaType === 'video' ? ('video' as const) : ('image' as const),
+    /** Все продаваемые объёмы — для sizeRow / модалки выбора на карточке. */
+    variants: toCardVolumeOptions(variants),
   };
 }
 
@@ -186,7 +185,35 @@ export class CatalogPublicService {
     const priced = await this.applyGroupPricesToSources(visible, ctx);
     let cards = priced.map((p) => toProductCard(p));
     if (ctx.allowCatalogDiscounts && campaigns.length) {
-      cards = applyCampaignToCards(cards, campaigns);
+      cards = cards.map((card) => {
+        const [pricedCard] = applyCampaignToCards([card], campaigns);
+        const variantPriced = applyCampaignToDetailVariants(
+          card.variants.map((v) => ({
+            id: v.id,
+            price: v.price,
+            compareAt: v.oldPrice,
+          })),
+          card.id,
+          card.categoryId,
+          campaigns,
+        );
+        const byId = new Map(variantPriced.map((v) => [v.id, v]));
+        return {
+          ...(pricedCard ?? card),
+          variants: card.variants.map((v) => {
+            const vp = byId.get(v.id);
+            if (!vp) return v;
+            return {
+              ...v,
+              price: vp.price,
+              oldPrice:
+                vp.compareAt != null && vp.compareAt > vp.price
+                  ? vp.compareAt
+                  : null,
+            };
+          }),
+        };
+      });
     }
     return cards.map(stripCategoryId);
   }

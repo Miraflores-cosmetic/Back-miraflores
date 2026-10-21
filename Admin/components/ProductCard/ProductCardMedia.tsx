@@ -3,8 +3,14 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FavoriteButton } from '@/components/FavoriteButton/FavoriteButton';
+import { VolumePickerModal } from '@/components/VolumePickerModal/VolumePickerModal';
 import { productCartHref } from '@/lib/cart/cartUtils';
 import { useCart } from '@/lib/cart/CartContext';
+import type { PublicCardVolumeOption } from '@/lib/publicCatalog';
+import {
+  volumeOptionFromCardVariant,
+  type VolumePickerOption,
+} from '@miraflores/volume-picker';
 import styles from './ProductCard.module.css';
 
 export type ProductCardMediaProps = {
@@ -24,6 +30,7 @@ export type ProductCardMediaProps = {
   minQty?: number | null;
   /** Верхний предел qty (stock ∩ orderMaxQty); 0 = нельзя купить */
   maxQty?: number | null;
+  variants?: PublicCardVolumeOption[] | null;
 };
 
 function isVideoUrl(url: string, mediaType?: string | null): boolean {
@@ -120,6 +127,7 @@ export function ProductCardMedia({
   mediaType,
   minQty: minQtyProp,
   maxQty: maxQtyProp,
+  variants: variantsProp,
 }: ProductCardMediaProps) {
   const cart = useCart();
   const urls = useMemo(() => {
@@ -128,8 +136,15 @@ export function ProductCardMedia({
     return imageUrl ? [imageUrl] : [];
   }, [imageUrl, imageUrls]);
 
+  const volumeOptions = useMemo((): VolumePickerOption[] => {
+    const list = variantsProp ?? [];
+    return list.filter((v) => v.price > 0).map(volumeOptionFromCardVariant);
+  }, [variantsProp]);
+  const needsVolumePick = volumeOptions.length > 1;
+
   const [index, setIndex] = useState(0);
   const [scrubbing, setScrubbing] = useState(false);
+  const [volumeModalOpen, setVolumeModalOpen] = useState(false);
   const scrubMovedRef = useRef(false);
   const urlsKey = urls.join('\0');
   const resolvedVariantId = variantId?.trim() || null;
@@ -138,9 +153,22 @@ export function ProductCardMedia({
   const href = productCartHref(slug, resolvedVariantId, resolvedShadeId);
   const minQty = Math.max(1, Math.floor(minQtyProp ?? 1));
   const maxQty = Math.max(0, maxQtyProp ?? 0);
-  const canCart = Boolean(resolvedProductId && resolvedVariantId && maxQty >= minQty);
-  const qty = canCart ? cart.getQty(resolvedVariantId!, resolvedShadeId) : 0;
-  const lineKey = canCart ? cart.lineKey(resolvedVariantId!, resolvedShadeId) : '';
+  const canCart = Boolean(
+    resolvedProductId &&
+      (needsVolumePick
+        ? volumeOptions.some(
+            (v) => (v.maxQty ?? 0) >= Math.max(1, v.minQty ?? 1),
+          )
+        : resolvedVariantId && maxQty >= minQty),
+  );
+  const qty =
+    canCart && resolvedVariantId && !needsVolumePick
+      ? cart.getQty(resolvedVariantId, resolvedShadeId)
+      : 0;
+  const lineKey =
+    canCart && resolvedVariantId && !needsVolumePick
+      ? cart.lineKey(resolvedVariantId, resolvedShadeId)
+      : '';
 
   useEffect(() => {
     setIndex(0);
@@ -209,9 +237,53 @@ export function ProductCardMedia({
     }
   };
 
+  const addVolumeToCart = useCallback(
+    (opt: VolumePickerOption) => {
+      if (!resolvedProductId) return;
+      const addMin = Math.max(1, opt.minQty ?? 1);
+      const addMax = Math.max(0, opt.maxQty ?? 0);
+      if (addMax < addMin) return;
+      cart.addItem(
+        {
+          productId: resolvedProductId,
+          variantId: opt.id,
+          shadeId: resolvedShadeId,
+          shadeName: shadeName ?? null,
+          slug,
+          name,
+          variantName: opt.label,
+          imageUrl: urls[0] ?? imageUrl ?? null,
+          price: opt.price,
+          listPrice:
+            opt.oldPrice != null && opt.oldPrice > opt.price
+              ? opt.oldPrice
+              : opt.price,
+          minQty: addMin,
+          maxQty: addMax,
+        },
+        Math.min(addMin, addMax),
+      );
+    },
+    [
+      cart,
+      imageUrl,
+      name,
+      resolvedProductId,
+      resolvedShadeId,
+      shadeName,
+      slug,
+      urls,
+    ],
+  );
+
   const onAdd = (e: React.MouseEvent) => {
     stopCardNav(e);
-    if (!resolvedProductId || !resolvedVariantId || maxQty < minQty) return;
+    if (!resolvedProductId) return;
+    if (needsVolumePick) {
+      setVolumeModalOpen(true);
+      return;
+    }
+    if (!resolvedVariantId || maxQty < minQty) return;
     cart.addItem(
       {
         productId: resolvedProductId,
@@ -230,6 +302,11 @@ export function ProductCardMedia({
       },
       Math.min(minQty, maxQty),
     );
+  };
+
+  const onVolumeSelect = (opt: VolumePickerOption) => {
+    addVolumeToCart(opt);
+    setVolumeModalOpen(false);
   };
 
   const onInc = (e: React.MouseEvent) => {
@@ -291,13 +368,36 @@ export function ProductCardMedia({
           <span className={styles.discountBadge}>{discountPercent}%</span>
         ) : null}
 
+        {volumeOptions.length > 0 ? (
+          <div className={styles.sizeRow} aria-label="Доступные объёмы">
+            {volumeOptions.map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                className={styles.sizePill}
+                aria-label={
+                  needsVolumePick
+                    ? `Выбрать объём: ${opt.label}`
+                    : opt.label
+                }
+                onClick={(e) => {
+                  stopCardNav(e);
+                  if (needsVolumePick) setVolumeModalOpen(true);
+                }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
         <div className={styles.favoriteBtn} onClick={stopCardNav}>
           <FavoriteButton variantId={resolvedVariantId} />
         </div>
       </div>
 
       {canCart ? (
-        qty > 0 ? (
+        qty > 0 && !needsVolumePick ? (
           <div
             className={styles.cardQtyStepper}
             aria-label="Количество в корзине"
@@ -334,6 +434,15 @@ export function ProductCardMedia({
             <CartBagIcon />
           </button>
         )
+      ) : null}
+
+      {needsVolumePick ? (
+        <VolumePickerModal
+          open={volumeModalOpen}
+          options={volumeOptions}
+          onSelect={onVolumeSelect}
+          onClose={() => setVolumeModalOpen(false)}
+        />
       ) : null}
     </div>
   );
