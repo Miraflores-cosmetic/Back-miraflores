@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from 'crypto';
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { resolveOrderPaySecret } from '../auth/jwt-secret';
+import { resolveAwaitingRemindSchedule } from './order-awaiting-payment-schedule';
 
 type PayTokenPayload = {
   v: 1;
@@ -23,25 +24,14 @@ export class OrderPayTokenService {
 
   /** TTL в секундах: ORDER_AWAITING_TTL_MINUTES + 15 мин запас. */
   ttlSeconds(): number {
-    const minutes = Math.max(
-      5,
-      Number.parseInt(
-        this.config.get<string>('ORDER_AWAITING_TTL_MINUTES') || '60',
-        10,
-      ) || 60,
-    );
-    return (minutes + 15) * 60;
+    return (this.awaitingTtlMinutes() + 15) * 60;
   }
 
-  /** Минуты ожидания оплаты (для UI «оплатите до …»). */
+  /** Минуты ожидания оплаты (для UI «оплатите до …»). Default 72 ч. */
   awaitingTtlMinutes(): number {
-    return Math.max(
-      5,
-      Number.parseInt(
-        this.config.get<string>('ORDER_AWAITING_TTL_MINUTES') || '60',
-        10,
-      ) || 60,
-    );
+    return resolveAwaitingRemindSchedule({
+      get: (k) => this.config.get<string>(k),
+    }).ttlMinutes;
   }
 
   issue(orderId: string, guestId: string): string {

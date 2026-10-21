@@ -8,6 +8,7 @@ import { CarrierShipmentService } from './carrier-shipment.service';
 import { OrdersAdminController } from './orders-admin.controller';
 import { OrdersAdminService } from './orders-admin.service';
 import { OrdersExpiryWorker } from './orders-expiry.worker';
+import { OrderAwaitingPaymentService } from './order-awaiting-payment.service';
 import { OrderPayTokenService } from './order-pay-token.service';
 import { ShippingQuoteService } from './shipping-quote.service';
 import { ShippingServerEstimateService } from './shipping-server-estimate.service';
@@ -39,6 +40,7 @@ import { YourichModule } from '../yourich/yourich.module';
     OrdersPublicService,
     OrdersAdminService,
     OrderLifecycleService,
+    OrderAwaitingPaymentService,
     YooKassaService,
     OrderPayTokenService,
     ShippingQuoteService,

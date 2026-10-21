@@ -21,6 +21,8 @@ import {
 /** Стабильные ключи событий (БД + API). */
 export const EMAIL_NOTIFICATION_EVENT_KEYS = [
   'order_awaiting_payment',
+  'order_awaiting_payment_24h',
+  'order_awaiting_payment_48h',
   'order_paid',
   'order_shipped',
   'order_delivered',
@@ -37,6 +39,15 @@ export const EMAIL_NOTIFICATION_EVENT_KEYS = [
 
 export type EmailNotificationEventKey =
   (typeof EMAIL_NOTIFICATION_EVENT_KEYS)[number];
+
+/** Stage 1=5м → order_awaiting_payment; 2=24ч; 3=48ч. */
+export function awaitingPaymentEmailEventKey(
+  stage: 1 | 2 | 3,
+): EmailNotificationEventKey {
+  if (stage === 2) return 'order_awaiting_payment_24h';
+  if (stage === 3) return 'order_awaiting_payment_48h';
+  return 'order_awaiting_payment';
+}
 
 export function isEmailNotificationEventKey(
   value: string,
@@ -108,20 +119,27 @@ export const EMAIL_GLOBAL_ALLOWED_KEYS: readonly string[] = [
  * defaultSubject/Body — сиды и fallback, если строки ещё нет в БД.
  * Rich fidelity: сниппеты {{cta.*}} / {{block.*}} (не произвольный HTML).
  */
+const AWAITING_PAYMENT_VARS: EmailNotificationVarDoc[] = [
+  ...ORDER_COMMON_VARS,
+  { key: 'order.total_label', label: 'Сумма к оплате (с ₽)' },
+  { key: 'order.pay_url', label: 'Ссылка на оплату (deep-link)' },
+  { key: 'order.reserve_hours', label: 'Срок резерва, часов' },
+  {
+    key: 'order.cancel_at_label',
+    label: 'Дата/время авто-отмены (МСК), на 48-ч напоминании',
+  },
+  SNIPPET_ORDER_CARD,
+  SNIPPET_CTA_PAY,
+  SNIPPET_CTA_ORDER,
+];
+
 export const EMAIL_NOTIFICATION_EVENTS: readonly EmailNotificationEventDef[] = [
   {
     key: 'order_awaiting_payment',
-    label: 'Заказ ожидает оплаты',
-    description: 'После оформления заказа со статусом «Ожидает оплаты».',
-    variables: [
-      ...ORDER_COMMON_VARS,
-      { key: 'order.total_label', label: 'Сумма к оплате (с ₽)' },
-      { key: 'order.pay_url', label: 'Ссылка на оплату (deep-link)' },
-      { key: 'order.reserve_hours', label: 'Срок резерва, часов' },
-      SNIPPET_ORDER_CARD,
-      SNIPPET_CTA_PAY,
-      SNIPPET_CTA_ORDER,
-    ],
+    label: 'Напоминание об оплате (5 мин)',
+    description:
+      'Первое напоминание: через ~5 минут после оформления, пока заказ AWAITING_PAYMENT.',
+    variables: AWAITING_PAYMENT_VARS,
     defaultSubject: `Заказ {{order.number}} ожидает оплаты — ${MAIL_BRAND.name}`,
     defaultBody: [
       'Здравствуйте!',
@@ -130,14 +148,67 @@ export const EMAIL_NOTIFICATION_EVENTS: readonly EmailNotificationEventDef[] = [
       '',
       '{{block.order_card}}',
       '',
-      'Товары зарезервированы на {{order.reserve_hours}} ч. Если оплата не поступит вовремя, заказ будет отменён автоматически.',
+      'Товары зарезервированы на {{order.reserve_hours}} ч. Оплатите заказ, чтобы мы могли его собрать и отправить.',
       '',
       '{{#if order.pay_url}}',
       '{{cta.pay}}',
       '',
       '{{/if}}',
-      'Или откройте заказ в кабинете:',
-      '{{order.url}}',
+      '{{cta.order}}',
+      '',
+      'Вопросы — на info@miraflores-shop.ru.',
+    ].join('\n'),
+  },
+  {
+    key: 'order_awaiting_payment_24h',
+    label: 'Напоминание об оплате (24 ч)',
+    description:
+      'Второе напоминание: через ~24 часа после оформления, если оплата ещё не поступила.',
+    variables: AWAITING_PAYMENT_VARS,
+    defaultSubject: `Напоминание: заказ {{order.number}} всё ещё без оплаты — ${MAIL_BRAND.name}`,
+    defaultBody: [
+      'Здравствуйте!',
+      '',
+      'Прошло около суток с оформления заказа — оплата пока не поступила.',
+      '',
+      '{{block.order_card}}',
+      '',
+      'Резерв товаров действует ещё некоторое время (всего {{order.reserve_hours}} ч с момента заказа). Пожалуйста, завершите оплату, чтобы заказ не был отменён.',
+      '',
+      '{{#if order.pay_url}}',
+      '{{cta.pay}}',
+      '',
+      '{{/if}}',
+      '{{cta.order}}',
+      '',
+      'Вопросы — на info@miraflores-shop.ru.',
+    ].join('\n'),
+  },
+  {
+    key: 'order_awaiting_payment_48h',
+    label: 'Напоминание об оплате (48 ч)',
+    description:
+      'Третье напоминание: через ~48 часов. В письме дата/время авто-отмены (МСК).',
+    variables: AWAITING_PAYMENT_VARS,
+    defaultSubject: `Срок оплаты истекает: заказ {{order.number}} — ${MAIL_BRAND.name}`,
+    defaultBody: [
+      'Здравствуйте!',
+      '',
+      'Это последнее напоминание об оплате заказа.',
+      '',
+      '{{block.order_card}}',
+      '',
+      '{{#if order.cancel_at_label}}',
+      'Если оплата не поступит, заказ будет автоматически отменён {{order.cancel_at_label}} (МСК).',
+      '',
+      '{{/if}}',
+      'Товары зарезервированы на {{order.reserve_hours}} ч с момента оформления.',
+      '',
+      '{{#if order.pay_url}}',
+      '{{cta.pay}}',
+      '',
+      '{{/if}}',
+      '{{cta.order}}',
       '',
       'Вопросы — на info@miraflores-shop.ru.',
     ].join('\n'),
@@ -227,12 +298,21 @@ export const EMAIL_NOTIFICATION_EVENTS: readonly EmailNotificationEventDef[] = [
   {
     key: 'order_cancelled',
     label: 'Заказ отменён',
-    description: 'При отмене заказа.',
-    variables: [...ORDER_COMMON_VARS, SNIPPET_ORDER_CARD, SNIPPET_CTA_SITE],
+    description: 'При отмене заказа (вручную или автоматически по неоплате через 72 ч).',
+    variables: [
+      ...ORDER_COMMON_VARS,
+      { key: 'order.cancel_reason', label: 'Причина / пояснение отмены' },
+      SNIPPET_ORDER_CARD,
+      SNIPPET_CTA_SITE,
+    ],
     defaultSubject: `Заказ {{order.number}} отменён — ${MAIL_BRAND.name}`,
     defaultBody: [
       'Заказ отменён.',
       '',
+      '{{#if order.cancel_reason}}',
+      '{{order.cancel_reason}}',
+      '',
+      '{{/if}}',
       '{{block.order_card}}',
       '',
       'Если это произошло по ошибке или нужна помощь — напишите на info@miraflores-shop.ru.',

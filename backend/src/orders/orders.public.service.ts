@@ -25,6 +25,7 @@ import {
   reserveStockForLines,
 } from './order-stock';
 import { lockOrderForUpdate } from './order-lock';
+import { OrderAwaitingPaymentService } from './order-awaiting-payment.service';
 import {
   DELIVERY_SURCHARGE_DEFAULTS,
   normalizeDeliverySurchargeRow,
@@ -114,6 +115,7 @@ export class OrdersPublicService {
     private readonly shippingServerEstimate: ShippingServerEstimateService,
     private readonly lifecycle: OrderLifecycleService,
     private readonly orderChat: OrderChatService,
+    private readonly awaitingPayment: OrderAwaitingPaymentService,
     @Optional() private readonly ozonAuth?: OzonAuthService,
     @Optional() private readonly yourichSync?: YourichSyncService,
     @Optional() private readonly yourichClient?: YourichClient,
@@ -450,7 +452,7 @@ export class OrdersPublicService {
     const guestId = dto.guestId.trim();
     if (!guestId) throw new BadRequestException('guestId обязателен');
 
-    await this.expireStaleAwaitingOrders();
+    await this.awaitingPayment.expireStaleAwaitingOrders();
 
     const existing = await this.prisma.order.findUnique({
       where: { idempotencyKey },
@@ -874,23 +876,11 @@ export class OrdersPublicService {
       );
     }
 
-    if (
-      order.status === OrderStatus.AWAITING_PAYMENT &&
-      order.total > 0 &&
-      order.email?.trim()
-    ) {
-      const guestIdForPay = order.guestId?.trim() || '';
-      const payToken = guestIdForPay
-        ? this.payTokens.issue(order.id, guestIdForPay)
-        : null;
-      void this.lifecycle.notifyOrderAwaitingPayment({
-        to: order.email.trim(),
-        orderNumber: order.number,
-        total: order.total,
-        orderId: order.id,
-        payToken,
-      });
-    }
+    // Письмо «ожидает оплаты» — не сразу: через 5 мин / 24 ч / 48 ч (OrdersExpiryWorker).
+    // Ops-дубль админу о новом заказе — сразу.
+    scheduleAfterRlsCommitWithBypass(this.prisma, () =>
+      this.lifecycle.notifyAdminOrderCreated(order.number),
+    );
 
     return this.serializeCreated(order);
   }
@@ -898,6 +888,10 @@ export class OrdersPublicService {
   /**
    * Гость отменяет неоплаченный заказ (смена корзины / адреса на checkout).
    * Снимает stockReserve.
+   *
+   * Письмо order_cancelled **не** шлём: пользователь ещё на checkout и сразу
+   * создаёт новый заказ — письмо «заказ отменён» в этом UX шум.
+   * TTL-expire и отмена из админки / ЛК — шлют (см. docs/emails.md).
    */
   async abandon(orderId: string, payToken?: string | null) {
     const result = await this.prisma.$transaction(async (tx) => {
@@ -955,75 +949,12 @@ export class OrdersPublicService {
     };
   }
 
-  /**
-   * Авто-отмена неоплаченных AWAITING_PAYMENT старше TTL (мин).
-   * Env: ORDER_AWAITING_TTL_MINUTES (default 60).
-   */
-  async expireStaleAwaitingOrders(now = new Date()): Promise<number> {
-    const minutesRaw = this.config.get<string>('ORDER_AWAITING_TTL_MINUTES');
-    const minutes = Math.max(
-      5,
-      Number.parseInt(minutesRaw || '60', 10) || 60,
-    );
-    const cutoff = new Date(now.getTime() - minutes * 60_000);
-
-    const stale = await this.prisma.order.findMany({
-      where: {
-        status: { in: [OrderStatus.AWAITING_PAYMENT, OrderStatus.NEW] },
-        createdAt: { lt: cutoff },
-      },
-      include: { items: true },
-      take: 50,
-    });
-
-    let cancelled = 0;
-    for (const order of stale) {
-      const pendingExternalIds = await this.prisma.$transaction(async (tx) => {
-        await lockOrderForUpdate(tx, order.id);
-        const fresh = await tx.order.findUnique({
-          where: { id: order.id },
-          include: { items: true },
-        });
-        if (
-          !fresh ||
-          (fresh.status !== OrderStatus.AWAITING_PAYMENT &&
-            fresh.status !== OrderStatus.NEW)
-        ) {
-          return null;
-        }
-        const result = await cancelUnpaidOrderInTx(tx, {
-          orderId: fresh.id,
-          fromStatus: fresh.status,
-          items: fresh.items,
-          message: 'Заказ отменён (истёк срок оплаты)',
-          reason: 'ttl',
-          giftNote: 'Возврат при истечении срока оплаты',
-        });
-        return result.pendingExternalIds;
-      });
-      if (pendingExternalIds == null) continue;
-      if (pendingExternalIds.length) {
-        await this.yookassa.cancelPaymentsBestEffort(pendingExternalIds);
-      }
-      scheduleAfterRlsCommitWithBypass(this.prisma, () =>
-        this.orderChat.applyRetentionForOrder(order.id, OrderStatus.CANCELLED),
-      );
-      if (this.yourichSync) {
-        scheduleAfterRlsCommitWithBypass(this.prisma, () =>
-          this.yourichSync!.touch(order.id),
-        );
-      }
-      cancelled += 1;
-    }
-    return cancelled;
-  }
-
   /** Создаёт платёж ЮKassa (embedded) для заказа AWAITING_PAYMENT. */
   async createPayment(
     orderId: string,
     opts: { payToken?: string | null; buyerUserId?: string | null } = {},
   ) {
-    await this.expireStaleAwaitingOrders();
+    await this.awaitingPayment.expireStaleAwaitingOrders();
 
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },

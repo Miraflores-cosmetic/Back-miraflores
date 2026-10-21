@@ -26,6 +26,8 @@ export const EMAIL_IF_ALLOWED_KEYS = [
   'order.changes_summary',
   'order.refund_intro',
   'order.refund_label',
+  'order.cancel_at_label',
+  'order.cancel_reason',
   'gift.items_text',
   'gift.items_html',
   'gift.buyer_email',
@@ -141,10 +143,29 @@ export function plainBodyToHtml(escapedInterpolatedBody: string): string {
     .join('');
 }
 
+/**
+ * CTA «Оплатить» только для deep-link `/order/pay` (с payToken).
+ * Profile / ЛК → не «Оплатить» (ложная кнопка для guest без token).
+ */
+export function isOrderPayDeepLink(href: string): boolean {
+  const t = href.trim();
+  if (!t) return false;
+  try {
+    const u = new URL(t);
+    return (
+      u.pathname.includes('/order/pay') && u.searchParams.has('payToken')
+    );
+  } catch {
+    return /\/order\/pay\?/i.test(t) && /[?&]payToken=/i.test(t);
+  }
+}
+
 function snippetTextFallback(key: string, vars: EmailTemplateVars): string {
   switch (key) {
-    case 'cta.pay':
-      return String(vars['order.pay_url'] ?? '').trim();
+    case 'cta.pay': {
+      const href = String(vars['order.pay_url'] ?? '').trim();
+      return isOrderPayDeepLink(href) ? href : '';
+    }
     case 'cta.order':
       return String(vars['order.url'] ?? '').trim();
     case 'cta.site':
@@ -228,7 +249,7 @@ function snippetHtml(key: EmailSnippetKey, vars: EmailTemplateVars): string {
   switch (key) {
     case 'cta.pay': {
       const href = String(vars['order.pay_url'] ?? '').trim();
-      return href ? mailCtaButton(href, 'Оплатить') : '';
+      return isOrderPayDeepLink(href) ? mailCtaButton(href, 'Оплатить') : '';
     }
     case 'cta.order': {
       const href = String(vars['order.url'] ?? '').trim();
@@ -263,7 +284,9 @@ function maybeAutoCtaHtml(plainBlock: string, vars: EmailTemplateVars): string |
   const pay = String(vars['order.pay_url'] ?? '').trim();
   const order = String(vars['order.url'] ?? '').trim();
   const site = String(vars['site.url'] ?? '').trim();
-  if (pay && t === pay) return mailCtaButton(pay, 'Оплатить');
+  if (pay && t === pay && isOrderPayDeepLink(pay)) {
+    return mailCtaButton(pay, 'Оплатить');
+  }
   if (order && t === order) return mailCtaButton(order, 'Смотреть заказ');
   if (site && t === site) return mailCtaButton(site, 'На сайт Miraflores');
   return null;

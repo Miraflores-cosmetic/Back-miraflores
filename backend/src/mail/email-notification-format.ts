@@ -1,6 +1,9 @@
 import { escapeHtml, MAIL_BRAND } from './email-layout';
 import type { GiftEmailCertItem } from './email-templates';
-import type { EmailTemplateVars } from './email-notification-render';
+import {
+  isOrderPayDeepLink,
+  type EmailTemplateVars,
+} from './email-notification-render';
 
 export type OrderEmailItem = {
   title: string;
@@ -165,6 +168,10 @@ export function baseOrderVars(opts: {
   tracking?: string | null;
   changesSummary?: string;
   reserveHours?: number;
+  /** Дата/время авто-отмены (для напоминания за 24 ч до TTL). */
+  cancelAtLabel?: string;
+  /** Причина отмены (например «автоматически из‑за неоплаты»). */
+  cancelReason?: string;
   items?: OrderEmailItem[];
   itemsText?: string;
   refundAmount?: number;
@@ -211,7 +218,11 @@ export function baseOrderVars(opts: {
     'site.url': site,
     'order.number': opts.orderNumber.trim(),
     'order.url': orderUrl,
-    'order.pay_url': (opts.payUrl || '').trim(),
+    // Пустой / не deep-link → {{#if order.pay_url}} и cta.pay скрыты (не ЛК).
+    'order.pay_url': (() => {
+      const pay = (opts.payUrl || '').trim();
+      return isOrderPayDeepLink(pay) ? pay : '';
+    })(),
     'order.total_label': totalLabel,
     'order.subtotal_label': subtotalLabel,
     'order.shipping_label': shippingLabel,
@@ -223,6 +234,8 @@ export function baseOrderVars(opts: {
     'order.changes_summary': (opts.changesSummary || '').trim(),
     'order.reserve_hours':
       opts.reserveHours != null ? String(opts.reserveHours) : '',
+    'order.cancel_at_label': (opts.cancelAtLabel || '').trim(),
+    'order.cancel_reason': (opts.cancelReason || '').trim(),
     'order.items_text': itemsText,
     'order.items_html': itemsHtml,
     'order.refund_intro': refundIntro,

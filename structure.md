@@ -55,8 +55,12 @@ cd Front && npm ci && npm run dev   # :5173
 
 ```
 Miraflores 3.0/
-├── deploy.md                 ← этот гайд: деплой
+├── deploy.md                 ← деплой
 ├── structure.md              ← структура
+├── docs/
+│   ├── emails.md             ← контракт transactional email + TTL/remind
+│   ├── ozon-delivery.md
+│   └── order-chat.md
 ├── package.json              ← workspaces (без Front)
 ├── backend/                  ← Nest API (miraflores-api)
 │   ├── prisma/               ← schema + migrations
@@ -66,7 +70,8 @@ Miraflores 3.0/
 │   │   ├── onec/             ← обмен 1С CommerceML (заказы → 1C, опц. offers → сайт)
 │   │   ├── user-groups/      ← группы, цены, visibility, commerce context, shared cache
 │   │   ├── settings/         ← FAQ, hero, homepage-sets, menu, product-attributes, …
-│   │   ├── mail/             ← SMTP, шаблоны писем
+│   │   ├── mail/             ← SMTP, editable email (см. docs/emails.md)
+│   │   ├── orders/           ← checkout; OrderAwaitingPaymentService + expiry worker
 │   │   └── …
 │   └── .env.example
 ├── Admin/                    ← Next admin + BFF
@@ -115,7 +120,27 @@ Miraflores 3.0/
   - `GET /catalog/admin/product-attribute-options` — read-only для формы товара (ACL catalog)
 - **1С обмен** (см. раздел ниже): `GET|POST /api/v1/1c/exchange`  
 - Uploads: `LOCAL_UPLOADS_*`  
-- Почта: SMTP (заказы, staff welcome/reset)
+- Почта: SMTP (заказы, staff welcome/reset) — полный контракт: [docs/emails.md](./docs/emails.md)
+
+### Неоплата: напоминания и TTL
+
+| Env | Default | Смысл |
+|-----|---------|--------|
+| `ORDER_AWAITING_TTL_MINUTES` | `4320` (72 ч) | авто-отмена `AWAITING_PAYMENT` |
+| `ORDER_PAY_REMIND_1_MINUTES` | `5` | письмо `order_awaiting_payment` |
+| `ORDER_PAY_REMIND_2_MINUTES` | `1440` (24 ч) | `order_awaiting_payment_24h` |
+| `ORDER_PAY_REMIND_3_MINUTES` | `2880` (48 ч) | `order_awaiting_payment_48h` + дата отмены |
+
+- Воркер `OrdersExpiryWorker`: **раз в 1 мин**, один лидер (`pg_try_advisory_lock`).
+- Логика: `OrderAwaitingPaymentService` + `order-awaiting-payment-schedule.ts` (то же расписание, что `reserve_hours` в mail).
+- **Catch-up (осознанно):** высший overdue stage; 5м/24ч тексты skip → `meta.skipped`.
+- **Outbox (не send-before-bump):** bump + `PAYMENT_REMIND(pending)` → SMTP → `sent`; fail → retry.
+- **Claim SQL:** только due. **Expire batch 50** + `ORDER_AWAITING_EXPIRE_BACKLOG_ALERT`.
+- **Remind backlog:** `ORDER_PAY_REMIND_BACKLOG_ALERT` (default 100).
+- Checkout `abandon` — без email; pay_url ≠ profile; TTL/admin — `order_cancelled`.
+- **Дубли админу:** `ORDER_ADMIN_NOTIFY_EMAIL` (default `mira-robot@…`) — создан / оплачен / отменён / возврат.
+
+Шаблоны писем: Админка → Настройки → Email. Подробно: [docs/emails.md](./docs/emails.md).
 
 ### Next Admin (`/admin` + BFF)
 

@@ -113,11 +113,35 @@ git push origin main
 | Файл | Назначение |
 |------|------------|
 | `/opt/miraflores/backend/.env` | DB, JWT, SMTP, ЮKassa, CDEK, uploads, `FRONTEND_PUBLIC_URL`, `ONEC_LOGIN` / `ONEC_PASSWORD`, Ozon (`OZON_*`, `ADMIN_PUBLIC_URL`, `OPS_ALERT_EMAIL`) |
-| `/opt/miraflores/Admin/.env.local` | `NEXT_PUBLIC_*`, Yandex Delivery, CDEK, webhook secret |
+| `/opt/miraflores/Admin/.env.local` | `NEXT_PUBLIC_*`, Yandex Delivery, CDEK, webhook secret; **`BACKEND_INTERNAL_URL=http://127.0.0.1:3001/api/v1`** (SSR/BFF → Nest, не публичный HTTPS) |
 | `/opt/miraflores/Front/.env` | пишет скрипт деплоя (`VITE_API_URL=/api/v1`, Yandex Map) |
 | `/opt/miraflores/deploy/.env` | пароль Postgres для docker-compose |
 
 Обязательные для почты staff/заказов: `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD`, `MAIL_FROM`, `FRONTEND_PUBLIC_URL`.
+
+Дубли заказов админу: `ORDER_ADMIN_NOTIFY_EMAIL=mira-robot@miraflores-shop.ru` (default тот же; пусто = выкл) — create / paid / cancelled / refund.
+
+Полный контракт писем (ключи шаблонов, auth/staff, синтаксис): [docs/emails.md](docs/emails.md).
+
+### Неоплата на проде (`backend/.env`)
+
+| Env | Рекомендация prod | Смысл |
+|-----|-------------------|--------|
+| `ORDER_AWAITING_TTL_MINUTES` | `4320` (72 ч) | авто-отмена неоплаченных |
+| `ORDER_PAY_REMIND_1_MINUTES` | `5` (или оставить default) | 1-е напоминание |
+| `ORDER_PAY_REMIND_2_MINUTES` | `1440` | 24 ч |
+| `ORDER_PAY_REMIND_3_MINUTES` | `2880` | 48 ч + дата отмены в письме |
+
+Воркер в API: tick **1 мин** (`OrdersExpiryWorker`) → remind, затем expire. Catch-up после даунтайма: одно письмо — высший overdue stage (см. docs/emails.md).
+
+Backlog remind: due > `ORDER_PAY_REMIND_BACKLOG_ALERT` (default 100) → `OPS_ALERT awaiting_remind_backlog`.  
+Backlog expire: due > `ORDER_AWAITING_EXPIRE_BACKLOG_ALERT` (default 50) → `OPS_ALERT awaiting_expire_backlog`.
+
+```bash
+grep -E '^(ORDER_AWAITING_TTL|ORDER_PAY_REMIND|ORDER_AWAITING_EXPIRE)' /opt/miraflores/backend/.env
+journalctl -u miraflores-api --since "1 hour ago" --no-pager \
+  | grep -iE "awaiting-payment reminder|awaiting_remind_backlog|awaiting_expire_backlog|Expired .* awaiting"
+```
 
 Проверка приглашений сотрудников:
 

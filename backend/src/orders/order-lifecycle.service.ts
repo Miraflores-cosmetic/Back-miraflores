@@ -19,7 +19,8 @@ export type OrderEventType =
   | 'CARRIER_COST'
   | 'ADDRESS_UPDATED'
   | 'ITEMS_UPDATED'
-  | 'SURCHARGE_PAID';
+  | 'SURCHARGE_PAID'
+  | 'PAYMENT_REMIND';
 
 @Injectable()
 export class OrderLifecycleService {
@@ -85,6 +86,10 @@ export class OrderLifecycleService {
     }
   }
 
+  /**
+   * Outbox-aware: не глотает ошибку SMTP (в отличие от runMail).
+   * `sent` | `skipped` (нет SMTP) | `failed`.
+   */
   async notifyOrderAwaitingPayment(input: {
     to: string;
     orderNumber: string;
@@ -92,25 +97,41 @@ export class OrderLifecycleService {
     orderId?: string;
     payToken?: string | null;
     payUrl?: string;
-  }): Promise<void> {
-    await this.runMail(
-      `Order awaiting payment mail ${input.orderNumber} → ${input.to}`,
-      () =>
-        this.mail.sendOrderAwaitingPayment({
-          to: input.to,
-          orderNumber: input.orderNumber,
-          total: input.total,
-          orderId: input.orderId,
-          payToken: input.payToken,
-          payUrl: input.payUrl,
-        }),
-    );
+    cancelAtLabel?: string;
+    /** 1 = 5м, 2 = 24ч, 3 = 48ч */
+    stage?: 1 | 2 | 3;
+  }): Promise<'sent' | 'skipped' | 'failed'> {
+    const label = `Order awaiting payment mail stage=${input.stage ?? 1} ${input.orderNumber} → ${input.to}`;
+    if (!this.mail.isConfigured()) {
+      this.logger.warn(`${label} skipped (no SMTP)`);
+      return 'skipped';
+    }
+    try {
+      await this.mail.sendOrderAwaitingPayment({
+        to: input.to,
+        orderNumber: input.orderNumber,
+        total: input.total,
+        orderId: input.orderId,
+        payToken: input.payToken,
+        payUrl: input.payUrl,
+        cancelAtLabel: input.cancelAtLabel,
+        stage: input.stage,
+      });
+      return 'sent';
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.logger.warn(`${label} failed: ${msg}`);
+      return 'failed';
+    }
   }
 
   async notifyOrderPaid(to: string, orderNumber: string): Promise<void> {
     const order = await this.prisma.order.findUnique({
       where: { number: orderNumber },
       select: {
+        email: true,
+        phone: true,
+        customerName: true,
         total: true,
         subtotal: true,
         shippingCost: true,
@@ -144,6 +165,16 @@ export class OrderLifecycleService {
         })),
       }),
     );
+    if (order) {
+      await this.notifyAdminOrderCopy({
+        kind: 'paid',
+        orderNumber,
+        email: order.email,
+        phone: order.phone,
+        customerName: order.customerName,
+        total: order.total,
+      });
+    }
   }
 
   async notifyOrderShipped(
@@ -162,10 +193,34 @@ export class OrderLifecycleService {
     );
   }
 
-  async notifyOrderCancelled(to: string, orderNumber: string): Promise<void> {
+  async notifyOrderCancelled(
+    to: string,
+    orderNumber: string,
+    cancelReason?: string,
+  ): Promise<void> {
     await this.runMail(`Order cancelled mail ${orderNumber} → ${to}`, () =>
-      this.mail.sendOrderCancelled({ to, orderNumber }),
+      this.mail.sendOrderCancelled({ to, orderNumber, cancelReason }),
     );
+    const order = await this.prisma.order.findUnique({
+      where: { number: orderNumber },
+      select: {
+        email: true,
+        phone: true,
+        customerName: true,
+        total: true,
+      },
+    });
+    if (order) {
+      await this.notifyAdminOrderCopy({
+        kind: 'cancelled',
+        orderNumber,
+        email: order.email,
+        phone: order.phone,
+        customerName: order.customerName,
+        total: order.total,
+        cancelReason,
+      });
+    }
   }
 
   async notifyOrderUpdated(input: {
@@ -201,6 +256,73 @@ export class OrderLifecycleService {
     await this.runMail(
       `Order refund mail ${input.orderNumber} → ${input.to}`,
       () => this.mail.sendOrderRefund(input),
+    );
+    const order = await this.prisma.order.findUnique({
+      where: { number: input.orderNumber },
+      select: {
+        email: true,
+        phone: true,
+        customerName: true,
+        total: true,
+      },
+    });
+    if (order) {
+      await this.notifyAdminOrderCopy({
+        kind: 'refunded',
+        orderNumber: input.orderNumber,
+        email: order.email,
+        phone: order.phone,
+        customerName: order.customerName,
+        total: order.total,
+        refundAmount: input.amount,
+      });
+    }
+  }
+
+  /**
+   * Ops-дубль админу при создании заказа (покупателю сразу не шлём).
+   * Env: ORDER_ADMIN_NOTIFY_EMAIL (default mira-robot@miraflores-shop.ru).
+   */
+  async notifyAdminOrderCreated(orderNumber: string): Promise<void> {
+    const order = await this.prisma.order.findUnique({
+      where: { number: orderNumber },
+      select: {
+        email: true,
+        phone: true,
+        customerName: true,
+        total: true,
+        items: {
+          orderBy: { id: 'asc' },
+          select: { title: true, qty: true, lineTotal: true },
+        },
+      },
+    });
+    if (!order) return;
+    await this.notifyAdminOrderCopy({
+      kind: 'created',
+      orderNumber,
+      email: order.email,
+      phone: order.phone,
+      customerName: order.customerName,
+      total: order.total,
+      items: order.items,
+    });
+  }
+
+  private async notifyAdminOrderCopy(input: {
+    kind: 'created' | 'paid' | 'cancelled' | 'refunded';
+    orderNumber: string;
+    email: string;
+    phone: string;
+    customerName?: string | null;
+    total: number;
+    items?: Array<{ title: string; qty: number; lineTotal: number }>;
+    refundAmount?: number;
+    cancelReason?: string | null;
+  }): Promise<void> {
+    await this.runMail(
+      `Admin order notify kind=${input.kind} ${input.orderNumber}`,
+      () => this.mail.sendAdminOrderNotify(input),
     );
   }
 

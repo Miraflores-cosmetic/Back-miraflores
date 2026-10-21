@@ -80,6 +80,43 @@ describe('MailService templated customer mail', () => {
     );
   });
 
+  it('sendAdminOrderNotify → mira-robot по умолчанию', async () => {
+    await svc.sendAdminOrderNotify({
+      kind: 'paid',
+      orderNumber: 'MF-9',
+      email: 'c@d.e',
+      phone: '+7000',
+      total: 100,
+      customerName: 'Тест',
+    });
+    expect(sendSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: 'mira-robot@miraflores-shop.ru',
+        subject: expect.stringContaining('оплачен'),
+      }),
+    );
+  });
+
+  it('ORDER_ADMIN_NOTIFY_EMAIL пустой → skip admin notify', async () => {
+    config.get.mockImplementation((key: string) => {
+      if (key === 'ORDER_ADMIN_NOTIFY_EMAIL') return '';
+      if (key === 'FRONTEND_PUBLIC_URL') return 'https://shop.test';
+      if (key === 'SMTP_HOST') return 'smtp.test';
+      if (key === 'SMTP_USER') return 'u';
+      if (key === 'SMTP_PASSWORD') return 'p';
+      if (key === 'MAIL_FROM') return 'from@test';
+      return undefined;
+    });
+    await svc.sendAdminOrderNotify({
+      kind: 'created',
+      orderNumber: 'MF-0',
+      email: 'c@d.e',
+      phone: '1',
+      total: 1,
+    });
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
   it('awaiting_payment собирает guest pay deep-link', async () => {
     emailNotifications.buildForEvent.mockResolvedValue({
       subject: 'Pay',
@@ -92,12 +129,40 @@ describe('MailService templated customer mail', () => {
       total: 500,
       orderId: 'ord9',
       payToken: 'tok9',
+      stage: 1,
     });
     expect(emailNotifications.buildForEvent).toHaveBeenCalledWith(
       'order_awaiting_payment',
       expect.objectContaining({
         'order.pay_url':
           'https://shop.test/order/pay?orderId=ord9&payToken=tok9&number=MF-9',
+      }),
+    );
+
+    emailNotifications.buildForEvent.mockClear();
+    await svc.sendOrderAwaitingPayment({
+      to: 'a@b.c',
+      orderNumber: 'MF-9',
+      total: 500,
+      stage: 2,
+    });
+    expect(emailNotifications.buildForEvent).toHaveBeenCalledWith(
+      'order_awaiting_payment_24h',
+      expect.any(Object),
+    );
+
+    emailNotifications.buildForEvent.mockClear();
+    await svc.sendOrderAwaitingPayment({
+      to: 'a@b.c',
+      orderNumber: 'MF-9',
+      total: 500,
+      stage: 3,
+      cancelAtLabel: '23.10.2026, 15:00',
+    });
+    expect(emailNotifications.buildForEvent).toHaveBeenCalledWith(
+      'order_awaiting_payment_48h',
+      expect.objectContaining({
+        'order.cancel_at_label': '23.10.2026, 15:00',
       }),
     );
   });

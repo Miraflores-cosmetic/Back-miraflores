@@ -26,13 +26,12 @@ vi.mock('../gift-certificates/gift-certificate-hold.util', () => ({
   computeGiftApplyAmount: vi.fn(),
 }));
 
-import { releaseStockReserve } from './order-stock';
-
 const order = {
   findUnique: vi.fn(),
   findMany: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
+  updateMany: vi.fn(),
 };
 const cartSettings = {
   findUnique: vi.fn().mockResolvedValue({ freeShippingThresholdRub: 10_000 }),
@@ -121,10 +120,16 @@ function makeService() {
     addEvent: vi.fn(async () => ({})),
     notifyCustomer: vi.fn(async () => undefined),
     notifyOrderAwaitingPayment: vi.fn(async () => undefined),
+    notifyOrderCancelled: vi.fn(async () => undefined),
     notifyOrderPaid: vi.fn(async () => undefined),
+    notifyAdminOrderCreated: vi.fn(async () => undefined),
     notifyGiftPurchasePaid: vi.fn(async () => undefined),
     notifyGiftBuyerCopy: vi.fn(async () => undefined),
     notifyOrderRefund: vi.fn(async () => undefined),
+  };
+  const awaitingPayment = {
+    expireStaleAwaitingOrders: vi.fn(async () => 0),
+    processAwaitingPaymentReminders: vi.fn(async () => 0),
   };
   return {
     service: new OrdersPublicService(
@@ -143,9 +148,11 @@ function makeService() {
         seedCustomerNoteFromOrder: vi.fn(),
         applyRetentionForOrder: vi.fn(async () => undefined),
       } as never,
+      awaitingPayment as never,
     ),
     lifecycle,
     payTokens,
+    awaitingPayment,
   };
 }
 
@@ -155,6 +162,8 @@ describe('OrdersPublicService', () => {
   let lifecycle: {
     addEvent: ReturnType<typeof vi.fn>;
     notifyCustomer: ReturnType<typeof vi.fn>;
+    notifyOrderAwaitingPayment: ReturnType<typeof vi.fn>;
+    notifyOrderCancelled: ReturnType<typeof vi.fn>;
   };
 
   beforeEach(() => {
@@ -492,45 +501,31 @@ describe('OrdersPublicService', () => {
     });
   });
 
-  describe('expireStaleAwaitingOrders', () => {
-    it('отменяет просроченные и снимает резерв', async () => {
-      order.findMany.mockResolvedValue([
-        {
-          id: 'old1',
-          status: OrderStatus.AWAITING_PAYMENT,
-          items: [{ variantId: 'v1', qty: 2 }],
-        },
-      ]);
+  describe('abandon', () => {
+    it('не шлёт order_cancelled (checkout cancel = silent)', async () => {
+      const token = payTokens.issue('ord-ab', 'guest-ab');
       order.findUnique.mockResolvedValue({
-        id: 'old1',
+        id: 'ord-ab',
+        number: 'MF-AB',
+        email: 'a@b.c',
+        guestId: 'guest-ab',
         status: OrderStatus.AWAITING_PAYMENT,
-        items: [{ variantId: 'v1', qty: 2 }],
+        items: [{ variantId: 'v1', qty: 1 }],
       });
       order.update.mockResolvedValue({
-        id: 'old1',
+        id: 'ord-ab',
         status: OrderStatus.CANCELLED,
       });
       payment.findMany.mockResolvedValue([]);
-      payment.updateMany.mockResolvedValue({ count: 1 });
+      payment.updateMany.mockResolvedValue({ count: 0 });
       orderEvent.create.mockResolvedValue({});
 
-      const n = await service.expireStaleAwaitingOrders(
-        new Date('2026-08-03T12:00:00Z'),
-      );
+      const result = await service.abandon('ord-ab', token);
 
-      expect(n).toBe(1);
-      expect(releaseStockReserve).toHaveBeenCalled();
-      expect(order.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: 'old1' },
-          data: { status: OrderStatus.CANCELLED },
-        }),
+      expect(result).toEqual(
+        expect.objectContaining({ abandoned: true, status: OrderStatus.CANCELLED }),
       );
-      expect(payment.updateMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: { status: PaymentStatus.CANCELED },
-        }),
-      );
+      expect(lifecycle.notifyOrderCancelled).not.toHaveBeenCalled();
     });
   });
 
@@ -584,7 +579,7 @@ describe('OrdersPublicService', () => {
       yookassa.createRefund.mockResolvedValue({ id: 'rf1', status: 'succeeded' });
       payment.updateMany.mockResolvedValue({ count: 1 });
 
-      const res = await service.paymentStatus('yk_1', token);
+      const res = await service.paymentStatus('yk_1', { payToken: token });
       expect(res.paid).toBe(false);
       expect(res.orderStatus).toBe(OrderStatus.CANCELLED);
       expect(res.latePaymentRefunded).toBe(true);

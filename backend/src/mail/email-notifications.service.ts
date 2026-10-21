@@ -549,11 +549,18 @@ function sampleVarsForEvent(
 
   switch (eventKey) {
     case 'order_awaiting_payment':
+    case 'order_awaiting_payment_24h':
+    case 'order_awaiting_payment_48h':
       return {
         ...base,
         // full: deep-link; sparse: пустой pay_url → {{#if order.pay_url}} / cta.pay скрыты
         'order.pay_url': payUrl,
         'order.total_label': moneyFull ? rubLabel(4500) : '',
+        'order.reserve_hours': sparse ? '' : '72',
+        'order.cancel_at_label':
+          sparse || eventKey !== 'order_awaiting_payment_48h'
+            ? ''
+            : '23.10.2026, 15:00',
         'order.items_text': '',
         'order.items_html': '',
         'order.totals_block': '',
@@ -581,9 +588,22 @@ function sampleVarsForEvent(
         'order.gift_label': '',
       };
     case 'order_delivered':
+      return {
+        ...base,
+        'order.items_text': '',
+        'order.items_html': '',
+        'order.totals_block': '',
+        'order.subtotal_label': '',
+        'order.shipping_label': '',
+        'order.discount_label': '',
+        'order.gift_label': '',
+      };
     case 'order_cancelled':
       return {
         ...base,
+        'order.cancel_reason': sparse
+          ? ''
+          : 'Заказ автоматически отменён: оплата не поступила в срок.',
         'order.items_text': '',
         'order.items_html': '',
         'order.totals_block': '',

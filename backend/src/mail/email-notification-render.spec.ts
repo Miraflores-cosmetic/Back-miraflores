@@ -59,7 +59,8 @@ describe('email-notification-render', () => {
       vars: {
         'order.number': 'MF-1',
         'order.total_label': '1 000 ₽',
-        'order.pay_url': 'https://shop.test/order/pay?orderId=1&payToken=t',
+        'order.pay_url':
+          'https://shop.test/order/pay?orderId=1&payToken=t',
       },
       siteUrl: 'https://shop.test',
     });
@@ -105,7 +106,7 @@ describe('email-notification-render', () => {
   });
 
   it('одиночный URL pay_url → auto CTA', () => {
-    const pay = 'https://shop.test/order/pay?x=1';
+    const pay = 'https://shop.test/order/pay?orderId=1&payToken=tok';
     const mail = renderEditableEmail({
       subjectTemplate: 'X',
       bodyTemplate: `Оплатите\n\n${pay}`,
@@ -113,7 +114,23 @@ describe('email-notification-render', () => {
       siteUrl: 'https://shop.test',
     });
     expect(mail.html).toContain('Оплатить');
-    expect(mail.html).toContain(pay);
+    expect(mail.html).toContain('payToken=tok');
+    expect(mail.html).toContain('/order/pay');
+  });
+
+  it('cta.pay не рисует «Оплатить» на profile (без deep-link)', () => {
+    const profile = 'https://shop.test/profile?tab=orders';
+    const mail = renderEditableEmail({
+      subjectTemplate: 'X',
+      bodyTemplate: 'Pay: {{cta.pay}}',
+      vars: {
+        'order.pay_url': profile,
+        'order.url': profile,
+      },
+      siteUrl: 'https://shop.test',
+    });
+    expect(mail.html.toLowerCase()).not.toContain('>оплатить<');
+    expect(mail.text.trim()).toBe('Pay:');
   });
 
   it('extractTemplatePlaceholders', () => {
@@ -133,14 +150,28 @@ describe('email-notification-render', () => {
 });
 
 describe('baseOrderVars pay_url', () => {
-  it('не подставляет profile вместо оплаты', async () => {
+  it('не подставляет profile вместо оплаты / отбрасывает не-deep-link', async () => {
     const { baseOrderVars } = await import('./email-notification-format');
-    const v = baseOrderVars({
+    const empty = baseOrderVars({
       orderNumber: 'MF-1',
       siteUrl: 'https://shop.test',
     });
-    expect(v['order.pay_url']).toBe('');
-    expect(v['order.url']).toBe('https://shop.test/profile?tab=orders');
+    expect(empty['order.pay_url']).toBe('');
+    expect(empty['order.url']).toBe('https://shop.test/profile?tab=orders');
+
+    const profileAsPay = baseOrderVars({
+      orderNumber: 'MF-1',
+      siteUrl: 'https://shop.test',
+      payUrl: 'https://shop.test/profile?tab=orders',
+    });
+    expect(profileAsPay['order.pay_url']).toBe('');
+
+    const deep = baseOrderVars({
+      orderNumber: 'MF-1',
+      siteUrl: 'https://shop.test',
+      payUrl: 'https://shop.test/order/pay?orderId=1&payToken=tok',
+    });
+    expect(deep['order.pay_url']).toContain('payToken=tok');
   });
 });
 

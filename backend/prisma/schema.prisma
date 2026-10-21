@@ -814,6 +814,8 @@ model Order {
   pricingGroupName String?
   /// guest | registered_default | registered_group
   pricingContext   String?
+  /// Сколько писем «ожидает оплаты» уже ушло: 0 → 5м → 24ч → 48ч (финал 72ч = отмена)
+  awaitingPaymentRemindStage Int @default(0)
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
   chatConversation ChatConversation?
@@ -821,6 +823,7 @@ model Order {
   @@index([giftCertificateId])
   @@index([giftPurchaseDenominationId])
   @@index([onecExportedAt, status])
+  @@index([status, awaitingPaymentRemindStage, createdAt])
   @@index([email])
   @@index([phone])
 }

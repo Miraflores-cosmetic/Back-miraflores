@@ -3,7 +3,13 @@ import { ConfigService } from '@nestjs/config';
 import { resolve4 } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import * as nodemailer from 'nodemailer';
+import { resolveAwaitingRemindSchedule } from '../orders/order-awaiting-payment-schedule';
 import {
+  buildAdminOrderNotifyEmail,
+  type AdminOrderNotifyInput,
+} from './admin-order-notify';
+import {
+  awaitingPaymentEmailEventKey,
   getEmailNotificationEventDef,
   type EmailNotificationEventKey,
 } from './email-notification-events';
@@ -157,6 +163,39 @@ export class MailService {
     await this.send(params);
   }
 
+  /**
+   * Куда слать ops-дубли заказов.
+   * Env ORDER_ADMIN_NOTIFY_EMAIL; пустая строка = выкл; unset → mira-robot@…
+   */
+  resolveAdminOrderNotifyEmail(): string {
+    const raw = this.config.get<string>('ORDER_ADMIN_NOTIFY_EMAIL');
+    if (raw !== undefined && raw.trim() === '') return '';
+    const explicit = raw?.trim();
+    if (explicit) return explicit;
+    return 'mira-robot@miraflores-shop.ru';
+  }
+
+  /** Дубль админу: создан / оплачен / отменён / возврат (не editable template). */
+  async sendAdminOrderNotify(
+    params: Omit<AdminOrderNotifyInput, 'siteUrl'>,
+  ): Promise<void> {
+    const to = this.resolveAdminOrderNotifyEmail();
+    if (!to) {
+      this.logger.warn(
+        `Admin order notify skipped (ORDER_ADMIN_NOTIFY_EMAIL empty) order=${params.orderNumber}`,
+      );
+      return;
+    }
+    const built = buildAdminOrderNotifyEmail({
+      ...params,
+      siteUrl: this.frontendPublicUrl(),
+    });
+    await this.send({ to, ...built });
+    this.logger.log(
+      `Admin order notify kind=${params.kind} order=${params.orderNumber} → ${to}`,
+    );
+  }
+
   private async sendBuilt(to: string, built: BuiltEmail): Promise<void> {
     await this.send({ to, ...built });
   }
@@ -230,20 +269,24 @@ export class MailService {
     orderNumber: string;
     total: number;
     reserveHours?: number;
+    /** Дата/время авто-отмены (МСК), для 3-го напоминания. */
+    cancelAtLabel?: string;
     /** Deep-link `/order/pay` (не confirmation URL ЮKassa). */
     payUrl?: string;
     /** Для сборки guest deep-link `/order/pay?...`. */
     orderId?: string;
     payToken?: string | null;
+    /** 1 = 5м, 2 = 24ч, 3 = 48ч — отдельный editable event key. */
+    stage?: 1 | 2 | 3;
   }): Promise<void> {
     const site = this.frontendPublicUrl();
-    const minutes = Number.parseInt(
-      this.config.get<string>('ORDER_AWAITING_TTL_MINUTES') || '60',
-      10,
-    );
+    const schedule = resolveAwaitingRemindSchedule({
+      get: (k) => this.config.get<string>(k),
+    });
     const reserveHours =
-      params.reserveHours ??
-      Math.max(1, Math.ceil((Number.isFinite(minutes) ? minutes : 60) / 60));
+      params.reserveHours ?? Math.max(1, Math.ceil(schedule.ttlMinutes / 60));
+    const stage = params.stage ?? 1;
+    const eventKey = awaitingPaymentEmailEventKey(stage);
 
     let payUrl = (params.payUrl || '').trim();
     const payToken = params.payToken?.trim() || '';
@@ -263,13 +306,14 @@ export class MailService {
       total: params.total,
       payUrl: payUrl || undefined,
       reserveHours,
+      cancelAtLabel: stage === 3 ? params.cancelAtLabel : undefined,
     });
-    const def = getEmailNotificationEventDef('order_awaiting_payment');
+    const def = getEmailNotificationEventDef(eventKey);
     await this.sendNotification(
       params.to,
-      'order_awaiting_payment',
+      eventKey,
       vars,
-      `order=${params.orderNumber}`,
+      `order=${params.orderNumber} stage=${stage}`,
       () =>
         renderEditableEmail({
           subjectTemplate: def.defaultSubject,
@@ -366,7 +410,11 @@ export class MailService {
     );
   }
 
-  async sendOrderCancelled(params: { to: string; orderNumber: string }): Promise<void> {
+  async sendOrderCancelled(params: {
+    to: string;
+    orderNumber: string;
+    cancelReason?: string;
+  }): Promise<void> {
     const site = this.frontendPublicUrl();
     await this.sendNotification(
       params.to,
@@ -374,6 +422,7 @@ export class MailService {
       baseOrderVars({
         orderNumber: params.orderNumber,
         siteUrl: site,
+        cancelReason: params.cancelReason,
       }),
       `order=${params.orderNumber}`,
       () =>

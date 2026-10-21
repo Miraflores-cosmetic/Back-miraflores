@@ -35,6 +35,7 @@ const ORDER_EVENT_TYPE_LABELS: Record<string, string> = {
   ADDRESS_UPDATED: 'Адрес изменён',
   ITEMS_UPDATED: 'Состав изменён',
   SURCHARGE_PAID: 'Доплата получена',
+  PAYMENT_REMIND: 'Напоминание об оплате',
 };
 
 export function orderStatusLabel(status: string): string {
