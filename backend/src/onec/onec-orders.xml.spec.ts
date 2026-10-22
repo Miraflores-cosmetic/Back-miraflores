@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { orderItemsForOnecExport } from './onec-orders.xml';
 
 describe('orderItemsForOnecExport', () => {
-  it('skips gratitude gifts and lines without onecId', () => {
+  it('includes gratitude gifts with onecId; skips lines without onecId', () => {
     const items = [
       {
         isGratitudeGift: true,
@@ -22,7 +22,6 @@ describe('orderItemsForOnecExport', () => {
     ] as Parameters<typeof orderItemsForOnecExport>[0];
 
     const out = orderItemsForOnecExport(items);
-    expect(out).toHaveLength(1);
-    expect(out[0]?.sku).toBe('4610505200353');
+    expect(out.map((i) => i.sku)).toEqual(['gift', '4610505200353']);
   });
 });

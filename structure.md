@@ -201,7 +201,7 @@ Prod URL: `https://miraflores-shop.com/api/v1/1c/exchange`
 | `ProductVariant.onecId` | UUID номенклатуры 1С | match offers + строки заказа в XML |
 | `ProductVariant.sku` | fallback в логах | — |
 | `Order.onecExportedAt` | флаг выгрузки | не дублировать в `sale/query` |
-| `OrderItem` без `onecId` / gratitude gift | — | не попадают в XML для 1С |
+| `OrderItem` без `onecId` у варианта | — | не попадают в XML для 1С (подарки благодарности — да, если есть `onecId`) |
 
 Строки заказа: `backend/src/onec/onec-orders.xml.ts` (доставка отдельной строкой без onecId).
 

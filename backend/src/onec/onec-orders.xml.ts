@@ -7,13 +7,11 @@ type OrderForXml = Order & {
   payments: Payment[];
 };
 
-/** Строки для 1С: без подарков благодарности и без номенклатуры без onecId. */
+/** Строки для 1С: нужны onecId (в т.ч. подарки благодарности). */
 export function orderItemsForOnecExport(
   items: OrderForXml['items'],
 ): OrderForXml['items'] {
-  return items.filter(
-    (item) => !item.isGratitudeGift && Boolean(item.variant?.onecId?.trim()),
-  );
+  return items.filter((item) => Boolean(item.variant?.onecId?.trim()));
 }
 
 function xmlEscape(s: string): string {
