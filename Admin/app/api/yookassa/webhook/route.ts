@@ -79,12 +79,14 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  const checkIpEnv = process.env.YOOKASSA_WEBHOOK_CHECK_IP;
   const checkIp =
-    process.env.YOOKASSA_WEBHOOK_CHECK_IP === '1' ||
-    process.env.YOOKASSA_WEBHOOK_CHECK_IP === 'true' ||
+    checkIpEnv === '1' ||
+    checkIpEnv === 'true' ||
     (process.env.NODE_ENV === 'production' &&
-      process.env.YOOKASSA_WEBHOOK_CHECK_IP !== '0' &&
-      process.env.YOOKASSA_WEBHOOK_CHECK_IP !== 'false');
+      checkIpEnv !== '0' &&
+      checkIpEnv !== 'false' &&
+      !expected);
 
   if (checkIp) {
     const ip = clientIp(request);
