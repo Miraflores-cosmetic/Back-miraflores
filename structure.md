@@ -203,7 +203,7 @@ Prod URL: `https://miraflores-shop.com/api/v1/1c/exchange`
 | `Order.onecExportedAt` | флаг выгрузки | не дублировать в `sale/query` |
 | `OrderItem` без `onecId` у варианта | — | не попадают в XML для 1С (подарки благодарности — да, если есть `onecId`) |
 
-Строки заказа: `backend/src/onec/onec-orders.xml.ts` (доставка отдельной строкой без onecId).
+Строки заказа: `backend/src/onec/onec-orders.xml.ts` — цены строк = оплата покупателя (промо/сертификат пропорционально, как в чеке ЮKassa); доставка отдельной строкой `DELIVERY`; `<Сумма>` документа = `order.total`.
 
 ### Утилиты
 

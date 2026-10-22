@@ -14,6 +14,70 @@ export function orderItemsForOnecExport(
   return items.filter((item) => Boolean(item.variant?.onecId?.trim()));
 }
 
+export type OnecPricedLine = {
+  item: OrderForXml['items'][number];
+  unitPrice: number;
+  lineTotal: number;
+};
+
+/**
+ * Цены строк для 1С = то, что заплатил покупатель.
+ * Промо + сертификат вычитаются пропорционально из товаров (как в чеке ЮKassa);
+ * доставка отдельной строкой; сумма товаров + доставка ≈ order.total.
+ * Бесплатные подарки (0 ₽) не трогаем. Инвариант: lineTotal = unitPrice × qty.
+ */
+export function pricedLinesForOnecExport(order: {
+  total: number;
+  shippingCost: number;
+  items: OrderForXml['items'];
+}): OnecPricedLine[] {
+  const exportItems = orderItemsForOnecExport(order.items);
+  const shipping =
+    order.shippingCost > 0 ? Math.max(0, Math.round(order.shippingCost)) : 0;
+  const goodsTarget = Math.max(0, Math.round(order.total) - shipping);
+
+  const paidIdx: number[] = [];
+  for (let i = 0; i < exportItems.length; i++) {
+    const it = exportItems[i]!;
+    if (it.unitPrice > 0 && it.qty > 0) paidIdx.push(i);
+  }
+
+  const out: OnecPricedLine[] = exportItems.map((item) => ({
+    item,
+    unitPrice: 0,
+    lineTotal: 0,
+  }));
+
+  if (paidIdx.length === 0) return out;
+
+  const linesSum = paidIdx.reduce((s, i) => {
+    const it = exportItems[i]!;
+    return s + it.unitPrice * it.qty;
+  }, 0);
+  const ratio = linesSum > 0 ? goodsTarget / linesSum : 1;
+
+  let running = 0;
+  for (let j = 0; j < paidIdx.length; j++) {
+    const idx = paidIdx[j]!;
+    const item = exportItems[idx]!;
+    const isLast = j === paidIdx.length - 1;
+    let unit: number;
+    if (isLast) {
+      unit = Math.max(
+        0,
+        Math.round((goodsTarget - running) / Math.max(1, item.qty)),
+      );
+    } else {
+      unit = Math.round(item.unitPrice * ratio);
+      if (unit <= 0 && goodsTarget > 0) unit = 1;
+      running += unit * item.qty;
+    }
+    out[idx] = { item, unitPrice: unit, lineTotal: unit * item.qty };
+  }
+
+  return out;
+}
+
 function xmlEscape(s: string): string {
   return s
     .replace(/&/g, '&amp;')
@@ -112,8 +176,8 @@ function buildDocument(order: OrderForXml): string {
   ].filter(Boolean);
   const address = xmlEscape(addressParts.join(', '));
 
-  const products = orderItemsForOnecExport(order.items)
-    .map((item) => {
+  const products = pricedLinesForOnecExport(order)
+    .map(({ item, unitPrice, lineTotal }) => {
       const onecId = item.variant!.onecId!.trim();
       const idXml = `<Ид>${xmlEscape(onecId)}</Ид>\n`;
       return (
@@ -121,9 +185,9 @@ function buildDocument(order: OrderForXml): string {
         `        ${idXml}` +
         `        <Артикул>${xmlEscape(item.sku)}</Артикул>\n` +
         `        <Наименование>${xmlEscape(item.title)}</Наименование>\n` +
-        `        <ЦенаЗаЕдиницу>${item.unitPrice}</ЦенаЗаЕдиницу>\n` +
+        `        <ЦенаЗаЕдиницу>${unitPrice}</ЦенаЗаЕдиницу>\n` +
         `        <Количество>${item.qty}</Количество>\n` +
-        `        <Сумма>${item.lineTotal}</Сумма>\n` +
+        `        <Сумма>${lineTotal}</Сумма>\n` +
         `        <Единица>шт</Единица>\n` +
         `      </Товар>`
       );
