@@ -3,6 +3,7 @@
 import { useMemo, useRef } from 'react';
 import { useOrderChatPanelVisible } from '@/hooks/useOrderChatPanelVisible';
 import { adminChatTargetKey } from '@/lib/orderChat/adminChatPaths';
+import { AdminCompactBtn } from '@/components/AdminCompactBtn/AdminCompactBtn';
 import { ChatWindow } from '@/components/ChatWindow/ChatWindow';
 import { useAdminOrderChat } from '@/hooks/useAdminOrderChat';
 import orderStyles from './orders.module.css';
@@ -48,6 +49,8 @@ export function AdminOrderSideChat({
     attachChatFiles,
     removePendingChatAttachment,
     deleteChatMessage,
+    markChatUnread,
+    canMarkChatUnread,
     chatHasOlderHistory,
     chatLoadingOlderHistory,
     loadOlderChatMessages,
@@ -90,6 +93,18 @@ export function AdminOrderSideChat({
         hideCloseButton
         title={inModal ? '' : 'Чат с клиентом'}
         titleTransform="none"
+        headerActions={
+          canMarkChatUnread ? (
+            <AdminCompactBtn
+              variant="outline"
+              type="button"
+              onClick={() => void markChatUnread()}
+              title="Отметить диалог непрочитанным"
+            >
+              Непрочитанным
+            </AdminCompactBtn>
+          ) : null
+        }
         messages={chatMessages}
         messageEmptyHint={chatLoading ? 'Загрузка…' : 'Сообщений пока нет'}
         inputPlaceholder="Напишите клиенту…"

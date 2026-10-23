@@ -399,6 +399,17 @@ export function OrderSupportChatClient({
                     <p className={styles.supportChatMainSubtitle}>{selected.userEmail}</p>
                   ) : null}
                 </div>
+                {chat.canMarkChatUnread ? (
+                  <AdminCompactBtn
+                    variant="outline"
+                    type="button"
+                    className={styles.supportChatMainAction}
+                    onClick={() => void chat.markChatUnread()}
+                    title="Отметить диалог непрочитанным"
+                  >
+                    Непрочитанным
+                  </AdminCompactBtn>
+                ) : null}
                 <AdminCompactBtnLink
                   href={`/admin/users/${selectedUserId}`}
                   variant="outline"

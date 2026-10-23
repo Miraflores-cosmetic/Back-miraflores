@@ -1,10 +1,13 @@
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsEnum,
+  IsInt,
   IsOptional,
   IsString,
   MaxLength,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -13,6 +16,19 @@ import {
   ORDER_CHAT_ATTACHMENTS_MAX,
   ORDER_CHAT_POST_BODY_MAX_CHARS,
 } from '../order-chat.constants';
+
+/** Staff POST …/chat/read: CAS по unreadGeneration; force — после ответа staff. */
+export class MarkChatReadDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  unreadGeneration?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  force?: boolean;
+}
 
 export class OrderChatAttachmentRefDto {
   @IsString()

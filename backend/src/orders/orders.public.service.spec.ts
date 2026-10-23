@@ -382,6 +382,86 @@ describe('OrdersPublicService', () => {
         qty: 1,
       });
     });
+
+    it('порог gratitude — сумма товаров после промокода', async () => {
+      order.findUnique.mockResolvedValue(null);
+      catalogPublic.syncCartLines.mockResolvedValue({
+        items: [
+          {
+            variantId: 'v1',
+            shadeId: null,
+            shadeName: null,
+            name: 'Крем',
+            variantName: '50 мл',
+            sku: 'sku-1',
+            price: 16000,
+            qty: 1,
+            productId: 'p1',
+            categoryId: 'c1',
+          },
+        ],
+      });
+      promoPublic.applyForCheckout.mockResolvedValue({
+        promoCodeId: 'promo-1',
+        code: 'SALE5000',
+        discountAmount: 5000,
+        affiliate: false,
+      });
+      settingsPublic.getApplicableGift.mockResolvedValue({ applicable: false });
+
+      const shippingQuotes = new ShippingQuoteService(config as never);
+      const lines = [{ variantId: 'v1', shadeId: null as string | null, qty: 1 }];
+      const shippingAddress = {
+        city: 'Москва',
+        address: 'Тверская 1',
+        comment:
+          '__VSP:carrier=cdek|lon=|lat=|pvz=MSK45|dropoff=pvz__\nТип доставки: СДЭК ПВЗ. Детали: x',
+        pvzCode: 'MSK45',
+      };
+      const { quote } = shippingQuotes.issue({
+        cost: 0,
+        method: 'CDEK',
+        addrHash: hashShippingAddress(shippingAddress, 'CDEK'),
+        linesHash: hashCartLines(lines),
+        goodsSubtotal: 11000,
+        freePvz: true,
+      });
+
+      order.create.mockImplementation(async ({ data }: { data: { items: { create: unknown[] } } }) => ({
+        id: 'ord-promo',
+        number: 'JCOS-PROMO',
+        status: OrderStatus.AWAITING_PAYMENT,
+        email: 'a@b.co',
+        phone: '+79001234567',
+        subtotal: 16000,
+        discountTotal: 5000,
+        giftCertificateAmount: 0,
+        giftCertificateCode: null,
+        total: 11000,
+        promoCode: 'SALE5000',
+        guestId: 'guest-123456',
+        items: data.items.create,
+      }));
+      tx.$queryRaw.mockResolvedValue([
+        { id: 'promo-1', active: true, maxUses: null, oneShot: false },
+      ]);
+
+      await service.create({
+        email: 'a@b.co',
+        phone: '+79001234567',
+        customerName: 'Иван',
+        guestId: 'guest-123456',
+        idempotencyKey: 'idem-gift-promo-1',
+        promoCode: 'SALE5000',
+        lines,
+        shippingMethod: 'CDEK',
+        shippingAddress,
+        shippingQuote: quote,
+      } as never);
+
+      // 16000 − 5000 promo → порог 11000, не сырой 16000
+      expect(settingsPublic.getApplicableGift).toHaveBeenCalledWith(11000);
+    });
   });
 
   describe('createPayment', () => {

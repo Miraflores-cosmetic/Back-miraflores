@@ -1662,9 +1662,13 @@ export class SettingsPublicService {
     return { content };
   }
 
-  async getApplicableGift(subtotal: number) {
-    const subtotalInt = Math.round(subtotal);
-    if (subtotalInt <= 0) {
+  /**
+   * Подарок по порогу суммы товаров после промокода (не сырой subtotal).
+   * Клиент передаёт ту же базу, что Nest на create (`payableAfterPromo`).
+   */
+  async getApplicableGift(goodsAfterPromo: number) {
+    const amountInt = Math.round(goodsAfterPromo);
+    if (amountInt <= 0) {
       return { applicable: false };
     }
 
@@ -1698,8 +1702,8 @@ export class SettingsPublicService {
 
     const matching = rules.filter((rule) => {
       if (!rule.variant.active || !rule.variant.product.active) return false;
-      if (subtotalInt < rule.minRub) return false;
-      if (rule.maxRub != null && subtotalInt > rule.maxRub) return false;
+      if (amountInt < rule.minRub) return false;
+      if (rule.maxRub != null && amountInt > rule.maxRub) return false;
       const available = Math.max(0, rule.variant.stock - rule.variant.stockReserve);
       if (available < 1) return false;
       return true;

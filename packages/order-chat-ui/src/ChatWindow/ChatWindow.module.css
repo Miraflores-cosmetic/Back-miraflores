@@ -180,6 +180,13 @@
   text-transform: none;
 }
 
+.headerActions {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .closeBtn {
   flex-shrink: 0;
   display: inline-flex;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChatAttachments } from '@/hooks/useChatAttachments';
 import type { ChatWindowMessage } from '@/components/ChatWindow/ChatWindow';
 import { DEFAULT_STAFF_AVATAR } from '@/app/(admin)/admin/settings/staff/StaffAvatarField';
@@ -9,6 +9,7 @@ import {
   adminChatMessagesListUrl,
   adminChatMessagesPath,
   adminChatReadPath,
+  adminChatUnreadPath,
   adminChatSocketJoinPayload,
   adminChatSocketLeavePayload,
   adminChatTargetKey,
@@ -16,6 +17,13 @@ import {
   adminChatUploadRevokePath,
   type AdminOrderChatTarget,
 } from '@/lib/orderChat/adminChatPaths';
+import {
+  publishAdminChatSuppressRead,
+  readAdminChatSuppressRead,
+  readAdminChatUnreadGeneration,
+  subscribeAdminChatSuppressRead,
+  writeAdminChatUnreadGeneration,
+} from '@/lib/orderChat/adminChatSuppressRead';
 import {
   CHAT_MESSAGES_PAGE_DEFAULT,
   ORDER_CHAT_ATTACHMENT_REFS_PAYLOAD_MAX_CHARS,
@@ -126,36 +134,188 @@ export function useAdminOrderChat(opts: {
   const [sending, setSending] = useState(false);
   const [hasOlderHistory, setHasOlderHistory] = useState(false);
   const [loadingOlderHistory, setLoadingOlderHistory] = useState(false);
+  /** API вернул changed:false — прячем кнопку до появления customer-сообщений. */
+  const [markUnreadKnownEmpty, setMarkUnreadKnownEmpty] = useState(false);
   const viewerRef = useRef<string | null>(staffUserId ?? null);
   const conversationIdRef = useRef<string | null>(null);
   const messagesRef = useRef<ChatWindowMessage[]>([]);
   const panelVisibleRef = useRef(panelVisible);
   panelVisibleRef.current = panelVisible;
   const markReadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * Sticky unread: после «Непрочитанным» не слать /read, пока staff не ответит.
+   * localStorage + BroadcastChannel (cold-open вкладки + live peers с тем же тредом).
+   * Не снимать от IntersectionObserver / tab blur / panelVisible.
+   */
+  const suppressAutoMarkReadRef = useRef(false);
+  /** Инвалидирует in-flight /read (поколение + AbortController). */
+  const markReadEpochRef = useRef(0);
+  const markReadAbortRef = useRef<AbortController | null>(null);
+  const markReadInFlightRef = useRef<Promise<void>>(Promise.resolve());
 
   viewerRef.current = staffUserId ?? viewerRef.current;
 
-  const markReadIfVisible = useCallback(async (refreshLists = true) => {
-    if (!panelVisibleRef.current) return;
+  const setSuppressAutoMarkRead = useCallback(
+    (targetKeyFor: string, on: boolean, unreadGeneration?: number) => {
+      suppressAutoMarkReadRef.current = on;
+      if (!targetKeyFor) return;
+      if (on) {
+        const gen =
+          unreadGeneration != null
+            ? unreadGeneration
+            : readAdminChatUnreadGeneration(targetKeyFor);
+        publishAdminChatSuppressRead({
+          type: 'set',
+          targetKey: targetKeyFor,
+          unreadGeneration: gen,
+        });
+      } else {
+        publishAdminChatSuppressRead({ type: 'clear', targetKey: targetKeyFor });
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    suppressAutoMarkReadRef.current = targetKey
+      ? readAdminChatSuppressRead(targetKey)
+      : false;
+    setMarkUnreadKnownEmpty(false);
+    markReadEpochRef.current += 1;
+    markReadAbortRef.current?.abort();
+    markReadAbortRef.current = null;
+    if (markReadTimerRef.current != null) {
+      clearTimeout(markReadTimerRef.current);
+      markReadTimerRef.current = null;
+    }
+  }, [targetKey]);
+
+  useEffect(() => {
+    return subscribeAdminChatSuppressRead((msg) => {
+      if (msg.targetKey !== targetKey) return;
+      suppressAutoMarkReadRef.current = msg.type === 'set';
+      if (msg.type === 'set') {
+        writeAdminChatUnreadGeneration(msg.targetKey, msg.unreadGeneration);
+        markReadEpochRef.current += 1;
+        markReadAbortRef.current?.abort();
+        markReadAbortRef.current = null;
+        if (markReadTimerRef.current != null) {
+          clearTimeout(markReadTimerRef.current);
+          markReadTimerRef.current = null;
+        }
+      }
+    });
+  }, [targetKey]);
+
+  const markReadIfVisible = useCallback(async (refreshLists = true, force = false) => {
+    if (!panelVisibleRef.current && !force) return;
+    if (!force && targetKey && readAdminChatSuppressRead(targetKey)) {
+      suppressAutoMarkReadRef.current = true;
+    }
+    if (!force && suppressAutoMarkReadRef.current) return;
     const t = targetRef.current;
     if (!t) return;
-    await fetch(adminChatReadPath(t), {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: '{}',
-    }).catch(() => undefined);
-    if (refreshLists) dispatchAdminChatUnreadRefresh();
+
+    const epoch = markReadEpochRef.current;
+    const expectedGen = targetKey ? readAdminChatUnreadGeneration(targetKey) : 0;
+    markReadAbortRef.current?.abort();
+    const ac = new AbortController();
+    markReadAbortRef.current = ac;
+
+    const run = (async () => {
+      try {
+        const res = await fetch(adminChatReadPath(t), {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(
+            force
+              ? { force: true }
+              : { unreadGeneration: expectedGen },
+          ),
+          signal: ac.signal,
+        });
+        void res;
+      } catch {
+        /* abort / network — ок */
+      } finally {
+        if (markReadAbortRef.current === ac) markReadAbortRef.current = null;
+      }
+      // Поздний /read после «Непрочитанным» не трогает UI; Nest CAS отсекает на сервере.
+      if (epoch !== markReadEpochRef.current || (!force && suppressAutoMarkReadRef.current)) {
+        return;
+      }
+      if (refreshLists) dispatchAdminChatUnreadRefresh();
+    })();
+
+    markReadInFlightRef.current = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    await run;
   }, [targetKey]);
 
   const scheduleMarkReadDebounced = useCallback(() => {
     if (!panelVisibleRef.current) return;
+    if (targetKey && readAdminChatSuppressRead(targetKey)) {
+      suppressAutoMarkReadRef.current = true;
+    }
+    if (suppressAutoMarkReadRef.current) return;
     if (markReadTimerRef.current != null) clearTimeout(markReadTimerRef.current);
     markReadTimerRef.current = setTimeout(() => {
       markReadTimerRef.current = null;
       void markReadIfVisible();
     }, 450);
-  }, [markReadIfVisible]);
+  }, [markReadIfVisible, targetKey]);
+
+  const markUnread = useCallback(async () => {
+    const t = targetRef.current;
+    if (!t || !targetKey) return false;
+
+    // Sticky + abort in-flight /read до POST /unread; кросс-вкладки через BC.
+    // await ниже — только клиентский fetch (Nest /unread не ждёт settle).
+    // Generation уточним после ответа; CAS unreadGeneration на сервере.
+    setSuppressAutoMarkRead(targetKey, true);
+    markReadEpochRef.current += 1;
+    if (markReadTimerRef.current != null) {
+      clearTimeout(markReadTimerRef.current);
+      markReadTimerRef.current = null;
+    }
+    markReadAbortRef.current?.abort();
+    markReadAbortRef.current = null;
+    await markReadInFlightRef.current;
+
+    try {
+      const res = await fetch(adminChatUnreadPath(t), {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      if (!res.ok) throw new Error(await readUpstreamJsonErrorMessage(res));
+      const body = (await res.json().catch(() => null)) as {
+        ok?: boolean;
+        changed?: boolean;
+        unreadGeneration?: number;
+      } | null;
+      if (body?.changed === false) {
+        setSuppressAutoMarkRead(targetKey, false);
+        setMarkUnreadKnownEmpty(true);
+        return false;
+      }
+      const gen =
+        typeof body?.unreadGeneration === 'number' ? body.unreadGeneration : undefined;
+      if (gen != null) {
+        setSuppressAutoMarkRead(targetKey, true, gen);
+      }
+      dispatchAdminChatUnreadRefresh();
+      return true;
+    } catch (e) {
+      setSuppressAutoMarkRead(targetKey, false);
+      setError(e instanceof Error ? e.message : 'Не удалось отметить непрочитанным');
+      return false;
+    }
+  }, [targetKey, setSuppressAutoMarkRead]);
 
   const revokeUploadedFile = useCallback(
     async (fileUrl: string) => {
@@ -578,7 +738,10 @@ export function useAdminOrderChat(opts: {
           ];
         });
         clearPendingAttachments();
-        await markReadIfVisible(false);
+        if (targetKey) setSuppressAutoMarkRead(targetKey, false);
+        else suppressAutoMarkReadRef.current = false;
+        // force: намеренный read после ответа — CAS не должен блокировать.
+        await markReadIfVisible(false, true);
         return true;
       } catch (e) {
         setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
@@ -588,7 +751,13 @@ export function useAdminOrderChat(opts: {
         setSending(false);
       }
     },
-    [targetKey, getReadyAttachments, clearPendingAttachments, markReadIfVisible],
+    [
+      targetKey,
+      getReadyAttachments,
+      clearPendingAttachments,
+      markReadIfVisible,
+      setSuppressAutoMarkRead,
+    ],
   );
 
   const deleteMessage = useCallback(
@@ -616,6 +785,16 @@ export function useAdminOrderChat(opts: {
     [targetKey],
   );
 
+  /** Кнопка «Непрочитанным»: есть сообщения клиента (в ленте или в более старой истории). */
+  const canMarkChatUnread = useMemo(() => {
+    const hasCustomer = messages.some(
+      (m) => m.ocAuthorRole === 'CUSTOMER' && !m.isDeleted,
+    );
+    if (hasCustomer) return true;
+    if (markUnreadKnownEmpty) return false;
+    return hasOlderHistory;
+  }, [messages, hasOlderHistory, markUnreadKnownEmpty]);
+
   return {
     chatMessages: messages,
     chatLoading: loading,
@@ -630,6 +809,8 @@ export function useAdminOrderChat(opts: {
     attachChatFiles,
     removePendingChatAttachment,
     deleteChatMessage: deleteMessage,
+    markChatUnread: markUnread,
+    canMarkChatUnread,
     chatHasOlderHistory: hasOlderHistory,
     chatLoadingOlderHistory: loadingOlderHistory,
     loadOlderChatMessages,

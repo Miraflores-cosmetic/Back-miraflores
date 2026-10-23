@@ -53,7 +53,9 @@ ORDER_CHAT_SOCKET_CORS_ORIGINS=https://miraflores-shop.com,https://www.miraflore
 - RLS на `ChatConversation`, `ChatMessage`, `ChatAttachment`, `ChatReadState`.
 - Подписанные URL вложений (`/api/v1/order-chat/files/...`); nginx не отдаёт `/uploads/chat/` напрямую.
 - Admin BFF: проверка `Origin` на мутирующих запросах; multipart upload **стримится** в API (без двойной буферизации).
-- `@UseGuards(ThrottlerGuard)` на контроллерах чата + `@Throttle` на POST/upload; email staff→customer не чаще 10 мин / беседа, если клиент не online в WS.
+- `@UseGuards(ThrottlerGuard)` на контроллерах чата + `@Throttle` на POST/upload.
+- Email: staff→customer (`order_chat_reply` / `order_chat_support_reply`) и customer→admin ops (`ORDER_ADMIN_NOTIFY_EMAIL`, default `mira-robot@…`) — throttle `ORDER_CHAT_EMAIL_MIN_INTERVAL_MS` (claim; release при SMTP fail / нет получателя / пустой ops-email / CMS `skipped_disabled`). Без online-skip.
+- Staff: `POST …/chat/unread` — отметить непрочитанным (кнопка скрыта без customer-сообщений / `changed:false`). Sticky suppress auto-`/read` (**localStorage** + BroadcastChannel — cold-open вкладки; не от `panelVisible`) до ответа staff; BFF пробрасывает AbortSignal; Nest CAS `ChatReadState.unreadGeneration` — поздний `/read` не перетирает sticky.
 - Orphan-upload sweep на диске **отключён** до хранения `storageKey` в БД (см. `order-chat-retention.worker`).
 - WS-клиент: один сокет на variant; JWT только на handshake (`auth` callback); TTL refresh обновляет метаданные без recreate; join с ack + догрузка `after`.
 - After-commit (WS/SMTP) — `setImmediate`, не блокирует POST.

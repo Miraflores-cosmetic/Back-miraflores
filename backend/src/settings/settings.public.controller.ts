@@ -57,6 +57,10 @@ export class SettingsPublicController {
     return this.settings.getQuizContentPublic();
   }
 
+  /**
+   * Query `subtotal` — сумма товаров **после промокода** (совпадает с Nest create).
+   * Имя параметра историческое; клиент шлёт payableAfterPromo.
+   */
   @Get('applicable-gift')
   getApplicableGift(@Query('subtotal') subtotalRaw?: string) {
     if (subtotalRaw == null || subtotalRaw.trim() === '') {

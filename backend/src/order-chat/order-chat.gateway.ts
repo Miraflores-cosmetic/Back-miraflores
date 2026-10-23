@@ -22,8 +22,7 @@ import {
   roomUserChatSessions,
 } from './order-chat.constants';
 import { OrderChatService } from './order-chat.service';
-import type { ChatCustomerPresenceContext, OrderChatMessageOut } from './order-chat.types';
-import { UserRole } from '@prisma/client';
+import type { OrderChatMessageOut } from './order-chat.types';
 import { getOrderChatWebSocketCorsOptions } from './order-chat-ws-cors';
 import { ORDER_CHAT_WS_JWT_AUD } from './order-chat-ws-token';
 
@@ -167,22 +166,5 @@ export class OrderChatGateway implements OnGatewayInit, OnGatewayConnection {
     for (const s of sockets) {
       s.disconnect(true);
     }
-  }
-
-  async isCustomerChatOnline(ctx: ChatCustomerPresenceContext): Promise<boolean> {
-    if (!this.server) return false;
-    const isBuyer = (role: unknown) => role === UserRole.USER || role === 'USER';
-
-    if (ctx.kind === 'SUPPORT') {
-      const sockets = await this.server.in(roomSupportChat(ctx.customerUserId)).fetchSockets();
-      return sockets.some(
-        (s) => isBuyer(s.data.role) && String(s.data.userId ?? '') === ctx.customerUserId,
-      );
-    }
-
-    const sockets = await this.server.in(roomOrderChat(ctx.orderId)).fetchSockets();
-    return sockets.some(
-      (s) => isBuyer(s.data.role) && String(s.data.userId ?? '') === ctx.customerUserId,
-    );
   }
 }

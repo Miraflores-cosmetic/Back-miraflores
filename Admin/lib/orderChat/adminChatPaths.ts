@@ -39,6 +39,15 @@ export function adminChatReadPath(target: AdminOrderChatTarget): string {
   return adminBackendPath(`orders/admin/chat/users/${encodeURIComponent(target.userId)}/read`);
 }
 
+export function adminChatUnreadPath(target: AdminOrderChatTarget): string {
+  if (target.kind === 'order') {
+    return adminBackendPath(`orders/admin/${encodeURIComponent(target.orderId)}/chat/unread`);
+  }
+  return adminBackendPath(
+    `orders/admin/chat/users/${encodeURIComponent(target.userId)}/unread`,
+  );
+}
+
 export function adminChatUploadPath(target: AdminOrderChatTarget): string {
   if (target.kind === 'order') {
     return adminBackendPath(`orders/admin/${encodeURIComponent(target.orderId)}/chat/upload`);

@@ -11,7 +11,8 @@ export const ORDER_CHAT_ATTACHMENTS_MAX = 12;
 export const ORDER_CHAT_ATTACHMENT_REFS_PAYLOAD_MAX_CHARS = 65536;
 export const ORDER_CHAT_UPLOAD_MAX_FILE_BYTES = 35 * 1024 * 1024;
 export const ORDER_CHAT_DELETE_WITHIN_MS = 24 * 60 * 60 * 1000;
-export const ORDER_CHAT_STAFF_REPLY_EMAIL_MIN_INTERVAL_MS = 10 * 60 * 1000;
+/** Throttle писем чата (staff→customer и customer→admin ops), мс. */
+export const ORDER_CHAT_EMAIL_MIN_INTERVAL_MS = 10 * 60 * 1000;
 
 export type OrderChatVariant = 'account' | 'admin';
 

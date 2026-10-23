@@ -871,6 +871,8 @@ model ChatConversation {
   user              User?                @relation("UserSupportChat", fields: [userId], references: [id], onDelete: Cascade)
   retentionPurgesAt DateTime?
   lastStaffReplyEmailAt DateTime?
+  /// Throttle ops-письма админу при входящих сообщениях клиента.
+  lastCustomerInboundAdminEmailAt DateTime?
   createdAt         DateTime             @default(now())
   updatedAt         DateTime             @updatedAt
 
@@ -919,6 +921,8 @@ model ChatReadState {
   userId         String
   user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   lastReadAt     DateTime         @default(now())
+  /// CAS: /unread инкрементирует; /read с устаревшим expected не применяет lastReadAt.
+  unreadGeneration Int            @default(0)
 
   @@id([conversationId, userId])
 }

@@ -18,7 +18,11 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { JwtPayload } from '../common/decorators/current-user.decorator';
-import { PostOrderChatMessageDto, RevokeChatUploadDto } from './dto/order-chat.dto';
+import {
+  MarkChatReadDto,
+  PostOrderChatMessageDto,
+  RevokeChatUploadDto,
+} from './dto/order-chat.dto';
 import {
   ORDER_CHAT_UPLOAD_MAX_FILE_BYTES,
   chatUploadKeyPrefixOrder,
@@ -117,10 +121,22 @@ export class OrderChatAdminController {
   }
 
   @Post('chat/users/:userId/read')
-  async supportRead(@CurrentUser() user: JwtPayload, @Param('userId') userId: string) {
+  async supportRead(
+    @CurrentUser() user: JwtPayload,
+    @Param('userId') userId: string,
+    @Body() dto?: MarkChatReadDto,
+  ) {
     await this.chat.assertStaffCanAccessSupport(user.sub, user.role);
-    await this.chat.markSupportRead(userId, user.sub, user.role);
-    return { ok: true as const };
+    return this.chat.markSupportRead(userId, user.sub, user.role, {
+      expectedUnreadGeneration: dto?.unreadGeneration,
+      force: dto?.force,
+    });
+  }
+
+  @Post('chat/users/:userId/unread')
+  async supportUnread(@CurrentUser() user: JwtPayload, @Param('userId') userId: string) {
+    await this.chat.assertStaffCanAccessSupport(user.sub, user.role);
+    return this.chat.markSupportUnread(userId, user.sub, user.role);
   }
 
   @Post('chat/users/:userId/upload')
@@ -206,10 +222,22 @@ export class OrderChatAdminController {
   }
 
   @Post(':orderId/chat/read')
-  async orderRead(@CurrentUser() user: JwtPayload, @Param('orderId') orderId: string) {
+  async orderRead(
+    @CurrentUser() user: JwtPayload,
+    @Param('orderId') orderId: string,
+    @Body() dto?: MarkChatReadDto,
+  ) {
     await this.chat.assertStaffCanAccessOrder(orderId, user.sub, user.role);
-    await this.chat.markOrderRead(orderId, user.sub, user.role);
-    return { ok: true as const };
+    return this.chat.markOrderRead(orderId, user.sub, user.role, {
+      expectedUnreadGeneration: dto?.unreadGeneration,
+      force: dto?.force,
+    });
+  }
+
+  @Post(':orderId/chat/unread')
+  async orderUnreadMark(@CurrentUser() user: JwtPayload, @Param('orderId') orderId: string) {
+    await this.chat.assertStaffCanAccessOrder(orderId, user.sub, user.role);
+    return this.chat.markOrderUnread(orderId, user.sub, user.role);
   }
 
   @Post(':orderId/chat/upload')

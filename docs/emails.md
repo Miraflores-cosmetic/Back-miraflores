@@ -70,6 +70,7 @@ Default: `mira-robot@miraflores-shop.ru`. Пустая строка в env = в�
 | Заказ оплачен | вместе с `order_paid` покупателю | номер, ФИО, email, тел, сумма |
 | Заказ отменён | вместе с `order_cancelled` (TTL/admin/ЛК; **не** abandon) | номер, ФИО, email, тел, сумма |
 | Возврат | вместе с `order_refund` | номер, ФИО, email, тел, сумма (+ сумма возврата) |
+| Сообщение в чате | клиент написал в чат заказа / поддержки | текст, клиент, ссылка в админку (throttle `ORDER_CHAT_EMAIL_MIN_INTERVAL_MS`) |
 
 ### Abandon checkout — без письма (осознанно, не регрессить)
 
@@ -107,7 +108,9 @@ Default: `mira-robot@miraflores-shop.ru`. Пустая строка в env = в�
 | `order_chat_reply` | ответ staff в чате **заказа** | покупатель |
 | `order_chat_support_reply` | ответ staff в общем чате поддержки | покупатель |
 
-**Не** в реестре (hardcoded в `MailService`): registration OTP, password reset (buyer), staff welcome / staff password reset, OPS-алерты (`sendRaw` / `notifyCustomer`).
+Входящие сообщения **клиента** в чат → ops-дубль админу (`sendAdminChatNotify`, не editable). Ответы staff → editable `order_chat_*` покупателю (throttle общий).
+
+**Не** в реестре (hardcoded в `MailService`): registration OTP, password reset (buyer), staff welcome / staff password reset, OPS-алерты (`sendRaw` / `notifyCustomer` / `sendAdminChatNotify`).
 
 ### Синтаксис шаблона
 

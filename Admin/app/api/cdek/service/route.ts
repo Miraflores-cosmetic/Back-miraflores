@@ -194,6 +194,34 @@ export async function GET(req: NextRequest) {
 // DELIVERY POINTS (PARALLEL + FAST)
 // ============================================
 
+/** СДЭК отдаёт списки постранично; checkout раньше брал size=150 — в Москве ~450 ПВЗ. */
+const CDEK_DP_PAGE_SIZE = 500
+const CDEK_DP_MAX_PAGES = 20
+
+function parseDeliveryPointsBody(data: unknown): any[] {
+  if (Array.isArray(data)) return data
+  if (data && typeof data === 'object' && Array.isArray((data as { items?: unknown }).items)) {
+    return (data as { items: any[] }).items
+  }
+  return []
+}
+
+async function fetchAllDeliveryPoints(
+  params: Record<string, string | number>,
+): Promise<any[]> {
+  const all: any[] = []
+  for (let page = 0; page < CDEK_DP_MAX_PAGES; page++) {
+    const res = await cdekRequest('deliverypoints', {
+      params: { ...params, size: CDEK_DP_PAGE_SIZE, page },
+    })
+    if (!res.ok) break
+    const list = parseDeliveryPointsBody(await res.json())
+    all.push(...list)
+    if (list.length < CDEK_DP_PAGE_SIZE) break
+  }
+  return all
+}
+
 async function handleDeliveryPoints(searchParams: URLSearchParams) {
   const cityCode = searchParams.get('city_code')
   const cityUuid = searchParams.get('city_uuid')
@@ -205,50 +233,52 @@ async function handleDeliveryPoints(searchParams: URLSearchParams) {
   // Если нет ни города, ни координат — возвращаем пустоту
   if (!cityCode && !cityUuid && !(latitude && longitude)) return json([])
 
-  const requests: Promise<Response>[] = []
+  const tasks: Promise<any[]>[] = []
 
-  // 1. Поиск по коду города (приоритет для Москвы и некоторых других)
+  // 1. По коду города — все страницы (Москва и др.)
   if (cityCode) {
-    requests.push(cdekRequest('deliverypoints', { params: { city_code: cityCode, size } }))
-    requests.push(cdekRequest('deliverypoints', { params: { city_code: cityCode, type: 'PVZ', size } }))
-    requests.push(cdekRequest('deliverypoints', { params: { city_code: cityCode, type: 'POSTAMAT', size } }))
+    tasks.push(fetchAllDeliveryPoints({ city_code: cityCode }))
   }
 
-  // 2. Поиск по UUID города (приоритет для ЕКБ и многих региональных городов)
-  // ВАЖНО: Делаем ОТДЕЛЬНЫМ запросом, так как совмещение с city_code может давать 0
+  // 2. По UUID города (ЕКБ и регионы; не смешивать с city_code в одном запросе СДЭК)
   if (cityUuid) {
-    requests.push(cdekRequest('deliverypoints', { params: { city_uuid: cityUuid, size } }))
+    tasks.push(fetchAllDeliveryPoints({ city_uuid: cityUuid }))
   }
 
-  // 3. Поиск по координатам (только если переданы и нет кодов города, либо как фоллбек)
-  // Примечание: API СДЭК v2 официально требует radius при передаче координат
+  // 3. По координатам — обычно мало точек; 1–2 страницы достаточно
   if (latitude && longitude) {
-    requests.push(cdekRequest('deliverypoints', {
-      params: {
-        latitude,
-        longitude,
-        radius: radius || 50,
-        size
-      }
-    }))
+    const geoSize = Math.min(Math.max(Number.isFinite(size) ? size : 150, 1), CDEK_DP_PAGE_SIZE)
+    tasks.push(
+      (async () => {
+        const all: any[] = []
+        for (let page = 0; page < 5; page++) {
+          const res = await cdekRequest('deliverypoints', {
+            params: {
+              latitude,
+              longitude,
+              radius: radius || 50,
+              size: geoSize,
+              page,
+            },
+          })
+          if (!res.ok) break
+          const list = parseDeliveryPointsBody(await res.json())
+          all.push(...list)
+          if (list.length < geoSize) break
+        }
+        return all
+      })(),
+    )
   }
 
-  const results = await Promise.allSettled(requests)
-  const all: any[] = []
-
-  for (const r of results) {
-    if (r.status === 'fulfilled' && r.value.ok) {
-      const data = await r.value.json()
-      const list = Array.isArray(data) ? data : data.items || []
-      all.push(...list)
-    }
-  }
+  const chunks = await Promise.all(tasks)
+  const all = chunks.flat()
 
   // Дедупликация по коду или UUID самого ПВЗ
-  const uniq = new Map()
+  const uniq = new Map<string, any>()
   for (const p of all) {
     const key = p.code || p.uuid
-    if (key) uniq.set(key, p)
+    if (key) uniq.set(String(key), p)
   }
 
   return json([...uniq.values()])

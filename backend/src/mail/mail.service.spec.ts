@@ -97,6 +97,23 @@ describe('MailService templated customer mail', () => {
     );
   });
 
+  it('sendAdminChatNotify → mira-robot с текстом сообщения', async () => {
+    const ok = await svc.sendAdminChatNotify({
+      kind: 'support',
+      messageText: 'Помогите с заказом',
+      customerEmail: 'u@x.co',
+      customerName: 'Анна',
+    });
+    expect(ok).toBe(true);
+    expect(sendSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: 'mira-robot@miraflores-shop.ru',
+        subject: expect.stringContaining('поддержки'),
+        text: expect.stringContaining('Помогите с заказом'),
+      }),
+    );
+  });
+
   it('ORDER_ADMIN_NOTIFY_EMAIL пустой → skip admin notify', async () => {
     config.get.mockImplementation((key: string) => {
       if (key === 'ORDER_ADMIN_NOTIFY_EMAIL') return '';
@@ -115,6 +132,30 @@ describe('MailService templated customer mail', () => {
       total: 1,
     });
     expect(sendSpy).not.toHaveBeenCalled();
+    const chatOk = await svc.sendAdminChatNotify({
+      kind: 'order',
+      messageText: 'hi',
+      orderNumber: 'MF-0',
+      orderId: 'o1',
+    });
+    expect(chatOk).toBe(false);
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it('order_chat_reply выключен → false (skipped_disabled)', async () => {
+    emailNotifications.buildForEvent.mockResolvedValue(null);
+    const ok = await svc.sendOrderChatReply({
+      to: 'c@x.co',
+      orderId: 'o1',
+      orderNumber: 'MF-1',
+      snippet: 'Ответ',
+    });
+    expect(ok).toBe(false);
+    expect(sendSpy).not.toHaveBeenCalled();
+    expect(emailNotifications.recordSendPath).toHaveBeenCalledWith(
+      'order_chat_reply',
+      'skipped_disabled',
+    );
   });
 
   it('awaiting_payment собирает guest pay deep-link', async () => {

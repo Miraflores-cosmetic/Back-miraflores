@@ -138,9 +138,22 @@ Miraflores 3.0/
 - **Claim SQL:** только due. **Expire batch 50** + `ORDER_AWAITING_EXPIRE_BACKLOG_ALERT`.
 - **Remind backlog:** `ORDER_PAY_REMIND_BACKLOG_ALERT` (default 100).
 - Checkout `abandon` — без email; pay_url ≠ profile; TTL/admin — `order_cancelled`.
-- **Дубли админу:** `ORDER_ADMIN_NOTIFY_EMAIL` (default `mira-robot@…`) — создан / оплачен / отменён / возврат.
+- **Дубли админу:** `ORDER_ADMIN_NOTIFY_EMAIL` (default `mira-robot@…`) — создан / оплачен / отменён / возврат; тот же env — inbound chat (см. ниже).
 
 Шаблоны писем: Админка → Настройки → Email. Подробно: [docs/emails.md](./docs/emails.md).
+
+### Order chat: inbound mail + sticky unread
+
+Полный контракт: [docs/order-chat.md](./docs/order-chat.md). Ops-кратко:
+
+| Направление | Куда | Когда | Throttle / skip |
+|-------------|------|-------|-----------------|
+| Клиент → ops | `ORDER_ADMIN_NOTIFY_EMAIL` (plain, не CMS) | новое сообщение в чате заказа / поддержки | `ORDER_CHAT_EMAIL_MIN_INTERVAL_MS`; **без claim** если email пуст; release при SMTP fail |
+| Staff → клиент | CMS `order_chat_reply` / `order_chat_support_reply` | ответ сотрудника | тот же interval; **release** при missing email / `skipped_disabled` / SMTP fail; **без online-skip** |
+
+- Staff «Непрочитанным»: `POST …/chat/unread` + CAS `ChatReadState.unreadGeneration`.
+- Sticky suppress auto-`/read`: **localStorage** + BroadcastChannel (cold-open вкладка не шлёт `/read`); **не** привязан к `panelVisible`.
+- Клиентский `await` in-flight `/read` перед `/unread` — только browser fetch; Nest не ждёт settle.
 
 ### Next Admin (`/admin` + BFF)
 
@@ -419,7 +432,7 @@ On-demand: `POST /api/admin/revalidate-catalog`.
 | **F1** | Избранное | `add` / `replace` — только `requireActiveVariant` (active + не excludeFromCatalog); **visibility не проверяется**. `listIds` — все variantId. **Фильтр visibility только в `listItems`**. | На add/replace — `filterVisibleVariantIds` для контекста покупателя; опционально чистить «невидимые» при listIds или lazy purge |
 | **A1** | Admin ACL + UX | Visibility группы — ✅ вкладка `/admin/settings/user-groups/[id]` (`users` ACL). Pickers — ✅ reuse `Discount*PickerModal` + `VariantPickerModal`. Глобальный `catalog/admin/visibility` — API есть, **UI нет**. | Общий **VisibilityRulesEditor** + global UI под `catalog` ACL; group tab — thin wrapper (`groupId` preset). Category prices list — paginate при >~50 |
 | **O1** | Admin заказ | `OrderItem.baseUnitPrice` / `groupUnitPrice` пишутся на create (`orders.public.service`); **admin serializer не отдаёт** → UI только `unitPrice` (финал после кампаний). `pricingGroupName` на заказе — ✅ | Строки заказа в admin: base / group / charged; tooltip «групповая скидка»; опционально buyer order detail |
-| **G1** | Cart sync + gratitude | Catalog lines: `baseUnitPrice` + `groupUnitPrice` в `cart/sync`. **Gift denom** — только `price`/`listPrice`, без snapshot-полей. **Gratitude** attach на create — `price: 0`, без base/group snapshot; `getApplicableGift` — subtotal + OOS, **без commerce ctx / visibility** | Gift lines — те же snapshot-поля где уместно; gratitude — catalog value snapshot + политика: skip если variant hidden для buyer ctx; preview `applicable-gift` с JWT |
+| **G1** | Cart sync + gratitude | Catalog lines: `baseUnitPrice` + `groupUnitPrice` в `cart/sync`. **Gift denom** — только `price`/`listPrice`, без snapshot-полей. **Gratitude** attach на create — `price: 0`, без base/group snapshot; `getApplicableGift` — сумма товаров **после промокода** (`payableAfterPromo`) + OOS, **без commerce ctx / visibility**; Front cart/checkout шлёт ту же базу | Gift lines — те же snapshot-поля где уместно; gratitude — catalog value snapshot + политика: skip если variant hidden для buyer ctx; preview `applicable-gift` с JWT |
 
 **F1** files: `backend/src/account/favorites.service.ts` (`add`, `replace` vs `listItems`).
 

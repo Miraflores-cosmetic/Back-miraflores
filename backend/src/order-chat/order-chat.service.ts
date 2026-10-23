@@ -34,7 +34,7 @@ import {
   ORDER_CHAT_ATTACHMENTS_MAX,
   ORDER_CHAT_DELETE_WITHIN_MS,
   ORDER_CHAT_POST_BODY_MAX_CHARS,
-  ORDER_CHAT_STAFF_REPLY_EMAIL_MIN_INTERVAL_MS,
+  ORDER_CHAT_EMAIL_MIN_INTERVAL_MS,
   chatUploadKeyPrefixOrder,
   chatUploadKeyPrefixSupport,
 } from './order-chat.constants';
@@ -44,9 +44,9 @@ import {
   resolveChatFileSigningSecret,
   signChatStorageKey,
 } from './chat-file-url';
-import type { ChatCustomerPresenceContext } from './order-chat.types';
 import type {
   AdminSupportThreadsOut,
+  ChatCustomerEmailContext,
   ChatCustomerThreadsOut,
   ChatThreadListItem,
   OrderChatMessageOut,
@@ -98,7 +98,9 @@ const TERMINAL_ORDER_STATUSES: OrderStatus[] = [
   OrderStatus.REFUNDED,
 ];
 
-type ChatCustomerEmailContext = ChatCustomerPresenceContext;
+type ChatEmailThrottleField =
+  | 'lastStaffReplyEmailAt'
+  | 'lastCustomerInboundAdminEmailAt';
 
 @Injectable()
 export class OrderChatService {
@@ -670,8 +672,16 @@ export class OrderChatService {
         this.gateway?.broadcastStaffInboxUpdated();
       }
     });
+    const snippet = chatMessageSnippet(body, att.length);
+    const messageTextForAdmin = body.trim()
+      ? body.trim().slice(0, 4000)
+      : snippet;
+    if (authorRole === ChatMessageAuthorRole.CUSTOMER && emailContext) {
+      scheduleAfterRlsCommitWithBypass(this.prisma, () =>
+        this.notifyAdminByEmail(conversationId, emailContext, messageTextForAdmin),
+      );
+    }
     if (authorRole === ChatMessageAuthorRole.STAFF && emailContext) {
-      const snippet = chatMessageSnippet(body, att.length);
       scheduleAfterRlsCommitWithBypass(this.prisma, () =>
         this.notifyCustomerByEmail(conversationId, emailContext, snippet),
       );
@@ -679,67 +689,181 @@ export class OrderChatService {
     return out;
   }
 
-  /** Письмо покупателю при ответе staff; уведомления staff по сообщениям клиента — отключены. */
+  /**
+   * Claim слота throttle для email по диалогу.
+   * true = этот вызов владеет слотом; при SMTP-fail / skip — releaseConversationEmailSlot.
+   */
+  private async claimConversationEmailSlot(
+    conversationId: string,
+    field: ChatEmailThrottleField,
+  ): Promise<boolean> {
+    const now = new Date();
+    const throttleBefore = new Date(now.getTime() - ORDER_CHAT_EMAIL_MIN_INTERVAL_MS);
+    const claimed = await this.prisma.chatConversation.updateMany({
+      where: {
+        id: conversationId,
+        OR: [{ [field]: null }, { [field]: { lt: throttleBefore } }],
+      },
+      data: { [field]: now },
+    });
+    return claimed.count > 0;
+  }
+
+  private async releaseConversationEmailSlot(
+    conversationId: string,
+    field: ChatEmailThrottleField,
+  ): Promise<void> {
+    await this.prisma.chatConversation.updateMany({
+      where: { id: conversationId },
+      data: { [field]: null },
+    });
+  }
+
+  /** Ops-письмо на mira-robot при сообщении клиента (заказ / поддержка). */
+  private async notifyAdminByEmail(
+    conversationId: string,
+    ctx: ChatCustomerEmailContext,
+    messageText: string,
+  ): Promise<void> {
+    // Не claim'ить слот, если ops-email выключен (пустой ORDER_ADMIN_NOTIFY_EMAIL).
+    if (!this.mail.resolveAdminOrderNotifyEmail()) return;
+
+    const slot: ChatEmailThrottleField = 'lastCustomerInboundAdminEmailAt';
+    if (!(await this.claimConversationEmailSlot(conversationId, slot))) return;
+
+    try {
+      const adminBase = this.mail.resolveAdminPublicUrl();
+
+      if (ctx.kind === 'ORDER') {
+        const order = await this.prisma.order.findUnique({
+          where: { id: ctx.orderId },
+          select: {
+            id: true,
+            number: true,
+            email: true,
+            customerName: true,
+            user: { select: { displayName: true, email: true } },
+          },
+        });
+        if (!order) {
+          await this.releaseConversationEmailSlot(conversationId, slot);
+          return;
+        }
+        const name =
+          order.user?.displayName?.trim() || order.customerName?.trim() || null;
+        const email = order.email?.trim() || order.user?.email?.trim() || null;
+        const sent = await this.mail.sendAdminChatNotify({
+          kind: 'order',
+          messageText,
+          customerName: name,
+          customerEmail: email,
+          orderNumber: order.number,
+          orderId: order.id,
+          adminChatUrl: `${adminBase}/admin/orders/${order.id}#order-chat`,
+        });
+        if (!sent) await this.releaseConversationEmailSlot(conversationId, slot);
+        return;
+      }
+
+      const user = await this.prisma.user.findUnique({
+        where: { id: ctx.customerUserId },
+        select: { id: true, email: true, displayName: true },
+      });
+      if (!user) {
+        await this.releaseConversationEmailSlot(conversationId, slot);
+        return;
+      }
+      const sent = await this.mail.sendAdminChatNotify({
+        kind: 'support',
+        messageText,
+        customerName: user.displayName?.trim() || null,
+        customerEmail: user.email?.trim() || null,
+        customerUserId: user.id,
+        adminChatUrl: `${adminBase}/admin/orders/chat?user=${encodeURIComponent(user.id)}`,
+      });
+      if (!sent) await this.releaseConversationEmailSlot(conversationId, slot);
+    } catch (err) {
+      await this.releaseConversationEmailSlot(conversationId, slot);
+      this.logger.warn(
+        `Admin chat notify failed conv=${conversationId} kind=${ctx.kind}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
+  /**
+   * Письмо покупателю при ответе staff (шаблоны order_chat_reply / order_chat_support_reply).
+   * Throttle на диалог; claim откатывается при SMTP fail / нет email / skipped_disabled.
+   */
   private async notifyCustomerByEmail(
     conversationId: string,
     ctx: ChatCustomerEmailContext,
     snippet: string,
   ): Promise<void> {
-    if (this.gateway && (await this.gateway.isCustomerChatOnline(ctx))) {
-      return;
-    }
-    const now = new Date();
-    const throttleBefore = new Date(
-      now.getTime() - ORDER_CHAT_STAFF_REPLY_EMAIL_MIN_INTERVAL_MS,
-    );
-    const claimed = await this.prisma.chatConversation.updateMany({
-      where: {
-        id: conversationId,
-        OR: [
-          { lastStaffReplyEmailAt: null },
-          { lastStaffReplyEmailAt: { lt: throttleBefore } },
-        ],
-      },
-      data: { lastStaffReplyEmailAt: now },
-    });
-    if (claimed.count === 0) return;
+    const slot: ChatEmailThrottleField = 'lastStaffReplyEmailAt';
+    if (!(await this.claimConversationEmailSlot(conversationId, slot))) return;
 
-    if (ctx.kind === 'ORDER') {
-      const order = await this.prisma.order.findUnique({
-        where: { id: ctx.orderId },
-        select: {
-          number: true,
-          email: true,
-          customerName: true,
-          user: { select: { displayName: true } },
-        },
+    try {
+      if (ctx.kind === 'ORDER') {
+        const order = await this.prisma.order.findUnique({
+          where: { id: ctx.orderId },
+          select: {
+            number: true,
+            email: true,
+            customerName: true,
+            user: { select: { displayName: true } },
+          },
+        });
+        if (!order) {
+          await this.releaseConversationEmailSlot(conversationId, slot);
+          return;
+        }
+        const to = order.email?.trim();
+        if (!to) {
+          await this.releaseConversationEmailSlot(conversationId, slot);
+          return;
+        }
+        const greeting =
+          order.user?.displayName?.trim() || order.customerName?.trim() || null;
+        const sent = await this.mail.sendOrderChatReply({
+          to,
+          orderId: ctx.orderId,
+          orderNumber: order.number,
+          snippet,
+          customerGreeting: greeting,
+        });
+        if (!sent) await this.releaseConversationEmailSlot(conversationId, slot);
+        return;
+      }
+
+      const user = await this.prisma.user.findUnique({
+        where: { id: ctx.customerUserId },
+        select: { email: true, displayName: true },
       });
-      if (!order) return;
-      const to = order.email?.trim();
-      if (!to) return;
-      const greeting = order.user?.displayName?.trim() || order.customerName?.trim() || null;
-      await this.mail.sendOrderChatReply({
+      if (!user) {
+        await this.releaseConversationEmailSlot(conversationId, slot);
+        return;
+      }
+      const to = user.email?.trim();
+      if (!to) {
+        await this.releaseConversationEmailSlot(conversationId, slot);
+        return;
+      }
+      const sent = await this.mail.sendOrderChatSupportReply({
         to,
-        orderId: ctx.orderId,
-        orderNumber: order.number,
         snippet,
-        customerGreeting: greeting,
+        customerGreeting: user.displayName?.trim() || null,
       });
-      return;
+      if (!sent) await this.releaseConversationEmailSlot(conversationId, slot);
+    } catch (err) {
+      await this.releaseConversationEmailSlot(conversationId, slot);
+      this.logger.warn(
+        `Customer chat notify failed conv=${conversationId} kind=${ctx.kind}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
     }
-
-    const user = await this.prisma.user.findUnique({
-      where: { id: ctx.customerUserId },
-      select: { email: true, displayName: true },
-    });
-    if (!user) return;
-    const to = user.email?.trim();
-    if (!to) return;
-    await this.mail.sendOrderChatSupportReply({
-      to,
-      snippet,
-      customerGreeting: user.displayName?.trim() || null,
-    });
   }
 
   async postOrderMessage(
@@ -933,7 +1057,12 @@ export class OrderChatService {
     await this.storage.deleteByPublicUrl(canonical);
   }
 
-  async markOrderRead(orderId: string, jwtUserId: string, jwtRole: string): Promise<void> {
+  async markOrderRead(
+    orderId: string,
+    jwtUserId: string,
+    jwtRole: string,
+    opts?: { expectedUnreadGeneration?: number; force?: boolean },
+  ): Promise<{ ok: true; applied: boolean }> {
     const authorRole = this.authorRoleFromJwt(jwtRole);
     if (authorRole === ChatMessageAuthorRole.CUSTOMER) {
       await this.assertCustomerCanAccessOrder(orderId, jwtUserId);
@@ -945,15 +1074,23 @@ export class OrderChatService {
       where: { orderId },
       select: { id: true },
     });
-    if (!conv) return;
-    await this.upsertReadState(conv.id, jwtUserId);
+    if (!conv) return { ok: true, applied: false };
+    const applied = await this.upsertReadState(conv.id, jwtUserId, {
+      expectedUnreadGeneration:
+        authorRole === ChatMessageAuthorRole.STAFF
+          ? opts?.expectedUnreadGeneration
+          : undefined,
+      force: authorRole === ChatMessageAuthorRole.STAFF ? Boolean(opts?.force) : true,
+    });
+    return { ok: true, applied };
   }
 
   async markSupportRead(
     customerUserId: string,
     jwtUserId: string,
     jwtRole: string,
-  ): Promise<void> {
+    opts?: { expectedUnreadGeneration?: number; force?: boolean },
+  ): Promise<{ ok: true; applied: boolean }> {
     const authorRole = this.authorRoleFromJwt(jwtRole);
     if (authorRole === ChatMessageAuthorRole.CUSTOMER) {
       if (jwtUserId !== customerUserId) throw new ForbiddenException();
@@ -965,11 +1102,87 @@ export class OrderChatService {
       where: { userId: customerUserId },
       select: { id: true },
     });
-    if (!conv) return;
-    await this.upsertReadState(conv.id, jwtUserId);
+    if (!conv) return { ok: true, applied: false };
+    const applied = await this.upsertReadState(conv.id, jwtUserId, {
+      expectedUnreadGeneration:
+        authorRole === ChatMessageAuthorRole.STAFF
+          ? opts?.expectedUnreadGeneration
+          : undefined,
+      force: authorRole === ChatMessageAuthorRole.STAFF ? Boolean(opts?.force) : true,
+    });
+    return { ok: true, applied };
   }
 
-  private async upsertReadState(conversationId: string, userId: string): Promise<void> {
+  /** Отметить тред непрочитанным для текущего staff (lastReadAt до последнего сообщения клиента). */
+  async markOrderUnread(
+    orderId: string,
+    jwtUserId: string,
+    jwtRole: string,
+  ): Promise<{ ok: true; changed: boolean; unreadGeneration: number }> {
+    await this.assertStaffCanAccessOrder(orderId, jwtUserId, jwtRole);
+    await this.assertOrderHasRegisteredBuyer(orderId);
+    const conv = await this.prisma.chatConversation.findUnique({
+      where: { orderId },
+      select: { id: true },
+    });
+    if (!conv) return { ok: true, changed: false, unreadGeneration: 0 };
+    return this.markConversationUnread(conv.id, jwtUserId);
+  }
+
+  async markSupportUnread(
+    customerUserId: string,
+    jwtUserId: string,
+    jwtRole: string,
+  ): Promise<{ ok: true; changed: boolean; unreadGeneration: number }> {
+    await this.assertStaffCanAccessSupport(jwtUserId, jwtRole);
+    await this.assertRegisteredBuyerUserId(customerUserId);
+    const conv = await this.prisma.chatConversation.findUnique({
+      where: { userId: customerUserId },
+      select: { id: true },
+    });
+    if (!conv) return { ok: true, changed: false, unreadGeneration: 0 };
+    return this.markConversationUnread(conv.id, jwtUserId);
+  }
+
+  private async markConversationUnread(
+    conversationId: string,
+    userId: string,
+  ): Promise<{ ok: true; changed: boolean; unreadGeneration: number }> {
+    const latestCustomer = await this.prisma.chatMessage.findFirst({
+      where: {
+        conversationId,
+        authorRole: ChatMessageAuthorRole.CUSTOMER,
+        deletedAt: null,
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
+    });
+    if (!latestCustomer) return { ok: true, changed: false, unreadGeneration: 0 };
+    // На 1 мс раньше последнего сообщения клиента → оно снова в unread.
+    const lastReadAt = new Date(latestCustomer.createdAt.getTime() - 1);
+    const existing = await this.prisma.chatReadState.findUnique({
+      where: { conversationId_userId: { conversationId, userId } },
+      select: { unreadGeneration: true },
+    });
+    const unreadGeneration = (existing?.unreadGeneration ?? 0) + 1;
+    await this.prisma.chatReadState.upsert({
+      where: { conversationId_userId: { conversationId, userId } },
+      create: { conversationId, userId, lastReadAt, unreadGeneration },
+      update: { lastReadAt, unreadGeneration },
+    });
+    return { ok: true, changed: true, unreadGeneration };
+  }
+
+  /**
+   * Обновить lastReadAt.
+   * Staff: CAS по expectedUnreadGeneration (поздний /read после /unread → applied:false),
+   * либо force после ответа. Customer: безусловно (force).
+   */
+  private async upsertReadState(
+    conversationId: string,
+    userId: string,
+    opts?: { expectedUnreadGeneration?: number; force?: boolean },
+  ): Promise<boolean> {
     // createdAt сообщений ставит БД, а now — часы приложения: при расхождении часов
     // свежее сообщение осталось бы «непрочитанным», поэтому не опускаемся ниже последнего.
     const latest = await this.prisma.chatMessage.findFirst({
@@ -979,11 +1192,52 @@ export class OrderChatService {
     });
     const now = new Date();
     const lastReadAt = latest && latest.createdAt > now ? latest.createdAt : now;
-    await this.prisma.chatReadState.upsert({
-      where: { conversationId_userId: { conversationId, userId } },
-      create: { conversationId, userId, lastReadAt },
-      update: { lastReadAt },
+    const force = Boolean(opts?.force);
+
+    if (force) {
+      await this.prisma.chatReadState.upsert({
+        where: { conversationId_userId: { conversationId, userId } },
+        create: { conversationId, userId, lastReadAt, unreadGeneration: 0 },
+        update: { lastReadAt },
+      });
+      return true;
+    }
+
+    const expected = Math.max(0, Math.floor(opts?.expectedUnreadGeneration ?? 0));
+    const updated = await this.prisma.chatReadState.updateMany({
+      where: { conversationId, userId, unreadGeneration: expected },
+      data: { lastReadAt },
     });
+    if (updated.count > 0) return true;
+
+    const existing = await this.prisma.chatReadState.findUnique({
+      where: { conversationId_userId: { conversationId, userId } },
+      select: { unreadGeneration: true },
+    });
+    if (existing) {
+      // Generation mismatch — stale /read проиграл /unread.
+      return false;
+    }
+    if (expected !== 0) return false;
+
+    try {
+      await this.prisma.chatReadState.create({
+        data: { conversationId, userId, lastReadAt, unreadGeneration: 0 },
+      });
+      return true;
+    } catch (e) {
+      if (
+        e instanceof Prisma.PrismaClientKnownRequestError &&
+        e.code === 'P2002'
+      ) {
+        const again = await this.prisma.chatReadState.updateMany({
+          where: { conversationId, userId, unreadGeneration: 0 },
+          data: { lastReadAt },
+        });
+        return again.count > 0;
+      }
+      throw e;
+    }
   }
 
   async uploadOrderAttachment(

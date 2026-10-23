@@ -59,7 +59,8 @@ export type AdminSupportThreadsOut = {
   unreadThreadsTotal: number;
 };
 
-export type ChatCustomerPresenceContext =
+/** Контекст для email-уведомлений по чату (заказ / поддержка). */
+export type ChatCustomerEmailContext =
   | { kind: 'ORDER'; orderId: string; customerUserId: string }
   | { kind: 'SUPPORT'; customerUserId: string };
 
@@ -69,6 +70,5 @@ export interface OrderChatRealtimeEmitter {
   broadcastSupportMessage(userId: string, payload: OrderChatMessageOut): void;
   broadcastSupportMessageDeleted(userId: string, payload: { id: string }): void;
   broadcastStaffInboxUpdated(): void;
-  isCustomerChatOnline(ctx: ChatCustomerPresenceContext): Promise<boolean>;
   disconnectUserSockets(userId: string): Promise<void>;
 }

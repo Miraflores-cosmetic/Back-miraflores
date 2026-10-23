@@ -5,6 +5,10 @@ import { isIP } from 'node:net';
 import * as nodemailer from 'nodemailer';
 import { resolveAwaitingRemindSchedule } from '../orders/order-awaiting-payment-schedule';
 import {
+  buildAdminChatNotifyEmail,
+  type AdminChatNotifyInput,
+} from './admin-chat-notify';
+import {
   buildAdminOrderNotifyEmail,
   type AdminOrderNotifyInput,
 } from './admin-order-notify';
@@ -196,6 +200,38 @@ export class MailService {
     );
   }
 
+  /**
+   * Дубль админу: входящее сообщение клиента в чате заказа / поддержки.
+   * @returns false если выкл (пустой ORDER_ADMIN_NOTIFY_EMAIL) — caller должен release claim.
+   */
+  async sendAdminChatNotify(
+    params: Omit<AdminChatNotifyInput, 'siteUrl'>,
+  ): Promise<boolean> {
+    const to = this.resolveAdminOrderNotifyEmail();
+    if (!to) {
+      this.logger.warn(
+        `Admin chat notify skipped (ORDER_ADMIN_NOTIFY_EMAIL empty) kind=${params.kind}`,
+      );
+      return false;
+    }
+    const built = buildAdminChatNotifyEmail({
+      ...params,
+      siteUrl: this.frontendPublicUrl(),
+    });
+    await this.send({ to, ...built });
+    this.logger.log(
+      `Admin chat notify kind=${params.kind} order=${params.orderNumber ?? '—'} → ${to}`,
+    );
+    return true;
+  }
+
+  /** База публичного URL админки (для ссылок в ops-письмах). */
+  resolveAdminPublicUrl(): string {
+    const raw = this.config.get<string>('ADMIN_PUBLIC_URL')?.trim().replace(/\/$/, '');
+    if (raw) return raw;
+    return this.frontendPublicUrl();
+  }
+
   private async sendBuilt(to: string, built: BuiltEmail): Promise<void> {
     await this.send({ to, ...built });
   }
@@ -207,13 +243,17 @@ export class MailService {
    * Ошибка рендера/БД → rendered_legacy.
    * Успех БД → rendered_db. Оба пути упали → failed.
    */
+  /**
+   * @returns false если шаблон выключен (skipped_disabled); true если письмо ушло
+   * (rendered_db / rendered_legacy). failed → throw.
+   */
   private async sendNotification(
     to: string,
     eventKey: EmailNotificationEventKey,
     vars: EmailTemplateVars,
     context: string,
     fallback: () => BuiltEmail,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const base = `email_notification event=${eventKey} to=${to} ${context}`;
     const notePath = (path: EmailSendPath, extra = '') => {
       this.logger.log(`${base} path=${path}${extra ? ` ${extra}` : ''}`);
@@ -227,16 +267,18 @@ export class MailService {
       const built = await this.emailNotifications.buildForEvent(eventKey, vars);
       if (!built) {
         notePath('skipped_disabled');
-        return;
+        return false;
       }
       await this.sendBuilt(to, built);
       notePath('rendered_db');
+      return true;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       this.logger.warn(`${base} path=rendered_legacy reason=${msg}`);
       try {
         await this.sendBuilt(to, fallback());
         notePath('rendered_legacy', `reason=${msg}`);
+        return true;
       } catch (e2) {
         const msg2 = e2 instanceof Error ? e2.message : String(e2);
         notePath('failed', `reason=${msg2}`);
@@ -573,13 +615,14 @@ export class MailService {
     );
   }
 
+  /** @returns false если шаблон order_chat_reply выключен в CMS. */
   async sendOrderChatReply(params: {
     to: string;
     orderId: string;
     orderNumber: string;
     snippet: string;
     customerGreeting?: string | null;
-  }): Promise<void> {
+  }): Promise<boolean> {
     const site = this.frontendPublicUrl();
     const chatUrl = accountOrderChatUrl(site, params.orderId);
     const vars: EmailTemplateVars = {
@@ -591,7 +634,7 @@ export class MailService {
       'chat.url': chatUrl,
       'customer.greeting': customerEmailGreeting(params.customerGreeting),
     };
-    await this.sendNotification(
+    return this.sendNotification(
       params.to,
       'order_chat_reply',
       vars,
@@ -607,11 +650,12 @@ export class MailService {
     );
   }
 
+  /** @returns false если шаблон order_chat_support_reply выключен в CMS. */
   async sendOrderChatSupportReply(params: {
     to: string;
     snippet: string;
     customerGreeting?: string | null;
-  }): Promise<void> {
+  }): Promise<boolean> {
     const site = this.frontendPublicUrl();
     const vars: EmailTemplateVars = {
       'site.url': site,
@@ -620,7 +664,7 @@ export class MailService {
       'chat.url': accountSupportChatUrl(site),
       'customer.greeting': customerEmailGreeting(params.customerGreeting),
     };
-    await this.sendNotification(
+    return this.sendNotification(
       params.to,
       'order_chat_support_reply',
       vars,

@@ -122,15 +122,15 @@ export class OrdersPublicService {
   ) {}
 
   /**
-   * Подарок благодарности по порогу subtotal — бесплатная линия в заказе.
+   * Подарок благодарности по порогу суммы товаров **после промокода**.
    * Клиентские isGift-линии не принимаем: аттач только с сервера через getApplicableGift.
    * OOS / inactive — soft skip (заказ без подарка), не блокируем create.
    * Preview (`GET applicable-gift`) тоже скрывает OOS заранее.
    */
   private async resolveGratitudeGiftLine(
-    subtotal: number,
+    goodsAfterPromo: number,
   ): Promise<SyncedCartItem | null> {
-    const gift = await this.settingsPublic.getApplicableGift(subtotal);
+    const gift = await this.settingsPublic.getApplicableGift(goodsAfterPromo);
     if (!gift.applicable || !gift.variantId) return null;
 
     const variant = await this.prisma.productVariant.findFirst({
@@ -593,20 +593,21 @@ export class OrdersPublicService {
     const total = Math.max(0, payableForGift - giftCertificateAmount);
 
     // Подарок благодарности — только к physical-заказам (не к digital gift-denom).
+    // Порог — payableAfterPromo (товары после промо), не сырой subtotal.
     const gratitudeGift = giftOnly
       ? null
-      : await this.resolveGratitudeGiftLine(subtotal);
+      : await this.resolveGratitudeGiftLine(payableAfterPromo);
     const itemsForOrder: SyncedCartItem[] = gratitudeGift
       ? [...(items as SyncedCartItem[]), gratitudeGift]
       : (items as SyncedCartItem[]);
 
     if (gratitudeGift) {
       this.logger.log(
-        `Gratitude gift attached: variant=${gratitudeGift.variantId} qty=${gratitudeGift.qty} subtotal=${subtotal}`,
+        `Gratitude gift attached: variant=${gratitudeGift.variantId} qty=${gratitudeGift.qty} goodsAfterPromo=${payableAfterPromo}`,
       );
     } else {
       this.logger.log(
-        `Gratitude gift not attached for subtotal=${subtotal}`,
+        `Gratitude gift not attached for goodsAfterPromo=${payableAfterPromo}`,
       );
     }
 

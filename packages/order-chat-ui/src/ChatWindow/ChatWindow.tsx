@@ -57,6 +57,8 @@ type Props = {
   open: boolean;
   onClose: () => void;
   title: string;
+  /** Доп. действия в шапке справа (до кнопки закрытия), напр. «Непрочитанным». */
+  headerActions?: ReactNode;
   messages?: ChatWindowMessage[];
   /** Вызывается при нажатии «Отправить»; черновик очищается только при `true`. */
   onSend?: (text: string) => boolean | Promise<boolean>;
@@ -296,6 +298,7 @@ export function ChatWindow({
   open,
   onClose,
   title,
+  headerActions = null,
   messages = [],
   onSend,
   threadKey,
@@ -589,10 +592,15 @@ export function ChatWindow({
             >
               {title}
             </h2>
-            {!hideCloseButton ? (
-              <button type="button" className={styles.closeBtn} onClick={onClose} aria-label="Закрыть чат">
-                <CloseIcon />
-              </button>
+            {headerActions || !hideCloseButton ? (
+              <div className={styles.headerActions}>
+                {headerActions}
+                {!hideCloseButton ? (
+                  <button type="button" className={styles.closeBtn} onClick={onClose} aria-label="Закрыть чат">
+                    <CloseIcon />
+                  </button>
+                ) : null}
+              </div>
             ) : null}
           </div>
           <div className={styles.headerMainRule} aria-hidden />

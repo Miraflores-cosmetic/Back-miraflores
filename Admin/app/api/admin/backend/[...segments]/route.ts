@@ -60,7 +60,13 @@ async function proxy(request: NextRequest, segments: string[], method: string) {
   const target = `${getServerApiBase()}/${path}${url.search}`;
 
   const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
-  const init: RequestInit = { method, headers, cache: 'no-store' };
+  const init: RequestInit = {
+    method,
+    headers,
+    cache: 'no-store',
+    // Проброс abort browser→Next→Nest (обрыв in-flight /read при «Непрочитанным»).
+    signal: request.signal,
+  };
 
   let bodyBackup: ArrayBuffer | null = null;
 
@@ -90,6 +96,9 @@ async function proxy(request: NextRequest, segments: string[], method: string) {
   try {
     res = await fetchUpstream(target, method, init, bodyBackup);
   } catch (e) {
+    if (request.signal.aborted) {
+      return new NextResponse(null, { status: 499 });
+    }
     const msg = e instanceof Error ? e.message : String(e);
     console.error('[admin/backend proxy] upstream fetch failed', target, msg);
     return NextResponse.json(

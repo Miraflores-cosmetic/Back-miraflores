@@ -481,7 +481,7 @@ export const EMAIL_NOTIFICATION_EVENTS: readonly EmailNotificationEventDef[] = [
     key: 'order_chat_reply',
     label: 'Чат: ответ по заказу',
     description:
-      'Покупателю, когда сотрудник ответил в чате заказа. Письма staff при сообщении клиента не отправляются.',
+      'Покупателю, когда сотрудник ответил в чате заказа. Входящие сообщения клиента дублируются ops на ORDER_ADMIN_NOTIFY_EMAIL (не этот шаблон).',
     variables: [
       ...ORDER_COMMON_VARS,
       { key: 'chat.snippet', label: 'Фрагмент ответа (до ~280 символов)' },
