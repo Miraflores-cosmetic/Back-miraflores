@@ -133,7 +133,7 @@ export function fetchPublicProduct(slug: string) {
 }
 
 /** Default page size for storefront catalog (mirrors backend PUBLIC_PRODUCTS_DEFAULT_LIMIT). */
-export const PUBLIC_CATALOG_PAGE_SIZE = 48;
+export const PUBLIC_CATALOG_PAGE_SIZE = 24;
 
 export function toProductCardProps(p: PublicProductCard): ProductCardProps {
   return {

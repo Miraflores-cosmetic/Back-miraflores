@@ -1,4 +1,12 @@
-import { BadRequestException, ConflictException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  Logger,
+  forwardRef,
+} from '@nestjs/common';
+import { CatalogPublicService } from '../catalog/catalog.public.service';
 import { Prisma } from '@prisma/client';
 import {
   type ProductAttributeKind,
@@ -1234,12 +1242,28 @@ export class SettingsAdminService {
       this.prisma.gratitudeGiftRule.findMany({
         orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
         include: {
-          variant: {
-            select: {
-              id: true,
-              name: true,
-              sku: true,
-              product: { select: { id: true, name: true, slug: true } },
+          items: {
+            orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+            include: {
+              variant: {
+                select: {
+                  id: true,
+                  name: true,
+                  sku: true,
+                  product: {
+                    select: {
+                      id: true,
+                      name: true,
+                      slug: true,
+                      images: {
+                        take: 1,
+                        orderBy: { sortOrder: 'asc' },
+                        select: { url: true },
+                      },
+                    },
+                  },
+                },
+              },
             },
           },
         },
@@ -1256,10 +1280,18 @@ export class SettingsAdminService {
         id: r.id,
         minRub: r.minRub,
         maxRub: r.maxRub,
-        variantId: r.variantId,
         active: r.active,
         sortOrder: r.sortOrder,
-        variant: r.variant,
+        variantIds: r.items.map((it) => it.variantId),
+        gifts: r.items.map((it) => ({
+          variantId: it.variant.id,
+          variantName: it.variant.name,
+          sku: it.variant.sku,
+          productId: it.variant.product.id,
+          productName: it.variant.product.name,
+          productSlug: it.variant.product.slug,
+          thumbnailUrl: it.variant.product.images[0]?.url ?? null,
+        })),
       })),
       tiers: tiers.map((t) => ({
         id: t.id,
@@ -1274,14 +1306,24 @@ export class SettingsAdminService {
 
   async replaceGratitude(dto: ReplaceGratitudeDto) {
     const cleanedRules = (dto.rules ?? [])
-      .map((r) => ({
-        id: typeof r.id === 'string' && r.id.trim() ? r.id.trim() : undefined,
-        minRub: r.minRub,
-        maxRub: r.maxRub ?? null,
-        variantId: r.variantId.trim(),
-        active: r.active ?? true,
-      }))
-      .filter((r) => r.variantId);
+      .map((r) => {
+        const seen = new Set<string>();
+        const variantIds: string[] = [];
+        for (const raw of r.variantIds ?? []) {
+          const id = typeof raw === 'string' ? raw.trim() : '';
+          if (!id || seen.has(id)) continue;
+          seen.add(id);
+          variantIds.push(id);
+        }
+        return {
+          id: typeof r.id === 'string' && r.id.trim() ? r.id.trim() : undefined,
+          minRub: r.minRub,
+          maxRub: r.maxRub ?? null,
+          variantIds,
+          active: r.active ?? true,
+        };
+      })
+      .filter((r) => r.variantIds.length > 0);
 
     for (const r of cleanedRules) {
       if (r.maxRub != null && r.maxRub < r.minRub) {
@@ -1289,7 +1331,7 @@ export class SettingsAdminService {
       }
     }
 
-    const variantIds = [...new Set(cleanedRules.map((r) => r.variantId))];
+    const variantIds = [...new Set(cleanedRules.flatMap((r) => r.variantIds))];
     if (variantIds.length > 0) {
       const found = await this.prisma.productVariant.findMany({
         where: { id: { in: variantIds }, active: true },
@@ -1327,17 +1369,29 @@ export class SettingsAdminService {
 
       for (let i = 0; i < cleanedRules.length; i++) {
         const r = cleanedRules[i]!;
-        const data = {
+        const ruleData = {
           minRub: r.minRub,
           maxRub: r.maxRub,
-          variantId: r.variantId,
           active: r.active,
           sortOrder: i,
         };
+        let ruleId: string;
         if (r.id && existingRuleIds.has(r.id)) {
-          await tx.gratitudeGiftRule.update({ where: { id: r.id }, data });
+          await tx.gratitudeGiftRule.update({ where: { id: r.id }, data: ruleData });
+          ruleId = r.id;
+          await tx.gratitudeGiftRuleItem.deleteMany({ where: { ruleId } });
         } else {
-          await tx.gratitudeGiftRule.create({ data });
+          const created = await tx.gratitudeGiftRule.create({ data: ruleData });
+          ruleId = created.id;
+        }
+        if (r.variantIds.length > 0) {
+          await tx.gratitudeGiftRuleItem.createMany({
+            data: r.variantIds.map((variantId, sortOrder) => ({
+              ruleId,
+              variantId,
+              sortOrder,
+            })),
+          });
         }
       }
 
@@ -1444,9 +1498,16 @@ export class SettingsAdminService {
   }
 }
 
+const HOME_BESTSELLERS_COLLECTION_SLUG = 'bestsellery';
+const HOME_BESTSELLERS_LIMIT = 12;
+
 @Injectable()
 export class SettingsPublicService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => CatalogPublicService))
+    private readonly catalog: CatalogPublicService,
+  ) {}
 
   async getSiteSeo() {
     const row = await this.prisma.siteSettings.findUnique({
@@ -1454,6 +1515,32 @@ export class SettingsPublicService {
     });
     if (!row) return emptySiteSeoResponse();
     return serializeSiteSeo(row);
+  }
+
+  /** Single round-trip payload for storefront Home CMS blocks. */
+  async getHome() {
+    const [faq, hero, promo, sets, gratitude, bestsellers] = await Promise.all([
+      this.listFaq(),
+      this.listHero(),
+      this.getHomePromo(),
+      this.listHomepageSets(),
+      this.getGratitude(),
+      this.catalog.listProducts({
+        collectionSlug: HOME_BESTSELLERS_COLLECTION_SLUG,
+        limit: HOME_BESTSELLERS_LIMIT,
+        page: 1,
+      }),
+    ]);
+
+    return {
+      faq,
+      hero,
+      promo,
+      sets,
+      gratitude,
+      bestsellers: { items: bestsellers.items, total: bestsellers.total },
+      generatedAt: new Date().toISOString(),
+    };
   }
 
   async listFaq() {
@@ -1663,35 +1750,41 @@ export class SettingsPublicService {
   }
 
   /**
-   * Подарок по порогу суммы товаров после промокода (не сырой subtotal).
+   * Подарки по порогу суммы товаров после промокода (не сырой subtotal).
    * Клиент передаёт ту же базу, что Nest на create (`payableAfterPromo`).
+   * Берётся правило с наибольшим minRub; из него — все in-stock варианты.
    */
   async getApplicableGift(goodsAfterPromo: number) {
     const amountInt = Math.round(goodsAfterPromo);
     if (amountInt <= 0) {
-      return { applicable: false };
+      return { applicable: false as const, items: [] as const };
     }
 
     const rules = await this.prisma.gratitudeGiftRule.findMany({
       where: { active: true },
       orderBy: [{ sortOrder: 'asc' }, { minRub: 'desc' }],
       include: {
-        variant: {
-          select: {
-            id: true,
-            name: true,
-            active: true,
-            stock: true,
-            stockReserve: true,
-            product: {
+        items: {
+          orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+          include: {
+            variant: {
               select: {
                 id: true,
                 name: true,
                 active: true,
-                images: {
-                  take: 1,
-                  orderBy: { sortOrder: 'asc' },
-                  select: { url: true },
+                stock: true,
+                stockReserve: true,
+                product: {
+                  select: {
+                    id: true,
+                    name: true,
+                    active: true,
+                    images: {
+                      take: 1,
+                      orderBy: { sortOrder: 'asc' },
+                      select: { url: true },
+                    },
+                  },
                 },
               },
             },
@@ -1701,30 +1794,46 @@ export class SettingsPublicService {
     });
 
     const matching = rules.filter((rule) => {
-      if (!rule.variant.active || !rule.variant.product.active) return false;
       if (amountInt < rule.minRub) return false;
       if (rule.maxRub != null && amountInt > rule.maxRub) return false;
-      const available = Math.max(0, rule.variant.stock - rule.variant.stockReserve);
-      if (available < 1) return false;
-      return true;
+      return rule.items.some((it) => {
+        if (!it.variant.active || !it.variant.product.active) return false;
+        return Math.max(0, it.variant.stock - it.variant.stockReserve) >= 1;
+      });
     });
 
     if (matching.length === 0) {
-      return { applicable: false };
+      return { applicable: false as const, items: [] as const };
     }
 
     matching.sort((a, b) => b.minRub - a.minRub);
     const rule = matching[0]!;
-    const variant = rule.variant;
-    const product = variant.product;
-    const thumbnailUrl = product.images[0]?.url ?? null;
+    const items = rule.items
+      .filter((it) => {
+        if (!it.variant.active || !it.variant.product.active) return false;
+        return Math.max(0, it.variant.stock - it.variant.stockReserve) >= 1;
+      })
+      .map((it) => ({
+        variantId: it.variant.id,
+        productName: it.variant.product.name,
+        variantName: it.variant.name,
+        thumbnailUrl: it.variant.product.images[0]?.url ?? null,
+        quantity: 1 as const,
+      }));
 
+    if (items.length === 0) {
+      return { applicable: false as const, items: [] as const };
+    }
+
+    const first = items[0]!;
     return {
-      applicable: true,
-      variantId: variant.id,
-      productName: product.name,
-      thumbnailUrl,
-      quantity: 1,
+      applicable: true as const,
+      items,
+      /** @deprecated single-gift compat — первый item */
+      variantId: first.variantId,
+      productName: first.productName,
+      thumbnailUrl: first.thumbnailUrl,
+      quantity: 1 as const,
     };
   }
 }

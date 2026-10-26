@@ -75,6 +75,7 @@ const prisma = {
   cartSettings,
   productVariant: {
     findFirst: vi.fn(),
+    findMany: vi.fn().mockResolvedValue([]),
   },
   $transaction: vi.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
   runInRlsTransaction: vi.fn(async (_ctx: unknown, fn: () => unknown) => fn()),
@@ -311,17 +312,31 @@ describe('OrdersPublicService', () => {
       });
       settingsPublic.getApplicableGift.mockResolvedValue({
         applicable: true,
+        items: [
+          { variantId: 'gift-v1', quantity: 1, productName: 'Капли-активатор «Защита Рук»' },
+          { variantId: 'gift-v2', quantity: 1, productName: 'Пробник крем' },
+        ],
         variantId: 'gift-v1',
         quantity: 1,
       });
-      prisma.productVariant.findFirst.mockResolvedValue({
-        id: 'gift-v1',
-        name: '10 мл',
-        sku: '4694872410287',
-        stock: 100,
-        stockReserve: 0,
-        product: { name: 'Капли-активатор «Защита Рук»' },
-      });
+      prisma.productVariant.findMany.mockResolvedValue([
+        {
+          id: 'gift-v1',
+          name: '10 мл',
+          sku: '4694872410287',
+          stock: 100,
+          stockReserve: 0,
+          product: { name: 'Капли-активатор «Защита Рук»' },
+        },
+        {
+          id: 'gift-v2',
+          name: '5 мл',
+          sku: 'gift-sku-2',
+          stock: 50,
+          stockReserve: 0,
+          product: { name: 'Пробник крем' },
+        },
+      ]);
 
       const shippingQuotes = new ShippingQuoteService(config as never);
       const lines = [{ variantId: 'v1', shadeId: null as string | null, qty: 1 }];
@@ -374,13 +389,24 @@ describe('OrdersPublicService', () => {
       const created = order.create.mock.calls[0]?.[0] as {
         data: { items: { create: Array<{ variantId: string; unitPrice: number; isGratitudeGift?: boolean }> } };
       };
-      const giftLine = created.data.items.create.find((l) => l.variantId === 'gift-v1');
-      expect(giftLine).toMatchObject({
-        variantId: 'gift-v1',
-        unitPrice: 0,
-        isGratitudeGift: true,
-        qty: 1,
-      });
+      const giftLines = created.data.items.create.filter((l) => l.isGratitudeGift);
+      expect(giftLines).toHaveLength(2);
+      expect(giftLines).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            variantId: 'gift-v1',
+            unitPrice: 0,
+            isGratitudeGift: true,
+            qty: 1,
+          }),
+          expect.objectContaining({
+            variantId: 'gift-v2',
+            unitPrice: 0,
+            isGratitudeGift: true,
+            qty: 1,
+          }),
+        ]),
+      );
     });
 
     it('порог gratitude — сумма товаров после промокода', async () => {

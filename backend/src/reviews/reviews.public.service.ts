@@ -53,6 +53,27 @@ export class ReviewsPublicService {
     return { productIds: rows.map((r) => r.productId) };
   }
 
+  async productReviewMeta(slug: string) {
+    const product = await this.prisma.product.findUnique({
+      where: { slug },
+      select: { id: true, active: true },
+    });
+    if (!product?.active) throw new NotFoundException('Товар не найден');
+
+    const where = { productId: product.id, isPublished: true };
+    const agg = await this.prisma.productReview.aggregate({
+      where,
+      _avg: { rating: true },
+      _count: { _all: true },
+    });
+
+    return {
+      ratingAvg:
+        agg._avg.rating != null ? Math.round(agg._avg.rating * 10) / 10 : null,
+      ratingCount: agg._count._all,
+    };
+  }
+
   async listByProductSlug(slug: string, opts?: { page?: number; limit?: number }) {
     const product = await this.prisma.product.findUnique({
       where: { slug },

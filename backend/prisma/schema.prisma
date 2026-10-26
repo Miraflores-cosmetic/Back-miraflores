@@ -488,7 +488,7 @@ model ProductVariant {
   galleryLinks         ProductVariantImage[]
   orderItems           OrderItem[]
   favoritedBy          UserFavorite[]
-  gratitudeGiftRules   GratitudeGiftRule[]
+  gratitudeGiftItems   GratitudeGiftRuleItem[]
   groupPrices          GroupVariantPrice[]
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
@@ -1236,21 +1236,35 @@ model AssistantAuditEvent {
   @@index([kind, createdAt])
 }
 
-/// Правило подарка по сумме корзины (программа благодарности)
+/// Правило подарков по сумме корзины (программа благодарности).
+/// В одном правиле — один или несколько вариантов (см. GratitudeGiftRuleItem).
 model GratitudeGiftRule {
-  id        String         @id @default(cuid())
+  id        String                 @id @default(cuid())
   /// Inclusive min cart subtotal, ₽
   minRub    Int
   /// Inclusive max; null = no upper bound
   maxRub    Int?
-  variantId String
-  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Restrict)
-  active    Boolean        @default(true)
-  sortOrder Int            @default(0)
-  createdAt DateTime       @default(now())
-  updatedAt DateTime       @updatedAt
+  active    Boolean                @default(true)
+  sortOrder Int                    @default(0)
+  createdAt DateTime               @default(now())
+  updatedAt DateTime               @updatedAt
+  items     GratitudeGiftRuleItem[]
 
   @@index([active, sortOrder])
+}
+
+/// Вариант-подарок внутри правила (порядок = sortOrder).
+model GratitudeGiftRuleItem {
+  id        String           @id @default(cuid())
+  ruleId    String
+  rule      GratitudeGiftRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  variantId String
+  variant   ProductVariant   @relation(fields: [variantId], references: [id], onDelete: Restrict)
+  sortOrder Int              @default(0)
+  createdAt DateTime         @default(now())
+
+  @@unique([ruleId, variantId])
+  @@index([ruleId, sortOrder])
   @@index([variantId])
 }
 

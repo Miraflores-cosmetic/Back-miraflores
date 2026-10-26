@@ -28,14 +28,20 @@ import {
 import { VariantPickerModal } from './VariantPickerModal';
 import catalogStyles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
 import styles from '@/app/(admin)/admin/settings/Settings.module.css';
+import giftStyles from './gratitudeAdmin.module.css';
+
+type GiftDraft = {
+  variantId: string;
+  label: string;
+  thumbnailUrl: string | null;
+};
 
 type RuleDraft = {
   key: string;
   id?: string;
   minRub: string;
   maxRub: string;
-  variantId: string;
-  variantLabel: string;
+  gifts: GiftDraft[];
   active: boolean;
 };
 
@@ -54,14 +60,15 @@ type GratitudeApi = {
     id: string;
     minRub: number;
     maxRub: number | null;
-    variantId: string;
     active: boolean;
-    variant: {
-      id: string;
-      name: string;
+    variantIds?: string[];
+    gifts?: Array<{
+      variantId: string;
+      variantName: string;
       sku: string;
-      product: { id: string; name: string; slug: string };
-    };
+      productName: string;
+      thumbnailUrl: string | null;
+    }>;
   }>;
   tiers: Array<{
     id: string;
@@ -76,8 +83,20 @@ function newKey() {
   return `tmp-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function ruleLabelFromApi(r: GratitudeApi['rules'][number]) {
-  return `${r.variant.product.name} — ${r.variant.name} (${r.variant.sku})`;
+function giftLabel(productName: string, variantName: string, sku?: string) {
+  const base = `${productName} — ${variantName}`;
+  return sku ? `${base} (${sku})` : base;
+}
+
+function giftsFromApi(r: GratitudeApi['rules'][number]): GiftDraft[] {
+  if (r.gifts?.length) {
+    return r.gifts.map((g) => ({
+      variantId: g.variantId,
+      label: giftLabel(g.productName, g.variantName, g.sku),
+      thumbnailUrl: g.thumbnailUrl,
+    }));
+  }
+  return [];
 }
 
 async function uploadImage(file: File): Promise<string> {
@@ -97,13 +116,15 @@ function SortableRuleRow({
   disabled,
   onChange,
   onRemove,
-  onPickVariant,
+  onAddGift,
+  onRemoveGift,
 }: {
   item: RuleDraft;
   disabled: boolean;
   onChange: (patch: Partial<RuleDraft>) => void;
   onRemove: () => void;
-  onPickVariant: () => void;
+  onAddGift: () => void;
+  onRemoveGift: (variantId: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: item.key,
@@ -157,13 +178,44 @@ function SortableRuleRow({
           disabled={disabled}
         />
       </div>
-      <div>
-        <p className={catalogStyles.muted} style={{ margin: '0 0 6px' }}>
-          Подарок (вариант)
+      <div className={giftStyles.giftsBlock}>
+        <p className={giftStyles.giftsLabel}>
+          Подарки ({item.gifts.length})
         </p>
-        <p style={{ margin: '0 0 8px' }}>{item.variantLabel || '— не выбран —'}</p>
-        <AdminCompactBtn type="button" variant="outline" onClick={onPickVariant} disabled={disabled}>
-          Выбрать вариант
+        {item.gifts.length === 0 ? (
+          <p className={catalogStyles.muted} style={{ margin: '0 0 8px' }}>
+            Не выбрано — добавьте хотя бы один вариант
+          </p>
+        ) : (
+          <ul className={giftStyles.giftList}>
+            {item.gifts.map((g) => (
+              <li key={g.variantId} className={giftStyles.giftRow}>
+                <div className={giftStyles.giftThumb} aria-hidden>
+                  {g.thumbnailUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={g.thumbnailUrl} alt="" />
+                  ) : (
+                    <span className={giftStyles.giftThumbEmpty}>∅</span>
+                  )}
+                </div>
+                <div className={giftStyles.giftMeta}>
+                  <span className={giftStyles.giftTitle}>{g.label}</span>
+                  <span className={giftStyles.giftId}>{g.variantId}</span>
+                </div>
+                <AdminCompactBtn
+                  type="button"
+                  variant="danger"
+                  disabled={disabled}
+                  onClick={() => onRemoveGift(g.variantId)}
+                >
+                  Убрать
+                </AdminCompactBtn>
+              </li>
+            ))}
+          </ul>
+        )}
+        <AdminCompactBtn type="button" variant="outline" onClick={onAddGift} disabled={disabled}>
+          Добавить подарок
         </AdminCompactBtn>
       </div>
     </li>
@@ -238,6 +290,10 @@ function SortableTierRow({
         onChange={(e) => onChange({ imageUrl: e.target.value })}
         disabled={disabled}
       />
+      {item.imageUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={item.imageUrl} alt="" className={giftStyles.tierPreview} />
+      ) : null}
       <AdminCompactBtn
         type="button"
         variant="outline"
@@ -289,8 +345,7 @@ export function GratitudeAdminClient() {
           id: r.id,
           minRub: String(r.minRub),
           maxRub: r.maxRub != null ? String(r.maxRub) : '',
-          variantId: r.variantId,
-          variantLabel: ruleLabelFromApi(r),
+          gifts: giftsFromApi(r),
           active: r.active,
         })),
       );
@@ -362,7 +417,7 @@ export function GratitudeAdminClient() {
       id: r.id,
       minRub: Number(r.minRub),
       maxRub: r.maxRub.trim() ? Number(r.maxRub) : null,
-      variantId: r.variantId,
+      variantIds: r.gifts.map((g) => g.variantId),
       active: r.active,
     }));
 
@@ -375,8 +430,8 @@ export function GratitudeAdminClient() {
         showToast('Максимальная сумма не может быть меньше минимальной');
         return;
       }
-      if (!r.variantId) {
-        showToast('Выберите вариант подарка для каждого правила');
+      if (r.variantIds.length === 0) {
+        showToast('В каждом правиле нужен хотя бы один подарок');
         return;
       }
     }
@@ -421,8 +476,8 @@ export function GratitudeAdminClient() {
     <>
       <h1 className={catalogStyles.title}>Программа благодарности</h1>
       <p className={catalogStyles.muted} style={{ marginBottom: 16, maxWidth: 640 }}>
-        Подарок автоматически добавляется в корзину при достижении суммы заказа. Правила проверяются
-        по подытогу корзины (без доставки).
+        При достижении порога суммы товаров (после промокода) в заказ добавляются все подарки
+        из подходящего правила. OOS-варианты пропускаются.
       </p>
 
       <form onSubmit={(e) => void onSave(e)}>
@@ -458,7 +513,17 @@ export function GratitudeAdminClient() {
                     setRules((prev) => prev.filter((r) => r.key !== item.key));
                     markDirty();
                   }}
-                  onPickVariant={() => setPickerKey(item.key)}
+                  onAddGift={() => setPickerKey(item.key)}
+                  onRemoveGift={(variantId) => {
+                    setRules((prev) =>
+                      prev.map((r) =>
+                        r.key === item.key
+                          ? { ...r, gifts: r.gifts.filter((g) => g.variantId !== variantId) }
+                          : r,
+                      ),
+                    );
+                    markDirty();
+                  }}
                 />
               ))}
             </ul>
@@ -475,8 +540,7 @@ export function GratitudeAdminClient() {
                 key: newKey(),
                 minRub: '',
                 maxRub: '',
-                variantId: '',
-                variantLabel: '',
+                gifts: [],
                 active: true,
               },
             ]);
@@ -545,16 +609,29 @@ export function GratitudeAdminClient() {
 
       <VariantPickerModal
         open={pickerKey != null}
-        selectedVariantId={pickerRule?.variantId ?? ''}
-        selectedLabel={pickerRule?.variantLabel ?? ''}
+        selectedVariantId=""
+        selectedLabel=""
         onClose={() => setPickerKey(null)}
-        onApply={(variantId, label) => {
+        onApply={(variantId, label, details) => {
           if (!pickerKey) return;
           setRules((prev) =>
-            prev.map((r) =>
-              r.key === pickerKey ? { ...r, variantId, variantLabel: label } : r,
-            ),
+            prev.map((r) => {
+              if (r.key !== pickerKey) return r;
+              if (r.gifts.some((g) => g.variantId === variantId)) return r;
+              return {
+                ...r,
+                gifts: [
+                  ...r.gifts,
+                  {
+                    variantId,
+                    label,
+                    thumbnailUrl: null,
+                  },
+                ],
+              };
+            }),
           );
+          void details;
           markDirty();
           setPickerKey(null);
         }}

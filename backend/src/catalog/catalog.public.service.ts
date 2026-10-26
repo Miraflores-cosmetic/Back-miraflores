@@ -9,6 +9,7 @@ import { GroupPricingService } from '../user-groups/group-pricing.service';
 import type { CampaignIn } from '../discounts/discount-pricing.engine';
 import {
   PUBLIC_HIDDEN_CATEGORY_SLUGS,
+  PUBLIC_PDP_HERO_IMAGES_MAX,
   PUBLIC_PRODUCTS_DEFAULT_LIMIT,
   PUBLIC_PRODUCTS_IN_MEMORY_MAX,
   PUBLIC_PRODUCTS_MAX_LIMIT,
@@ -23,18 +24,21 @@ import {
 } from './catalog-campaign-price.util';
 import {
   cardVariantQty,
+  catalogSellableVariantWhere,
+  listCardVolumeOptions,
   toCardVolumeOptions,
 } from './catalog-card.util';
 import {
   giftPurchaseSkuForDenom,
   parseGiftDenomCartVariantId,
 } from '../gift-certificates/gift-certificate-purchase.util';
+import { queryCatalogProductIdsPage } from './catalog-list-sql.util';
 
 type ProductCardSource = {
   id: string;
   slug: string;
   name: string;
-  shortDescription: string | null;
+  shortDescription?: string | null;
   productType: string | null;
   categoryId: string;
   images: Array<{ url: string; mediaType?: string }>;
@@ -47,46 +51,43 @@ type ProductCardSource = {
     orderMaxQty: number | null;
     stock: number;
     stockReserve: number;
-    shades: Array<{ id: string; name: string; imageUrl: string | null }>;
+    shades?: Array<{ id: string; name: string; imageUrl: string | null }>;
   }>;
 };
 
-const productCardSelect = {
+const productListVariantSelect = {
+  id: true,
+  name: true,
+  price: true,
+  compareAt: true,
+  orderMinQty: true,
+  orderMaxQty: true,
+  stock: true,
+  stockReserve: true,
+} as const;
+
+/** PLP / home cards — без shortDescription, только sellable variants, без shades. */
+const productListCardSelect = {
   id: true,
   slug: true,
   name: true,
-  shortDescription: true,
   productType: true,
   categoryId: true,
   images: {
-    take: 8,
+    take: 2,
     orderBy: { sortOrder: 'asc' as const },
     select: { url: true, mediaType: true },
   },
   variants: {
-    where: { active: true },
+    where: catalogSellableVariantWhere,
     orderBy: [{ price: 'asc' as const }, { createdAt: 'asc' as const }],
-    select: {
-      id: true,
-      name: true,
-      price: true,
-      compareAt: true,
-      orderMinQty: true,
-      orderMaxQty: true,
-      stock: true,
-      stockReserve: true,
-      shades: {
-        orderBy: { sortOrder: 'asc' as const },
-        take: 1,
-        select: { id: true, name: true, imageUrl: true },
-      },
-    },
+    select: productListVariantSelect,
   },
 };
 
-type ProductCard = ReturnType<typeof toProductCard>;
+type ProductCard = Omit<ReturnType<typeof toProductCard>, 'categoryId'>;
 
-function toProductCard(p: ProductCardSource) {
+function toProductCard(p: ProductCardSource, opts?: { list?: boolean }) {
   const variants = p.variants ?? [];
   const prices = catalogSellablePrices(variants);
   const minPrice = prices.length ? Math.min(...prices) : 0;
@@ -102,9 +103,15 @@ function toProductCard(p: ProductCardSource) {
     ? cardVariantQty(v)
     : { available: 0, minQty: 1, maxQty: 0 };
   const shade = v?.shades?.[0] ?? null;
-  const imageUrls = p.images.map((img) => img.url).filter(Boolean);
+  const imageUrls = p.images
+    .map((img) => img.url)
+    .filter(Boolean)
+    .slice(0, 2);
   const cover = p.images[0];
-  return {
+  const volumeOptions = opts?.list
+    ? listCardVolumeOptions(variants)
+    : toCardVolumeOptions(variants);
+  const card = {
     id: p.id,
     categoryId: p.categoryId,
     variantId: v?.id ?? null,
@@ -113,7 +120,9 @@ function toProductCard(p: ProductCardSource) {
     shadeName: shade?.name ?? null,
     slug: p.slug,
     name: p.name,
-    shortDescription: p.shortDescription,
+    ...(opts?.list
+      ? {}
+      : { shortDescription: p.shortDescription ?? null }),
     productType: p.productType,
     price,
     oldPrice: compareAt != null && compareAt > price ? compareAt : null,
@@ -125,9 +134,9 @@ function toProductCard(p: ProductCardSource) {
     imageUrl: cover?.url || shade?.imageUrl || null,
     imageUrls,
     mediaType: cover?.mediaType === 'video' ? ('video' as const) : ('image' as const),
-    /** Все продаваемые объёмы — для sizeRow / модалки выбора на карточке. */
-    variants: toCardVolumeOptions(variants),
+    ...(volumeOptions?.length ? { variants: volumeOptions } : {}),
   };
+  return card;
 }
 
 function stripCategoryId<T extends { categoryId: string }>(card: T) {
@@ -177,18 +186,20 @@ export class CatalogPublicService {
     sources: ProductCardSource[],
     ctx: CommerceContext,
     campaigns: CampaignIn[],
+    opts?: { list?: boolean },
   ) {
     const visible = await this.catalogVisibility.applyVariantVisibilityToProductSources(
       ctx,
       sources,
     );
     const priced = await this.applyGroupPricesToSources(visible, ctx);
-    let cards = priced.map((p) => toProductCard(p));
+    let cards = priced.map((p) => toProductCard(p, opts));
     if (ctx.allowCatalogDiscounts && campaigns.length) {
       cards = cards.map((card) => {
         const [pricedCard] = applyCampaignToCards([card], campaigns);
+        const cardVariants = card.variants ?? [];
         const variantPriced = applyCampaignToDetailVariants(
-          card.variants.map((v) => ({
+          cardVariants.map((v) => ({
             id: v.id,
             price: v.price,
             compareAt: v.oldPrice,
@@ -198,20 +209,24 @@ export class CatalogPublicService {
           campaigns,
         );
         const byId = new Map(variantPriced.map((v) => [v.id, v]));
+        const nextVariants =
+          cardVariants.length > 0
+            ? cardVariants.map((v) => {
+                const vp = byId.get(v.id);
+                if (!vp) return v;
+                return {
+                  ...v,
+                  price: vp.price,
+                  oldPrice:
+                    vp.compareAt != null && vp.compareAt > vp.price
+                      ? vp.compareAt
+                      : null,
+                };
+              })
+            : undefined;
         return {
           ...(pricedCard ?? card),
-          variants: card.variants.map((v) => {
-            const vp = byId.get(v.id);
-            if (!vp) return v;
-            return {
-              ...v,
-              price: vp.price,
-              oldPrice:
-                vp.compareAt != null && vp.compareAt > vp.price
-                  ? vp.compareAt
-                  : null,
-            };
-          }),
+          ...(nextVariants?.length ? { variants: nextVariants } : {}),
         };
       });
     }
@@ -241,7 +256,7 @@ export class CatalogPublicService {
         where: { collectionId, product: productWhere },
         orderBy: { sortOrder: 'asc' },
         take: poolTake,
-        include: { product: { select: productCardSelect } },
+        include: { product: { select: productListCardSelect } },
       });
       allRows = itemRows.map((it) => it.product).filter(Boolean);
     } else {
@@ -249,7 +264,7 @@ export class CatalogPublicService {
         where,
         orderBy,
         take: poolTake,
-        select: productCardSelect,
+        select: productListCardSelect,
       });
     }
 
@@ -262,52 +277,77 @@ export class CatalogPublicService {
       );
     }
 
-    const cards = await this.finalizeProductCards(allRows, ctx, campaigns);
+    const cards = await this.finalizeProductCards(allRows, ctx, campaigns, { list: true });
     const total = cards.length;
     const pageItems = cards.slice((page - 1) * limit, page * limit);
     return { items: pageItems, total, page, limit, truncated: poolTruncated };
   }
 
-  async getProductBySlug(slug: string, userId?: string | null) {
-    const ctx = await this.resolveBuyerContext(userId);
-    const row = await this.prisma.product.findFirst({
-      where: { slug, active: true, excludeFromCatalog: false },
-      include: {
-        category: {
-          select: {
-            id: true,
-            name: true,
-            slug: true,
-            parent: {
-              select: {
-                id: true,
-                name: true,
-                slug: true,
-                parent: { select: { id: true, name: true, slug: true } },
-              },
-            },
-          },
-        },
-        images: { orderBy: { sortOrder: 'asc' } },
-        catalogTags: {
-          select: {
-            tag: { select: { id: true, name: true, slug: true, sortOrder: true } },
-          },
-        },
-        variants: {
-          where: { active: true },
-          orderBy: { createdAt: 'asc' },
-          include: {
-            galleryLinks: {
-              orderBy: { sortOrder: 'asc' },
-              include: { productImage: { select: { id: true, url: true, mediaType: true } } },
-            },
-          },
-        },
-      },
-    });
-    if (!row) return null;
+  private mapPdpImage(img: {
+    id: string;
+    url: string;
+    mediaType: string | null;
+    sortOrder: number;
+  }) {
+    return {
+      id: img.id,
+      url: img.url,
+      mediaType: (img.mediaType === 'video' ? 'video' : 'image') as 'image' | 'video',
+      sortOrder: img.sortOrder,
+    };
+  }
 
+  private variantPdpImages(
+    galleryLinks: Array<{
+      sortOrder: number;
+      productImage: { id: string; url: string; mediaType: string | null };
+    }>,
+    productImages: ReturnType<CatalogPublicService['mapPdpImage']>[],
+  ) {
+    const variantImages = galleryLinks.map((link) =>
+      this.mapPdpImage({
+        id: link.productImage.id,
+        url: link.productImage.url,
+        mediaType: link.productImage.mediaType,
+        sortOrder: link.sortOrder,
+      }),
+    );
+    if (!variantImages.length) return undefined;
+    if (
+      variantImages.length === productImages.length &&
+      variantImages.every((img, i) => img.id === productImages[i]?.id)
+    ) {
+      return undefined;
+    }
+    return variantImages;
+  }
+
+  private async buildPdpVariants(
+    row: {
+      id: string;
+      categoryId: string;
+      variants: Array<{
+        id: string;
+        name: string;
+        slug: string;
+        volumeMl: number | null;
+        sku: string | null;
+        price: number;
+        compareAt: number | null;
+        orderMinQty: number;
+        orderMaxQty: number | null;
+        stock: number;
+        stockReserve: number;
+        galleryLinks: Array<{
+          sortOrder: number;
+          productImage: { id: string; url: string; mediaType: string | null };
+        }>;
+      }>;
+    },
+    ctx: CommerceContext,
+    productImages: ReturnType<CatalogPublicService['mapPdpImage']>[],
+    campaigns: CampaignIn[],
+  ) {
     const visibleVariantIds = await this.catalogVisibility.filterVisibleVariantIds(ctx, {
       productId: row.id,
       categoryId: row.categoryId,
@@ -326,23 +366,9 @@ export class CatalogPublicService {
       })),
     );
 
-    const productImages = row.images.map((img) => ({
-      id: img.id,
-      url: img.url,
-      mediaType: (img.mediaType === 'video' ? 'video' : 'image') as 'image' | 'video',
-      sortOrder: img.sortOrder,
-    }));
-
     const rawVariants = visibleVariants.map((v) => {
-      const variantImages = v.galleryLinks.map((link) => ({
-        id: link.productImage.id,
-        url: link.productImage.url,
-        mediaType: (link.productImage.mediaType === 'video' ? 'video' : 'image') as
-          | 'image'
-          | 'video',
-        sortOrder: link.sortOrder,
-      }));
       const available = Math.max(0, v.stock - v.stockReserve);
+      const images = this.variantPdpImages(v.galleryLinks, productImages);
       return {
         id: v.id,
         name: v.name,
@@ -356,36 +382,85 @@ export class CatalogPublicService {
         stock: v.stock,
         stockReserve: v.stockReserve,
         available,
-        images: variantImages.length > 0 ? variantImages : productImages,
+        ...(images?.length ? { images } : {}),
       };
     });
 
-    const campaigns = ctx.allowCatalogDiscounts
-      ? await this.discountsPublic.loadRunningCampaigns()
-      : [];
-    const variants = campaigns.length
+    return campaigns.length
       ? applyCampaignToDetailVariants(rawVariants, row.id, row.categoryId, campaigns)
       : rawVariants;
+  }
+
+  async getProductBySlug(
+    slug: string,
+    userId?: string | null,
+    opts?: { fields?: 'hero' | 'full' },
+  ) {
+    const fields = opts?.fields === 'full' ? 'full' : 'hero';
+    const ctx = await this.resolveBuyerContext(userId);
+    const campaignsPromise = ctx.allowCatalogDiscounts
+      ? this.discountsPublic.loadRunningCampaigns()
+      : Promise.resolve([] as CampaignIn[]);
+
+    const [row, campaigns] = await Promise.all([
+      this.prisma.product.findFirst({
+      where: { slug, active: true, excludeFromCatalog: false },
+      include: {
+        category: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            parent: {
+              select: {
+                id: true,
+                name: true,
+                slug: true,
+                parent: { select: { id: true, name: true, slug: true } },
+              },
+            },
+          },
+        },
+        images: {
+          orderBy: { sortOrder: 'asc' },
+          take: PUBLIC_PDP_HERO_IMAGES_MAX,
+        },
+        catalogTags: {
+          select: {
+            tag: { select: { id: true, name: true, slug: true, sortOrder: true } },
+          },
+        },
+        variants: {
+          where: { active: true },
+          orderBy: { createdAt: 'asc' },
+          include: {
+            galleryLinks: {
+              orderBy: { sortOrder: 'asc' },
+              include: { productImage: { select: { id: true, url: true, mediaType: true } } },
+            },
+          },
+        },
+      },
+    }),
+      campaignsPromise,
+    ]);
+    if (!row) return null;
+
+    const productImages = row.images.map((img) => this.mapPdpImage(img));
+    const variants = await this.buildPdpVariants(row, ctx, productImages, campaigns);
+    if (!variants) return null;
 
     const prices = catalogSellablePrices(variants);
 
-    return {
+    const base = {
       id: row.id,
       slug: row.slug,
       name: row.name,
       shortDescription: row.shortDescription,
       pageShortDescriptionHtml: row.pageShortDescriptionHtml,
-      descriptionHtml: row.descriptionHtml,
-      actionEffectHtml: row.actionEffectHtml,
-      applicationHtml: row.applicationHtml,
-      compositionHtml: row.compositionHtml,
-      importantNoteHtml: row.importantNoteHtml,
-      mirafloresNoteHtml: row.mirafloresNoteHtml,
-      storageHtml: row.storageHtml,
       productType: row.productType,
       purpose: row.purpose,
       shelfLife: row.shelfLife,
-      extraHtml: row.extraHtml,
       metaTitle: row.metaTitle,
       metaDescription: row.metaDescription,
       ogImageUrl: row.ogImageUrl,
@@ -402,6 +477,61 @@ export class CatalogPublicService {
       variants,
       minPrice: prices.length ? Math.min(...prices) : null,
       maxPrice: prices.length ? Math.max(...prices) : null,
+    };
+
+    if (fields === 'hero') {
+      return { ...base, contentDeferred: true as const };
+    }
+
+    return {
+      ...base,
+      descriptionHtml: row.descriptionHtml,
+      actionEffectHtml: row.actionEffectHtml,
+      applicationHtml: row.applicationHtml,
+      compositionHtml: row.compositionHtml,
+      importantNoteHtml: row.importantNoteHtml,
+      mirafloresNoteHtml: row.mirafloresNoteHtml,
+      storageHtml: row.storageHtml,
+      extraHtml: row.extraHtml,
+    };
+  }
+
+  async getProductContentBySlug(slug: string, userId?: string | null) {
+    const ctx = await this.resolveBuyerContext(userId);
+    const row = await this.prisma.product.findFirst({
+      where: { slug, active: true, excludeFromCatalog: false },
+      select: {
+        id: true,
+        categoryId: true,
+        descriptionHtml: true,
+        actionEffectHtml: true,
+        applicationHtml: true,
+        compositionHtml: true,
+        importantNoteHtml: true,
+        mirafloresNoteHtml: true,
+        storageHtml: true,
+        extraHtml: true,
+        variants: { where: { active: true }, select: { id: true } },
+      },
+    });
+    if (!row) return null;
+
+    const visible = await this.catalogVisibility.filterVisibleVariantIds(ctx, {
+      productId: row.id,
+      categoryId: row.categoryId,
+      variantIds: row.variants.map((v) => v.id),
+    });
+    if (!visible.length) return null;
+
+    return {
+      descriptionHtml: row.descriptionHtml,
+      actionEffectHtml: row.actionEffectHtml,
+      applicationHtml: row.applicationHtml,
+      compositionHtml: row.compositionHtml,
+      importantNoteHtml: row.importantNoteHtml,
+      mirafloresNoteHtml: row.mirafloresNoteHtml,
+      storageHtml: row.storageHtml,
+      extraHtml: row.extraHtml,
     };
   }
 
@@ -439,7 +569,7 @@ export class CatalogPublicService {
       },
       orderBy: { sortOrder: 'asc' },
       include: {
-        product: { select: productCardSelect },
+        product: { select: productListCardSelect },
       },
     });
 
@@ -454,7 +584,7 @@ export class CatalogPublicService {
     const campaigns = ctx.allowCatalogDiscounts
       ? await this.discountsPublic.loadRunningCampaigns()
       : [];
-    const items = await this.finalizeProductCards(sources, ctx, campaigns);
+    const items = await this.finalizeProductCards(sources, ctx, campaigns, { list: true });
     return { items };
   }
 
@@ -496,14 +626,14 @@ export class CatalogPublicService {
           excludeFromCatalog: false,
           slug: { in: slugs },
         },
-        select: productCardSelect,
+        select: productListCardSelect,
       });
       const bySlug = new Map(rows.map((r) => [r.slug, r]));
       const ordered = slugs.flatMap((s) => {
         const p = bySlug.get(s);
         return p ? [p] : [];
       });
-      const items = await this.finalizeProductCards(ordered, ctx, campaigns);
+      const items = await this.finalizeProductCards(ordered, ctx, campaigns, { list: true });
       return { items, total: items.length, page: 1, limit: slugs.length };
     }
 
@@ -511,6 +641,7 @@ export class CatalogPublicService {
       active: true,
       excludeFromCatalog: false,
     };
+    let filterCategoryIds: string[] | undefined;
 
     if (opts?.categorySlug) {
       const cat = await this.prisma.category.findUnique({
@@ -536,7 +667,8 @@ export class CatalogPublicService {
               })
             ).map((c) => c.id)
           : [];
-      where.categoryId = { in: [...new Set([...ids, ...grandIds])] };
+      filterCategoryIds = [...new Set([...ids, ...grandIds])];
+      where.categoryId = { in: filterCategoryIds };
     }
 
     if (opts?.tagSlug) {
@@ -607,11 +739,11 @@ export class CatalogPublicService {
           orderBy: { sortOrder: 'asc' },
           skip: (page - 1) * limit,
           take: limit,
-          include: { product: { select: productCardSelect } },
+          include: { product: { select: productListCardSelect } },
         }),
       ]);
       const rows = itemRows.map((it) => it.product).filter(Boolean);
-      const items = await this.finalizeProductCards(rows, ctx, campaigns);
+      const items = await this.finalizeProductCards(rows, ctx, campaigns, { list: true });
       return { items, total, page, limit };
     }
 
@@ -623,92 +755,183 @@ export class CatalogPublicService {
           orderBy,
           skip: (page - 1) * limit,
           take: limit,
-          select: productCardSelect,
+          select: productListCardSelect,
         }),
       ]);
-      const items = await this.finalizeProductCards(rows, ctx, campaigns);
+      const items = await this.finalizeProductCards(rows, ctx, campaigns, { list: true });
       return { items, total, page, limit };
     }
 
-    // sale / price-sort: полный пул → кампании → фильтр → пагинация (точный total)
-    if (opts?.saleOnly) {
-      const campaignProductIds = [
-        ...new Set(campaigns.flatMap((c) => c.productIds)),
-      ];
-      const campaignCategoryIds = [
-        ...new Set(campaigns.flatMap((c) => c.categoryIds)),
-      ];
-      where.OR = [
-        {
-          variants: {
-            some: {
-              active: true,
-              compareAt: { not: null, gt: 0 },
-            },
-          },
-        },
-        ...(campaignProductIds.length
-          ? [{ id: { in: campaignProductIds } }]
-          : []),
-        ...(campaignCategoryIds.length
-          ? [{ categoryId: { in: campaignCategoryIds } }]
-          : []),
-      ];
-    }
+    const campaignProductIds = [
+      ...new Set(campaigns.flatMap((c) => c.productIds)),
+    ];
+    const campaignCategoryIds = [
+      ...new Set(campaigns.flatMap((c) => c.categoryIds)),
+    ];
 
-    let allRows: ProductCardSource[];
-    const poolTake = PUBLIC_PRODUCTS_IN_MEMORY_MAX + 1;
-
-    if (useCollectionSort && collectionId) {
-      const productWhere: Prisma.ProductWhereInput = { ...where };
-      delete productWhere.collectionItems;
-      const itemRows = await this.prisma.collectionItem.findMany({
-        where: { collectionId, product: productWhere },
-        orderBy: { sortOrder: 'asc' },
-        take: poolTake,
-        include: { product: { select: productCardSelect } },
-      });
-      allRows = itemRows.map((it) => it.product).filter(Boolean);
-    } else {
-      allRows = await this.prisma.product.findMany({
-        where,
-        orderBy: sort === 'name' ? { name: 'asc' } : { createdAt: 'desc' },
-        take: poolTake,
-        select: productCardSelect,
+    if (needsVisibilityPagination) {
+      return this.listProductsSqlCardFilters({
+        categoryIds: filterCategoryIds,
+        tagSlug: opts?.tagSlug,
+        collectionId,
+        saleOnly: opts?.saleOnly,
+        priceMin: opts?.priceMin,
+        priceMax: opts?.priceMax,
+        sort,
+        useCollectionSort,
+        campaignProductIds,
+        campaignCategoryIds,
+        ctx,
+        campaigns,
+        page,
+        limit,
+        visibilityWalk: true,
       });
     }
 
-    const poolTruncated = allRows.length > PUBLIC_PRODUCTS_IN_MEMORY_MAX;
-    if (poolTruncated) {
-      allRows = allRows.slice(0, PUBLIC_PRODUCTS_IN_MEMORY_MAX);
-      this.logger.warn(
-        `TODO(scale) listProducts in-memory pool truncated at ${PUBLIC_PRODUCTS_IN_MEMORY_MAX} ` +
-          `(sale=${Boolean(opts?.saleOnly)} priceMin=${opts?.priceMin ?? '-'} ` +
-          `priceMax=${opts?.priceMax ?? '-'} sort=${sort}). ` +
-          `Denorm cardPrice/onSale + SQL pagination.`,
-      );
+    return this.listProductsSqlCardFilters({
+      categoryIds: filterCategoryIds,
+      tagSlug: opts?.tagSlug,
+      collectionId,
+      saleOnly: opts?.saleOnly,
+      priceMin: opts?.priceMin,
+      priceMax: opts?.priceMax,
+      sort,
+      useCollectionSort,
+      campaignProductIds,
+      campaignCategoryIds,
+      ctx,
+      campaigns,
+      page,
+      limit,
+    });
+  }
+
+  private filterListCardsByCardPrice(
+    cards: ProductCard[],
+    opts: { saleOnly?: boolean; priceMin?: number; priceMax?: number },
+  ): ProductCard[] {
+    let out = cards;
+    if (opts.saleOnly) {
+      out = out.filter((p) => p.oldPrice != null && p.oldPrice > p.price);
+    }
+    if (opts.priceMin != null) {
+      out = out.filter((p) => p.price >= opts.priceMin!);
+    }
+    if (opts.priceMax != null) {
+      out = out.filter((p) => p.price <= opts.priceMax!);
+    }
+    return out;
+  }
+
+  private async loadListCardsByIds(
+    ids: string[],
+    ctx: CommerceContext,
+    campaigns: CampaignIn[],
+  ): Promise<ProductCard[]> {
+    if (!ids.length) return [];
+    const rows = await this.prisma.product.findMany({
+      where: { id: { in: ids } },
+      select: productListCardSelect,
+    });
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const ordered = ids
+      .map((id) => byId.get(id))
+      .filter(Boolean) as ProductCardSource[];
+    return this.finalizeProductCards(ordered, ctx, campaigns, { list: true });
+  }
+
+  /** Sale / price / popular — SQL id pages (no in-memory catalog pool). */
+  private async listProductsSqlCardFilters(opts: {
+    categoryIds?: string[];
+    tagSlug?: string;
+    collectionId: string | null;
+    saleOnly?: boolean;
+    priceMin?: number;
+    priceMax?: number;
+    sort: string;
+    useCollectionSort: boolean;
+    campaignProductIds: string[];
+    campaignCategoryIds: string[];
+    ctx: CommerceContext;
+    campaigns: CampaignIn[];
+    page: number;
+    limit: number;
+    /** Visibility rules: scan SQL pages until the requested slice is full. */
+    visibilityWalk?: boolean;
+  }) {
+    const sqlFilters = {
+      categoryIds: opts.categoryIds,
+      tagSlug: opts.tagSlug,
+      collectionId: opts.collectionId ?? undefined,
+      saleOnly: opts.saleOnly,
+      priceMin: opts.priceMin,
+      priceMax: opts.priceMax,
+      sort: opts.sort,
+      useCollectionSort: opts.useCollectionSort,
+      campaignProductIds: opts.campaignProductIds,
+      campaignCategoryIds: opts.campaignCategoryIds,
+    };
+    const postFilter = (cards: ProductCard[]) =>
+      this.filterListCardsByCardPrice(cards, opts);
+
+    if (opts.visibilityWalk) {
+      const needStart = (opts.page - 1) * opts.limit;
+      const needEnd = needStart + opts.limit;
+      const matched: ProductCard[] = [];
+      let sqlOffset = 0;
+      const batchSize = Math.min(Math.max(opts.limit * 4, 36), 120);
+      let sqlTotal = 0;
+      const maxSqlScan = 8000;
+
+      while (matched.length < needEnd) {
+        const { ids, total } = await queryCatalogProductIdsPage(this.prisma, {
+          ...sqlFilters,
+          skip: sqlOffset,
+          take: batchSize,
+        });
+        sqlTotal = total;
+        if (!ids.length) break;
+        sqlOffset += ids.length;
+
+        const cards = postFilter(
+          await this.loadListCardsByIds(ids, opts.ctx, opts.campaigns),
+        );
+        matched.push(...cards);
+
+        if (sqlOffset >= total) break;
+        if (sqlOffset >= maxSqlScan) {
+          this.logger.warn(
+            `listProducts SQL visibility walk stopped after ${maxSqlScan} catalog ids`,
+          );
+          break;
+        }
+      }
+
+      const fullyScanned = sqlOffset >= sqlTotal;
+      return {
+        items: matched.slice(needStart, needEnd),
+        total: fullyScanned ? matched.length : sqlTotal,
+        page: opts.page,
+        limit: opts.limit,
+      };
     }
 
-    let cards = await this.finalizeProductCards(allRows, ctx, campaigns);
+    const { ids, total } = await queryCatalogProductIdsPage(this.prisma, {
+      ...sqlFilters,
+      skip: (opts.page - 1) * opts.limit,
+      take: opts.limit,
+    });
 
-    if (opts?.saleOnly) {
-      cards = cards.filter((p) => p.oldPrice != null && p.oldPrice > p.price);
-    }
-    if (opts?.priceMin != null) {
-      cards = cards.filter((p) => p.price >= opts.priceMin!);
-    }
-    if (opts?.priceMax != null) {
-      cards = cards.filter((p) => p.price <= opts.priceMax!);
-    }
-    if (sort === 'price_asc') cards.sort((a, b) => a.price - b.price);
-    else if (sort === 'price_desc') cards.sort((a, b) => b.price - a.price);
-    else if (sort === 'popular') {
-      cards.sort((a, b) => (b.discountPercent ?? 0) - (a.discountPercent ?? 0));
+    if (!ids.length) {
+      return { items: [], total, page: opts.page, limit: opts.limit };
     }
 
-    const total = cards.length;
-    const pageItems = cards.slice((page - 1) * limit, page * limit);
-    return { items: pageItems, total, page, limit, truncated: poolTruncated };
+    const cards = postFilter(
+      await this.loadListCardsByIds(ids, opts.ctx, opts.campaigns),
+    );
+
+    return { items: cards, total, page: opts.page, limit: opts.limit };
   }
 
   /**
@@ -757,7 +980,7 @@ export class CatalogPublicService {
           where: { product: { active: true, excludeFromCatalog: false } },
           orderBy: { sortOrder: 'asc' },
           include: {
-            product: { select: productCardSelect },
+            product: { select: productListCardSelect },
           },
         },
       },
@@ -769,7 +992,7 @@ export class CatalogPublicService {
         rows.map(async (c) => {
           const sources = c.items.map((it) => it.product).filter(Boolean);
           const products = ctx
-            ? await this.finalizeProductCards(sources, ctx, campaigns)
+            ? await this.finalizeProductCards(sources, ctx, campaigns, { list: true })
             : [];
           const productPreviewUrl =
             c.productPreviewUrl?.trim() ||

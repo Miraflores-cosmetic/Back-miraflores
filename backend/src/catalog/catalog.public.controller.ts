@@ -75,11 +75,27 @@ export class CatalogPublicController {
     return this.catalogPublic.getSetSiblings(slug, this.buyerUserId(req));
   }
 
+  @Get('products/:slug/content')
+  async productContent(@Param('slug') slug: string, @Req() req: { user?: JwtPayload }) {
+    const content = await this.catalogPublic.getProductContentBySlug(
+      slug,
+      this.buyerUserId(req),
+    );
+    if (!content) throw new NotFoundException('Product not found');
+    return content;
+  }
+
   @Get('products/:slug')
-  async product(@Param('slug') slug: string, @Req() req: { user?: JwtPayload }) {
+  async product(
+    @Param('slug') slug: string,
+    @Req() req: { user?: JwtPayload },
+    @Query('fields') fields?: string,
+  ) {
+    const mode = fields?.trim().toLowerCase() === 'full' ? 'full' : 'hero';
     const product = await this.catalogPublic.getProductBySlug(
       slug,
       this.buyerUserId(req),
+      { fields: mode },
     );
     if (!product) throw new NotFoundException('Product not found');
     return product;

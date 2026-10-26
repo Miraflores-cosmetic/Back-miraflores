@@ -1,4 +1,15 @@
+import { Prisma } from '@prisma/client';
 import { isCatalogSellableVariant } from './catalog-price.util';
+
+/** Prisma `where` для объёмов на PLP (без пробников / price ≤ 0). */
+export const catalogSellableVariantWhere = {
+  active: true,
+  price: { gt: 0 },
+  NOT: [
+    { name: { equals: 'пробник', mode: 'insensitive' as const } },
+    { name: { contains: 'пробник', mode: 'insensitive' as const } },
+  ],
+} satisfies Prisma.ProductVariantWhereInput;
 
 /** Минимальный вариант для объёмов на карточке (каталог / избранное). */
 export type CatalogCardVariantSource = {
@@ -48,4 +59,12 @@ export function toCardVolumeOptions(
       maxQty,
     };
   });
+}
+
+/** PLP: sizeRow / модалка только при 2+ sellable объёмах. */
+export function listCardVolumeOptions(
+  variants: CatalogCardVariantSource[],
+): CatalogCardVolumeOption[] | undefined {
+  const options = toCardVolumeOptions(variants);
+  return options.length > 1 ? options : undefined;
 }

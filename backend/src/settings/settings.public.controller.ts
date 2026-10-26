@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Get, Query } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Header, Query } from '@nestjs/common';
 import { Public } from '../common/decorators/public.decorator';
 import { SettingsPublicService } from './settings.service';
 
@@ -15,6 +15,17 @@ export class SettingsPublicController {
   @Get('hero')
   listHero() {
     return this.settings.listHero();
+  }
+
+  /**
+   * Home CMS bundle (hero, promo, sets, faq, gratitude, bestsellers).
+   * Cache: CDN/browser may honor Cache-Control; FE also dedupes in-flight (see docs/settings-home.md).
+   * Auth: public (guest); optional JWT later for group-priced bestsellers.
+   */
+  @Get('home')
+  @Header('Cache-Control', 'public, max-age=60, stale-while-revalidate=300')
+  getHome() {
+    return this.settings.getHome();
   }
 
   @Get('home-promo')

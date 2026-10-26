@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { DiscountsModule } from '../discounts/discounts.module';
 import { SettingsModule } from '../settings/settings.module';
 import { StorageModule } from '../storage/storage.module';
@@ -13,7 +13,12 @@ import { CatalogPublicService } from './catalog.public.service';
 import { CatalogTagsAdminService } from './catalog-tags.admin.service';
 
 @Module({
-  imports: [StorageModule, DiscountsModule, SettingsModule, UserGroupsModule],
+  imports: [
+    StorageModule,
+    DiscountsModule,
+    forwardRef(() => SettingsModule),
+    UserGroupsModule,
+  ],
   controllers: [CatalogAdminController, CatalogPublicController],
   providers: [
     CatalogCategoriesAdminService,

@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMinSize,
   IsArray,
   IsBoolean,
   IsInt,
@@ -28,9 +29,12 @@ export class GratitudeGiftRuleInputDto {
   @Max(100_000_000)
   maxRub?: number | null;
 
-  @IsString()
-  @MinLength(1)
-  variantId!: string;
+  /** Один или несколько вариантов-подарков в правиле. */
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsString({ each: true })
+  @MinLength(1, { each: true })
+  variantIds!: string[];
 
   @IsOptional()
   @IsBoolean()

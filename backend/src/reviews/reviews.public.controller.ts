@@ -36,6 +36,18 @@ export class ReviewsPublicController {
   }
 
   @Public()
+  @Get('product/:slug/meta')
+  productMeta(@Param('slug') slug: string) {
+    let s = slug;
+    try {
+      s = decodeURIComponent(slug);
+    } catch {
+      /* as-is */
+    }
+    return this.reviews.productReviewMeta(s);
+  }
+
+  @Public()
   @Get('product/:slug')
   byProduct(
     @Param('slug') slug: string,

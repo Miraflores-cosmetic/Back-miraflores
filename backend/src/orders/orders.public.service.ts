@@ -122,20 +122,32 @@ export class OrdersPublicService {
   ) {}
 
   /**
-   * Подарок благодарности по порогу суммы товаров **после промокода**.
+   * Подарки благодарности по порогу суммы товаров **после промокода**.
    * Клиентские isGift-линии не принимаем: аттач только с сервера через getApplicableGift.
-   * OOS / inactive — soft skip (заказ без подарка), не блокируем create.
-   * Preview (`GET applicable-gift`) тоже скрывает OOS заранее.
+   * OOS / inactive на отдельном варианте — soft skip этого item; пустой список — без подарков.
    */
-  private async resolveGratitudeGiftLine(
+  private async resolveGratitudeGiftLines(
     goodsAfterPromo: number,
-  ): Promise<SyncedCartItem | null> {
+  ): Promise<SyncedCartItem[]> {
     const gift = await this.settingsPublic.getApplicableGift(goodsAfterPromo);
-    if (!gift.applicable || !gift.variantId) return null;
+    const previewItems =
+      gift.applicable && Array.isArray(gift.items) && gift.items.length > 0
+        ? gift.items
+        : gift.applicable && gift.variantId
+          ? [
+              {
+                variantId: gift.variantId,
+                quantity: gift.quantity ?? 1,
+                productName: gift.productName,
+              },
+            ]
+          : [];
+    if (previewItems.length === 0) return [];
 
-    const variant = await this.prisma.productVariant.findFirst({
+    const variantIds = [...new Set(previewItems.map((i) => i.variantId).filter(Boolean))];
+    const variants = await this.prisma.productVariant.findMany({
       where: {
-        id: gift.variantId,
+        id: { in: variantIds },
         active: true,
         product: { active: true },
       },
@@ -148,33 +160,38 @@ export class OrdersPublicService {
         product: { select: { name: true } },
       },
     });
-    if (!variant) {
-      this.logger.warn(
-        `Gratitude gift skipped: variant missing/inactive (${gift.variantId})`,
-      );
-      return null;
-    }
+    const byId = new Map(variants.map((v) => [v.id, v]));
 
-    const qty = Math.max(1, gift.quantity ?? 1);
-    const available = Math.max(0, variant.stock - variant.stockReserve);
-    if (available < qty) {
-      this.logger.warn(
-        `Gratitude gift skipped: OOS for ${variant.id} (need ${qty}, available ${available})`,
-      );
-      return null;
+    const lines: SyncedCartItem[] = [];
+    for (const preview of previewItems) {
+      const variant = byId.get(preview.variantId);
+      if (!variant) {
+        this.logger.warn(
+          `Gratitude gift skipped: variant missing/inactive (${preview.variantId})`,
+        );
+        continue;
+      }
+      const qty = Math.max(1, preview.quantity ?? 1);
+      const available = Math.max(0, variant.stock - variant.stockReserve);
+      if (available < qty) {
+        this.logger.warn(
+          `Gratitude gift skipped: OOS for ${variant.id} (need ${qty}, available ${available})`,
+        );
+        continue;
+      }
+      lines.push({
+        variantId: variant.id,
+        shadeId: null,
+        shadeName: null,
+        name: variant.product.name,
+        variantName: variant.name,
+        sku: variant.sku?.trim() || `gift-${variant.id}`,
+        price: 0,
+        qty,
+        isGratitudeGift: true,
+      });
     }
-
-    return {
-      variantId: variant.id,
-      shadeId: null,
-      shadeName: null,
-      name: variant.product.name,
-      variantName: variant.name,
-      sku: variant.sku?.trim() || `gift-${variant.id}`,
-      price: 0,
-      qty,
-      isGratitudeGift: true,
-    };
+    return lines;
   }
 
   private serializeCreated(order: {
@@ -592,18 +609,21 @@ export class OrdersPublicService {
     const giftCertificateCode = giftApply?.code ?? null;
     const total = Math.max(0, payableForGift - giftCertificateAmount);
 
-    // Подарок благодарности — только к physical-заказам (не к digital gift-denom).
+    // Подарки благодарности — только к physical-заказам (не к digital gift-denom).
     // Порог — payableAfterPromo (товары после промо), не сырой subtotal.
-    const gratitudeGift = giftOnly
-      ? null
-      : await this.resolveGratitudeGiftLine(payableAfterPromo);
-    const itemsForOrder: SyncedCartItem[] = gratitudeGift
-      ? [...(items as SyncedCartItem[]), gratitudeGift]
-      : (items as SyncedCartItem[]);
+    const gratitudeGifts = giftOnly
+      ? []
+      : await this.resolveGratitudeGiftLines(payableAfterPromo);
+    const itemsForOrder: SyncedCartItem[] = [
+      ...(items as SyncedCartItem[]),
+      ...gratitudeGifts,
+    ];
 
-    if (gratitudeGift) {
+    if (gratitudeGifts.length > 0) {
       this.logger.log(
-        `Gratitude gift attached: variant=${gratitudeGift.variantId} qty=${gratitudeGift.qty} goodsAfterPromo=${payableAfterPromo}`,
+        `Gratitude gifts attached: n=${gratitudeGifts.length} variants=${gratitudeGifts
+          .map((g) => g.variantId)
+          .join(',')} goodsAfterPromo=${payableAfterPromo}`,
       );
     } else {
       this.logger.log(
