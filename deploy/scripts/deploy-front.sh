@@ -108,6 +108,12 @@ YANDEX_MAP_KEY='${DEPLOY_YANDEX_MAP_API_KEY:-}'
 if [[ -z "\$YANDEX_MAP_KEY" && -f .env ]]; then
   YANDEX_MAP_KEY=\$(grep -E '^VITE_PUBLIC_YANDEX_MAP_API_KEY=' .env | head -1 | cut -d= -f2- || true)
 fi
+if [[ -z "\$YANDEX_MAP_KEY" && -f "\$DEPLOY_PATH/Admin/.env.local" ]]; then
+  YANDEX_MAP_KEY=\$(grep -E '^NEXT_PUBLIC_YANDEX_MAP_API_KEY=' "\$DEPLOY_PATH/Admin/.env.local" | head -1 | cut -d= -f2- || true)
+fi
+if [[ -z "\$YANDEX_MAP_KEY" ]]; then
+  echo "warn: Yandex Map key пуст — задайте DEPLOY_YANDEX_MAP_API_KEY в deploy/deploy.env" >&2
+fi
 
 cat > .env <<EOF
 VITE_API_URL=/api/v1
@@ -118,7 +124,11 @@ EOF
 
 echo "==> npm ci (devDependencies — vite, types)"
 unset NODE_ENV
-npm ci
+npm ci --ignore-scripts
+echo "==> build @miraflores/order-chat-core"
+cd "\$DEPLOY_PATH"
+npm run build -w @miraflores/order-chat-core
+cd "\$FRONT"
 
 echo "==> npm run build"
 npm run build
@@ -161,6 +171,12 @@ YANDEX_MAP_KEY='${DEPLOY_YANDEX_MAP_API_KEY:-}'
 if [[ -z "\$YANDEX_MAP_KEY" && -f .env ]]; then
   YANDEX_MAP_KEY=\$(grep -E '^VITE_PUBLIC_YANDEX_MAP_API_KEY=' .env | head -1 | cut -d= -f2- || true)
 fi
+if [[ -z "\$YANDEX_MAP_KEY" && -f "\$DEPLOY_PATH/Admin/.env.local" ]]; then
+  YANDEX_MAP_KEY=\$(grep -E '^NEXT_PUBLIC_YANDEX_MAP_API_KEY=' "\$DEPLOY_PATH/Admin/.env.local" | head -1 | cut -d= -f2- || true)
+fi
+if [[ -z "\$YANDEX_MAP_KEY" ]]; then
+  echo "warn: Yandex Map key пуст — задайте DEPLOY_YANDEX_MAP_API_KEY в deploy/deploy.env" >&2
+fi
 
 cat > .env <<EOF
 VITE_API_URL=/api/v1
@@ -171,7 +187,11 @@ EOF
 
 echo "==> npm ci (devDependencies — vite, types)"
 unset NODE_ENV
-npm ci
+npm ci --ignore-scripts
+echo "==> build @miraflores/order-chat-core"
+cd "\$DEPLOY_PATH"
+npm run build -w @miraflores/order-chat-core
+cd "\$FRONT"
 
 echo "==> npm run build"
 npm run build
