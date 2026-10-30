@@ -71,11 +71,16 @@ async function getCdekToken(): Promise<string> {
 // SAFE REQUEST WITH TIMEOUT
 // ============================================
 
-async function cdekRequest(endpoint: string, options: {
-  method?: string
-  body?: any
-  params?: Record<string, any>
-} = {}) {
+async function cdekRequest(
+  endpoint: string,
+  options: {
+    method?: string
+    body?: any
+    params?: Record<string, any>
+    /** Таймаут ms (города size=10000 на медленном uplink могут >15s). */
+    timeoutMs?: number
+  } = {},
+) {
   const token = await getCdekToken()
 
   const url = new URL(`${CDEK_API_URL}/${endpoint}`)
@@ -86,7 +91,10 @@ async function cdekRequest(endpoint: string, options: {
   }
 
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 15000)
+  const timeout = setTimeout(
+    () => controller.abort(),
+    options.timeoutMs ?? 15000,
+  )
 
   try {
     return await fetch(url.toString(), {
@@ -129,44 +137,82 @@ export async function GET(req: NextRequest) {
   const action = searchParams.get('action')
 
   try {
-    // ✅ CITIES WITH CACHE
+    // ✅ CITIES — поиск по city идёт сразу в СДЭК (без выгрузки всей страны).
+    // Полный справочник (size≥1000 без city) кешируется по country_codes.
     if (method === 'location/cities') {
-      const cityFilter = searchParams.get('city')?.toLowerCase()
+      const cityRaw = (searchParams.get('city') || '').trim()
+      const cityFilter = cityRaw.toLowerCase()
       const countryCodes = (
         searchParams.get('country_codes') || 'RU'
       ).toUpperCase()
+      const sizeParam = Number(searchParams.get('size'))
+      const size = Number.isFinite(sizeParam) && sizeParam > 0
+        ? Math.min(Math.floor(sizeParam), 10000)
+        : cityFilter
+          ? 40
+          : 10000
 
       const cached = citiesCacheByCountry.get(countryCodes)
-      if (cached && Date.now() - cached.time < CITIES_CACHE_TTL_MS) {
-        if (cityFilter) {
-          const filtered = cached.list.filter((c: any) =>
-            c.city?.toLowerCase().includes(cityFilter)
-          )
+      const cacheFresh =
+        cached && Date.now() - cached.time < CITIES_CACHE_TTL_MS
+
+      // Быстрый поиск: не ждём полный дамп страны (KZ/BY/KG иначе таймаутятся).
+      if (cityFilter) {
+        if (cacheFresh) {
+          const filtered = cached!.list
+            .filter((c: any) => c.city?.toLowerCase().includes(cityFilter))
+            .slice(0, size)
           return json(filtered)
         }
-        return json(cached.list)
+        const res = await cdekRequest('location/cities', {
+          params: {
+            size,
+            country_codes: countryCodes,
+            city: cityRaw,
+          },
+          timeoutMs: 20000,
+        })
+        if (!res.ok) {
+          return json(
+            { error: `CDEK cities ${res.status}`, detail: await res.text() },
+            502,
+          )
+        }
+        const data = await res.json()
+        const list = Array.isArray(data) ? data : data.items || []
+        return json(list)
+      }
+
+      if (cacheFresh) {
+        return json(
+          size < cached!.list.length
+            ? cached!.list.slice(0, size)
+            : cached!.list,
+        )
       }
 
       const res = await cdekRequest('location/cities', {
         params: {
-          size: 10000,
+          size,
           country_codes: countryCodes,
         },
+        timeoutMs: size >= 1000 ? 45000 : 20000,
       })
-
+      if (!res.ok) {
+        return json(
+          { error: `CDEK cities ${res.status}`, detail: await res.text() },
+          502,
+        )
+      }
       const data = await res.json()
       const list = Array.isArray(data) ? data : data.items || []
 
-      citiesCacheByCountry.set(countryCodes, {
-        list,
-        time: Date.now(),
-      })
-
-      if (cityFilter) {
-        const filtered = list.filter((c: any) =>
-          c.city?.toLowerCase().includes(cityFilter)
-        )
-        return json(filtered)
+      // Кешируем только «полный» снимок страны
+      if (size >= 1000 && !cityFilter) {
+        citiesCacheByCountry.set(countryCodes, {
+          list,
+          time: Date.now(),
+        })
       }
 
       return json(list)

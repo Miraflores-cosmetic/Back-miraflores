@@ -68,8 +68,10 @@ export function CdekPvzPicker({
     normalizeCdekCountryCode(countryCodeProp, 'RU'),
   );
   const [cities, setCities] = useState<CdekCity[]>([]);
+  const [searchCities, setSearchCities] = useState<CdekCity[]>([]);
   const [citiesLoading, setCitiesLoading] = useState(true);
   const [citiesError, setCitiesError] = useState<string | null>(null);
+  const [citySearchLoading, setCitySearchLoading] = useState(false);
   const [selectedCity, setSelectedCity] = useState<CdekCity | null>(null);
   const [cityQuery, setCityQuery] = useState('');
   const [showDropdown, setShowDropdown] = useState(false);
@@ -93,6 +95,7 @@ export function CdekPvzPicker({
     setSelectedCity(null);
     setPvzList([]);
     setCityQuery('');
+    setSearchCities([]);
     setPvzQuery('');
     onCountryChange?.(next);
   }
@@ -104,22 +107,47 @@ export function CdekPvzPicker({
       setCitiesError(null);
       setSelectedCity(null);
       setPvzList([]);
+      setSearchCities([]);
+      setCityQuery('');
       try {
-        const data = await getCities({
-          country_codes: countryCode,
-          size: 10000,
-        });
-        if (cancelled) return;
-        const list = Array.isArray(data) ? data : [];
-        const sorted = [...list].sort((a, b) =>
-          a.city.localeCompare(b.city, 'ru'),
+        const names = [...country.priorityCities];
+        if (
+          cityHint &&
+          !names.some((n) => n.toLowerCase() === cityHint.toLowerCase())
+        ) {
+          names.unshift(cityHint);
+        }
+        const found = await Promise.all(
+          names.map(async (name) => {
+            try {
+              const list = await getCities({
+                country_codes: countryCode,
+                city: name,
+                size: 10,
+              });
+              const arr = Array.isArray(list) ? list : [];
+              return (
+                arr.find(
+                  (c) => c.city.toLowerCase() === name.toLowerCase(),
+                ) ||
+                arr[0] ||
+                null
+              );
+            } catch {
+              return null;
+            }
+          }),
         );
-        const priority = country.priorityCities
-          .map((name) => sorted.find((c) => c.city === name))
-          .filter(Boolean) as CdekCity[];
-        const priorityNames = new Set(country.priorityCities);
-        const rest = sorted.filter((c) => !priorityNames.has(c.city));
-        const ordered = [...priority, ...rest];
+        if (cancelled) return;
+        const byCode = new Map<number, CdekCity>();
+        for (const c of found) {
+          if (c?.code) byCode.set(c.code, c);
+        }
+        const ordered = [...byCode.values()];
+        if (!ordered.length) {
+          setCitiesError('Не удалось загрузить города');
+          return;
+        }
         setCities(ordered);
         const needle = cityHint.toLowerCase();
         const def =
@@ -141,9 +169,43 @@ export function CdekPvzPicker({
     return () => {
       cancelled = true;
     };
-    // cityHint намеренно только при смене страны — иначе поиск города дёргает список
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reload on country
   }, [countryCode]);
+
+  useEffect(() => {
+    const q = cityQuery.trim();
+    if (q.length < 2) {
+      setSearchCities([]);
+      setCitySearchLoading(false);
+      return;
+    }
+    let cancelled = false;
+    const t = window.setTimeout(() => {
+      setCitySearchLoading(true);
+      void getCities({
+        country_codes: countryCode,
+        city: q,
+        size: 40,
+      })
+        .then((list) => {
+          if (cancelled) return;
+          const arr = Array.isArray(list) ? list : [];
+          setSearchCities(
+            [...arr].sort((a, b) => a.city.localeCompare(b.city, 'ru')),
+          );
+        })
+        .catch(() => {
+          if (!cancelled) setSearchCities([]);
+        })
+        .finally(() => {
+          if (!cancelled) setCitySearchLoading(false);
+        });
+    }, 280);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, [cityQuery, countryCode]);
 
   useEffect(() => {
     if (!selectedCity) return;
@@ -189,10 +251,13 @@ export function CdekPvzPicker({
   }, [showDropdown]);
 
   const filteredCities = useMemo(() => {
-    if (!cityQuery.trim()) return cities.slice(0, 40);
-    const q = cityQuery.toLowerCase().trim();
-    return cities.filter((c) => c.city.toLowerCase().includes(q)).slice(0, 40);
-  }, [cities, cityQuery]);
+    if (cityQuery.trim().length >= 2) {
+      if (searchCities.length) return searchCities.slice(0, 40);
+      const q = cityQuery.toLowerCase().trim();
+      return cities.filter((c) => c.city.toLowerCase().includes(q)).slice(0, 40);
+    }
+    return cities.slice(0, 40);
+  }, [cities, cityQuery, searchCities]);
 
   const filteredPvz = useMemo(() => {
     if (!pvzQuery.trim()) return pvzList;
@@ -297,6 +362,9 @@ export function CdekPvzPicker({
                     autoFocus
                   />
                 </li>
+                {citySearchLoading ? (
+                  <li className={styles.status}>Поиск…</li>
+                ) : null}
                 {filteredCities.map((c) => (
                   <li key={`${c.code}-${c.city_uuid}`}>
                     <button
@@ -312,7 +380,13 @@ export function CdekPvzPicker({
                         .join(' ')}
                       onClick={() => {
                         setSelectedCity(c);
+                        setCities((prev) =>
+                          prev.some((x) => x.code === c.code)
+                            ? prev
+                            : [c, ...prev],
+                        );
                         setCityQuery('');
+                        setSearchCities([]);
                         setShowDropdown(false);
                         setPvzQuery('');
                       }}
