@@ -64,17 +64,37 @@ export async function estimateShippingCostRub(
     // CDEK
     const cityQuery = selection.city.trim();
     if (!cityQuery) return null;
+    const countryCodes = (selection.countryCode || 'RU').toUpperCase();
+    const cityCodeNum = Number(selection.cityCode);
+    if (Number.isFinite(cityCodeNum) && cityCodeNum > 0) {
+      const { tariffs } = await calculateCdekDelivery({
+        fromCityCode: CDEK_ORIGIN_CITY_CODE,
+        toCityCode: cityCodeNum,
+        weight: DEFAULT_WEIGHT_G,
+      });
+      const filtered =
+        selection.dropoff === 'courier'
+          ? filterCdekCourierTariffs(tariffs)
+          : filterCdekPvzTariffs(tariffs);
+      if (!filtered.length) return null;
+      const cheapest = filtered.reduce((min, t) =>
+        t.delivery_sum < min.delivery_sum ? t : min,
+      );
+      return cheapest.delivery_sum > 0
+        ? Math.round(cheapest.delivery_sum)
+        : null;
+    }
     const postal = cleanRuPostalCode(selection.postalCode);
     let cities = await getCities({
       city: cityQuery,
-      country_codes: 'RU',
+      country_codes: countryCodes,
       size: 40,
       ...(postal ? { postal_code: postal } : {}),
     });
     if ((!cities || cities.length === 0) && postal) {
       cities = await getCities({
         city: cityQuery,
-        country_codes: 'RU',
+        country_codes: countryCodes,
         size: 40,
       });
     }

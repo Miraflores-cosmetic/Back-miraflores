@@ -136,6 +136,10 @@ export function OrderAddressEditModal({
         ...(pending.lat != null ? { lat: pending.lat } : {}),
         ...(pending.lon != null ? { lon: pending.lon } : {}),
         ...(pending.pvzId ? { pvzId: pending.pvzId } : {}),
+        ...(pending.cityCode?.trim()
+          ? { cid: pending.cityCode.trim() }
+          : {}),
+        ...(pending.countryCode ? { cc: pending.countryCode } : {}),
       },
       pending.comment,
     );

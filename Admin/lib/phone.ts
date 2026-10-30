@@ -9,11 +9,13 @@ export function ruPhoneDigits(value: string): string {
 
 /**
  * Нормализация цифр: 8 → 7; мобильный 9XX без кода страны → 7…
- * Не режем узбекский 998.
+ * Не режем 998 (UZ), 375 (BY), 996 (KG).
  */
 export function normalizeRuPhoneDigits(digits: string): string {
   if (!digits) return '';
   if (digits.startsWith('998')) return digits.slice(0, 12);
+  if (digits.startsWith('375')) return digits.slice(0, 12);
+  if (digits.startsWith('996')) return digits.slice(0, 12);
 
   let d = digits;
   if (d[0] === '8') {
@@ -33,7 +35,7 @@ export function normalizePhoneDigits(raw: string): string {
   return normalizeRuPhoneDigits(ruPhoneDigits(raw));
 }
 
-/** Маска +7 (XXX) XXX-XX-XX */
+/** Маска +7 (XXX) XXX-XX-XX; также BY/KG/UZ. */
 export function formatRuPhoneDisplay(digitsAfterNormalize: string): string {
   const d = digitsAfterNormalize;
   if (!d) return '';
@@ -46,6 +48,23 @@ export function formatRuPhoneDisplay(digitsAfterNormalize: string): string {
       return `+998(${u.slice(3, 5)}) ${u.slice(5, 8)}-${u.slice(8)}`;
     }
     return `+998(${u.slice(3, 5)}) ${u.slice(5, 8)}-${u.slice(8, 10)}-${u.slice(10, 12)}`;
+  }
+  if (d.startsWith('375')) {
+    const u = d.slice(0, 12);
+    if (u.length <= 3) return '+375';
+    if (u.length <= 5) return `+375 (${u.slice(3)}`;
+    if (u.length <= 8) return `+375 (${u.slice(3, 5)}) ${u.slice(5)}`;
+    if (u.length <= 10) {
+      return `+375 (${u.slice(3, 5)}) ${u.slice(5, 8)}-${u.slice(8)}`;
+    }
+    return `+375 (${u.slice(3, 5)}) ${u.slice(5, 8)}-${u.slice(8, 10)}-${u.slice(10, 12)}`;
+  }
+  if (d.startsWith('996')) {
+    const u = d.slice(0, 12);
+    if (u.length <= 3) return '+996';
+    if (u.length <= 6) return `+996 ${u.slice(3)}`;
+    if (u.length <= 9) return `+996 ${u.slice(3, 6)} ${u.slice(6)}`;
+    return `+996 ${u.slice(3, 6)} ${u.slice(6, 9)}-${u.slice(9, 12)}`;
   }
 
   if (!d.startsWith('7')) {
@@ -74,11 +93,13 @@ export function formatPhoneInputValue(rawInput: string): string {
   return formatRuPhoneDisplay(normalizeRuPhoneDigits(ruPhoneDigits(rawInput)));
 }
 
-/** РФ: 11 цифр с 7; либо 998…; иначе 10–15 цифр. */
+/** РФ/KZ +7; BY +375; KG +996; UZ +998; иначе 10–15 цифр. */
 export function isValidPhone(raw: string): boolean {
   const d = normalizePhoneDigits(raw);
   if (!d) return false;
-  if (d.startsWith('998')) return d.length === 12;
+  if (d.startsWith('998') || d.startsWith('375') || d.startsWith('996')) {
+    return d.length === 12;
+  }
   if (d.length === 11 && d.startsWith('7')) return true;
   if (d.length === 10) return true;
   return d.length >= 10 && d.length <= 15;

@@ -14,6 +14,34 @@
   text-transform: uppercase;
 }
 
+.countryTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.countryTab {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border, #e5e5e5);
+  border-radius: 6px;
+  background: var(--color-white);
+  font-family: var(--font-open-sans);
+  font-size: var(--text-caption);
+  color: var(--color-ink-black);
+  cursor: pointer;
+}
+
+.countryTab:hover {
+  border-color: var(--color-ink-black);
+}
+
+.countryTabActive {
+  border-color: var(--color-ink-black);
+  background: var(--color-bright-snow);
+  font-weight: 600;
+}
+
 .cityWrap {
   position: relative;
 }

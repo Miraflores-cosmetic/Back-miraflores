@@ -18,6 +18,10 @@ export type JcosAddressMeta = {
   lat?: number;
   /** id пункта (CDEK code / Yandex pickup point id / Ozon map_point_id) */
   pvzId?: string;
+  /** СДЭК: код города (location/cities.code) для калькулятора */
+  cid?: string;
+  /** СДЭК: ISO-2 страны назначения (RU/KZ/BY/KG) */
+  cc?: string;
 };
 
 function parseMetaFirstLine(first: string): JcosAddressMeta | null {
@@ -41,6 +45,14 @@ function parseMetaFirstLine(first: string): JcosAddressMeta | null {
       if (Number.isFinite(n)) meta.lat = n;
     } else if (key === 'pvz' && val) {
       meta.pvzId = val;
+    } else if (key === 'cid' && val) {
+      try {
+        meta.cid = decodeURIComponent(val);
+      } catch {
+        meta.cid = val;
+      }
+    } else if (key === 'cc' && val) {
+      meta.cc = val.trim().toUpperCase();
     } else if (key === 'dropoff' && (val === 'pvz' || val === 'courier')) {
       meta.dropoff = val;
     }
@@ -84,6 +96,14 @@ export function buildJcosAddress2WithMeta(
   const pvz = meta.pvzId?.trim();
   if (pvz) {
     line += `|pvz=${pvz}`;
+  }
+  const cid = meta.cid?.trim();
+  if (cid) {
+    line += `|cid=${encodeURIComponent(cid)}`;
+  }
+  const cc = meta.cc?.trim().toUpperCase();
+  if (cc) {
+    line += `|cc=${cc}`;
   }
   line += `__`;
   const c = (userComment || '').trim();

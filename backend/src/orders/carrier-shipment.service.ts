@@ -58,6 +58,16 @@ function asSnap(raw: unknown): ShippingSnap {
   return raw as ShippingSnap;
 }
 
+/** ISO-2 страны из __VSP__/__JCOS__ (|cc=KZ). */
+function countryCodeFromComment(comment?: string | null): string {
+  const s = (comment ?? '').trim();
+  const m = s.match(/__(?:VSP|JCOS):carrier=\w+([^_]*)__/i);
+  if (!m) return 'RU';
+  const r = (m[1] || '').match(/(?:^|\|)cc=([A-Za-z]{2})/i);
+  const cc = (r?.[1] || '').toUpperCase();
+  return /^[A-Z]{2}$/.test(cc) ? cc : 'RU';
+}
+
 @Injectable()
 export class CarrierShipmentService {
   private readonly logger = new Logger(CarrierShipmentService.name);
@@ -217,6 +227,7 @@ export class CarrierShipmentService {
         );
       }
       payload.to_location = {
+        country_code: countryCodeFromComment(snap.comment),
         city,
         address: addressLine,
         ...(snap.postalCode ? { postal_code: snap.postalCode } : {}),

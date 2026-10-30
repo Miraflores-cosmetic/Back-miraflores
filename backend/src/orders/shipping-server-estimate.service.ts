@@ -36,11 +36,12 @@ const CDEK_EXCLUDED_TARIFF_CODES = new Set<number>([358]);
 function parseVspMeta(comment?: string | null): {
   carrier?: string;
   cid?: string;
+  cc?: string;
   dropoff?: string;
   pvz?: string;
 } {
   const s = (comment ?? '').trim();
-  const m = s.match(/__VSP:carrier=(\w+)([^_]*)__/i);
+  const m = s.match(/__(?:VSP|JCOS):carrier=(\w+)([^_]*)__/i);
   if (!m) return {};
   const tail = m[2] || '';
   const pick = (key: string) => {
@@ -54,9 +55,11 @@ function parseVspMeta(comment?: string | null): {
     }
     return v.trim();
   };
+  const cc = pick('cc').toUpperCase();
   return {
     carrier: m[1]?.toLowerCase(),
     cid: pick('cid'),
+    ...(cc ? { cc } : {}),
     dropoff: pick('dropoff'),
     pvz: pick('pvz'),
   };
@@ -275,7 +278,11 @@ export class ShippingServerEstimateService {
         '44',
       10,
     );
-    const toLocation: Record<string, string | number> = { country_code: 'RU' };
+    const countryCode =
+      meta.cc && /^[A-Z]{2}$/.test(meta.cc) ? meta.cc : 'RU';
+    const toLocation: Record<string, string | number> = {
+      country_code: countryCode,
+    };
     if (Number.isFinite(cityCode) && cityCode > 0) toLocation.code = cityCode;
     if (postal) toLocation.postal_code = postal;
 

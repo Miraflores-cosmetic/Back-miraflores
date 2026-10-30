@@ -6,6 +6,7 @@ import {
   jcosCarrierDisplayName,
   parseJcosAddressMeta,
 } from '@/lib/shipping/addressShippingMeta';
+import { normalizeCdekCountryCode } from '@/lib/shipping/cdekCountries';
 
 /** Поля адреса ЛК / DTO без служебных timestamps. */
 export type BuyerAddressFields = {
@@ -83,6 +84,12 @@ export function shippingSelectionToAddressPayload(
         ...(selection.lat != null ? { lat: selection.lat } : {}),
         ...(selection.lon != null ? { lon: selection.lon } : {}),
         ...(selection.pvzId ? { pvzId: selection.pvzId } : {}),
+        ...(selection.cityCode?.trim()
+          ? { cid: selection.cityCode.trim() }
+          : {}),
+        ...(selection.countryCode
+          ? { cc: selection.countryCode }
+          : {}),
       },
       selection.comment,
     ),
@@ -111,6 +118,8 @@ export function addressToShippingSeed(
     | 'lat'
     | 'lon'
     | 'pvzId'
+    | 'cityCode'
+    | 'countryCode'
   >
 > {
   const { meta, comment } = parseJcosAddressMeta(a.comment ?? '');
@@ -130,6 +139,10 @@ export function addressToShippingSeed(
           lat: meta.lat,
           lon: meta.lon,
           pvzId: meta.pvzId,
+          ...(meta.cid?.trim() ? { cityCode: meta.cid.trim() } : {}),
+          ...(meta.cc?.trim()
+            ? { countryCode: normalizeCdekCountryCode(meta.cc) }
+            : {}),
         }
       : {}),
   };

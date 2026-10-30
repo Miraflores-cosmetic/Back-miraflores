@@ -113,11 +113,11 @@ function json(data: unknown, status = 200) {
 }
 
 // ============================================
-// CITIES CACHE (24H)
+// CITIES CACHE (24H) — по country_codes
 // ============================================
 
-let citiesCache: any[] | null = null
-let citiesCacheTime = 0
+const citiesCacheByCountry = new Map<string, { list: any[]; time: number }>()
+const CITIES_CACHE_TTL_MS = 86400000
 
 // ============================================
 // GET
@@ -132,30 +132,35 @@ export async function GET(req: NextRequest) {
     // ✅ CITIES WITH CACHE
     if (method === 'location/cities') {
       const cityFilter = searchParams.get('city')?.toLowerCase()
+      const countryCodes = (
+        searchParams.get('country_codes') || 'RU'
+      ).toUpperCase()
 
-      // Если кеш есть и нужна фильтрация — фильтруем из кеша
-      if (citiesCache && Date.now() - citiesCacheTime < 86400000) {
+      const cached = citiesCacheByCountry.get(countryCodes)
+      if (cached && Date.now() - cached.time < CITIES_CACHE_TTL_MS) {
         if (cityFilter) {
-          const filtered = citiesCache.filter((c: any) =>
+          const filtered = cached.list.filter((c: any) =>
             c.city?.toLowerCase().includes(cityFilter)
           )
           return json(filtered)
         }
-        return json(citiesCache)
+        return json(cached.list)
       }
 
       const res = await cdekRequest('location/cities', {
         params: {
           size: 10000,
-          country_codes: searchParams.get('country_codes') || 'RU',
+          country_codes: countryCodes,
         },
       })
 
       const data = await res.json()
       const list = Array.isArray(data) ? data : data.items || []
 
-      citiesCache = list
-      citiesCacheTime = Date.now()
+      citiesCacheByCountry.set(countryCodes, {
+        list,
+        time: Date.now(),
+      })
 
       if (cityFilter) {
         const filtered = list.filter((c: any) =>

@@ -15,11 +15,18 @@ import type {
   JcosShippingCarrier,
   JcosShippingDropoff,
 } from '@/lib/shipping/addressShippingMeta';
+import {
+  CDEK_COUNTRIES,
+  cdekCountryDef,
+  normalizeCdekCountryCode,
+  type CdekCountryCode,
+} from '@/lib/shipping/cdekCountries';
 import { yandexPointIdForCargoOffers } from '@/lib/shipping/yandexPickupPointId';
 import { YANDEX_DELIVERY_ENABLED } from '@/lib/shipping/deliveryCarriers';
 import type { YandexPickupPoint } from '@/lib/shipping/types';
 import { CdekPvzPicker, type CdekPvzChoice } from './CdekPvzPicker';
 import { YandexPvzPicker } from './YandexPvzPicker';
+import pickerStyles from './shippingPicker.module.css';
 import panelStyles from './SideDrawerPanel.module.css';
 import styles from './ShippingCarrierModal.module.css';
 
@@ -40,6 +47,10 @@ export type ShippingSelection = {
   lat?: number;
   lon?: number;
   pvzId?: string;
+  /** СДЭК: код города location/cities */
+  cityCode?: string;
+  /** СДЭК: ISO-2 страны назначения */
+  countryCode?: CdekCountryCode;
   /** Подсказка стоимости доставки (руб.), если уже посчитана снаружи */
   shippingCostHint?: number;
 };
@@ -61,6 +72,8 @@ type Seed = Partial<
     | 'lat'
     | 'lon'
     | 'pvzId'
+    | 'cityCode'
+    | 'countryCode'
   >
 >;
 
@@ -139,6 +152,8 @@ export function ShippingCarrierModal({
   const [lat, setLat] = useState<number | undefined>();
   const [lon, setLon] = useState<number | undefined>();
   const [pvzId, setPvzId] = useState<string | undefined>();
+  const [cityCode, setCityCode] = useState<string | undefined>();
+  const [countryCode, setCountryCode] = useState<CdekCountryCode>('RU');
   const [errors, setErrors] = useState<Partial<Record<FieldKey, string>>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -164,6 +179,8 @@ export function ShippingCarrierModal({
     setLat(s?.lat);
     setLon(s?.lon);
     setPvzId(hiddenSeedCarrier ? undefined : s?.pvzId);
+    setCityCode(hiddenSeedCarrier ? undefined : s?.cityCode);
+    setCountryCode(normalizeCdekCountryCode(s?.countryCode, 'RU'));
     setErrors({});
     setFormError(null);
     setSubmitting(false);
@@ -224,6 +241,8 @@ export function ShippingCarrierModal({
     setCity(pvz.cityName || city);
     setAddress(pvz.address || address);
     setPostalCode(pvz.postalCode || postalCode);
+    setCityCode(pvz.cityCode?.trim() || undefined);
+    setCountryCode(normalizeCdekCountryCode(pvz.countryCode, countryCode));
     if (pvz.region?.trim()) setRegion(pvz.region.trim());
     if (
       pvz.lat != null &&
@@ -239,6 +258,18 @@ export function ShippingCarrierModal({
     }
     clearFieldError('city');
     clearFieldError('address');
+  }
+
+  function changeCdekCountry(next: CdekCountryCode) {
+    if (next === countryCode) return;
+    setCountryCode(next);
+    setPvzId(undefined);
+    setCityCode(undefined);
+    setCity(cdekCountryDef(next).defaultCity);
+    setAddress('');
+    setPostalCode('');
+    setLat(undefined);
+    setLon(undefined);
   }
 
   function handleYandexPvz(pvz: YandexPickupPoint) {
@@ -308,7 +339,7 @@ export function ShippingCarrierModal({
     if (!address.trim()) next.address = 'Укажите адрес';
     const phoneRaw = phone.trim();
     if (phoneRaw && !isValidPhone(phoneRaw)) {
-      next.phone = 'Введите номер: +7 (9XX) XXX-XX-XX';
+      next.phone = 'Введите номер с кодом страны (+7, +375, +996…)';
     }
     if (dropoff === 'pvz' && !pvzId?.trim()) {
       setFormError('Выберите пункт выдачи');
@@ -342,6 +373,10 @@ export function ShippingCarrierModal({
       ...(lat != null && Number.isFinite(lat) ? { lat } : {}),
       ...(lon != null && Number.isFinite(lon) ? { lon } : {}),
       ...(dropoff === 'pvz' && pvzId?.trim() ? { pvzId: pvzId.trim() } : {}),
+      ...(carrier === 'cdek' && cityCode?.trim()
+        ? { cityCode: cityCode.trim() }
+        : {}),
+      ...(carrier === 'cdek' ? { countryCode } : {}),
     });
     setSubmitting(false);
     if (closeAfterConfirm) onClose();
@@ -515,8 +550,12 @@ export function ShippingCarrierModal({
                 {carrier === 'cdek' && dropoff === 'pvz' ? (
                   <CdekPvzPicker
                     onChoose={handleCdekPvz}
-                    defaultCity={city || 'Москва'}
+                    defaultCity={
+                      city || cdekCountryDef(countryCode).defaultCity
+                    }
                     selectedPvzId={pvzId ?? null}
+                    countryCode={countryCode}
+                    onCountryChange={changeCdekCountry}
                   />
                 ) : null}
                 {carrier === 'yandex' && dropoff === 'pvz' ? (
@@ -534,11 +573,48 @@ export function ShippingCarrierModal({
                   </p>
                 ) : null}
                 {dropoff === 'courier' ? (
-                  <AddressMap
-                    eager
-                    hintCity={city.trim() || 'Москва'}
-                    onSelect={handleCourierMap}
-                  />
+                  <>
+                    {carrier === 'cdek' ? (
+                      <div>
+                        <p className={pickerStyles.fieldLabel}>Страна</p>
+                        <div
+                          className={pickerStyles.countryTabs}
+                          role="tablist"
+                          aria-label="Страна СДЭК"
+                        >
+                          {CDEK_COUNTRIES.map((c) => (
+                            <button
+                              key={c.code}
+                              type="button"
+                              role="tab"
+                              aria-selected={countryCode === c.code}
+                              className={[
+                                pickerStyles.countryTab,
+                                countryCode === c.code
+                                  ? pickerStyles.countryTabActive
+                                  : '',
+                              ]
+                                .filter(Boolean)
+                                .join(' ')}
+                              onClick={() => changeCdekCountry(c.code)}
+                            >
+                              {c.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                    <AddressMap
+                      eager
+                      hintCity={
+                        city.trim() ||
+                        (carrier === 'cdek'
+                          ? cdekCountryDef(countryCode).defaultCity
+                          : 'Москва')
+                      }
+                      onSelect={handleCourierMap}
+                    />
+                  </>
                 ) : null}
               </div>
 

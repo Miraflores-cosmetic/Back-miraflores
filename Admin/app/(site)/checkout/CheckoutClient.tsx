@@ -35,6 +35,7 @@ import {
   parseJcosAddressMeta,
   type JcosAddressMeta,
 } from '@/lib/shipping/addressShippingMeta';
+import { normalizeCdekCountryCode } from '@/lib/shipping/cdekCountries';
 import {
   addressToShippingSeed,
   buyerDeliveryTitle,
@@ -351,6 +352,12 @@ export function CheckoutClient() {
         ...(selection.lat != null ? { lat: selection.lat } : {}),
         ...(selection.lon != null ? { lon: selection.lon } : {}),
         ...(selection.pvzId ? { pvzId: selection.pvzId } : {}),
+        ...(selection.cityCode?.trim()
+          ? { cid: selection.cityCode.trim() }
+          : {}),
+        ...(selection.countryCode
+          ? { cc: selection.countryCode }
+          : {}),
       });
       setContact((c) => ({
         ...c,
@@ -959,6 +966,16 @@ export function CheckoutClient() {
                           lat: shippingMeta.lat,
                           lon: shippingMeta.lon,
                           pvzId: shippingMeta.pvzId,
+                          ...(shippingMeta.cid?.trim()
+                            ? { cityCode: shippingMeta.cid.trim() }
+                            : {}),
+                          ...(shippingMeta.cc?.trim()
+                            ? {
+                                countryCode: normalizeCdekCountryCode(
+                                  shippingMeta.cc,
+                                ),
+                              }
+                            : {}),
                         }
                       : {}),
                   }
