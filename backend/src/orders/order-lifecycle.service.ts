@@ -19,6 +19,7 @@ export type OrderEventType =
   | 'CARRIER_COST'
   | 'ADDRESS_UPDATED'
   | 'ITEMS_UPDATED'
+  | 'PROMO_REMOVED'
   | 'SURCHARGE_PAID'
   | 'PAYMENT_REMIND';
 
