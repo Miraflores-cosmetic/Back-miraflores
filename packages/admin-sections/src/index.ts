@@ -354,7 +354,7 @@ export const SECTIONS_NEEDING_CATALOG: readonly ModeratorAssignableSectionId[] =
  * Кто может GET catalog/admin/products (пикер) без полного grant `catalog`.
  * `orders_finance` — UI заказов без `orders`.
  */
-export const CATALOG_READ_GRANT_SECTIONS: readonly string[] = [
+export const CATALOG_READ_GRANT_SECTIONS: readonly AdminSectionId[] = [
   'catalog',
   'orders',
   'orders_finance',
@@ -365,7 +365,7 @@ export const CATALOG_READ_GRANT_SECTIONS: readonly string[] = [
  * Кто может GET gift-certificates/admin/denominations без полного certificates.
  * Нужно для gift-denom в admin order create.
  */
-export const GIFT_DENOMS_READ_GRANT_SECTIONS: readonly string[] = [
+export const GIFT_DENOMS_READ_GRANT_SECTIONS: readonly AdminSectionId[] = [
   'certificates',
   'certificates_finance',
   'orders',
