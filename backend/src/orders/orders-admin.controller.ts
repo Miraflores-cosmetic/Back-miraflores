@@ -19,6 +19,7 @@ import {
   OrderNoteDto,
   OrderRefundDto,
   OrderRegisterCarrierDto,
+  OrderRemovePromoDto,
   OrderShipDto,
   OrderShipmentCostDto,
   OrderSendTrackingDto,
@@ -155,6 +156,25 @@ export class OrdersAdminController {
     @Body() dto: OrderItemsUpdateDto,
   ) {
     return this.orders.updateItems(id, actorUserId, dto);
+  }
+
+  /** Снять промокод: discountTotal → 0, освобождает redemption, пересчёт total. */
+  @Post(':id/remove-promo')
+  removePromo(
+    @Param('id') id: string,
+    @CurrentUser('sub') actorUserId: string,
+    @Body() dto: OrderRemovePromoDto,
+  ) {
+    return this.orders.removePromo(id, actorUserId, dto);
+  }
+
+  /** Неоплаченный заказ: новая redirect-ссылка на актуальный total. */
+  @Post(':id/checkout-payment')
+  createCheckoutPayment(
+    @Param('id') id: string,
+    @CurrentUser('sub') actorUserId: string,
+  ) {
+    return this.orders.createCheckoutPayment(id, actorUserId);
   }
 
   @Post(':id/surcharge-payment')

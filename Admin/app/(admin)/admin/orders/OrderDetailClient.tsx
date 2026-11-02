@@ -45,6 +45,8 @@ type ConfirmState = {
   message: string;
   confirmLabel: string;
   danger?: boolean;
+  /** Чекбокс «уведомить» (removePromo и т.п.). */
+  showNotify?: boolean;
   run: () => Promise<void>;
 } | null;
 
@@ -122,6 +124,8 @@ export function OrderDetailClient({
   const [refundReason, setRefundReason] = useState('');
   const [providerRefund, setProviderRefund] = useState(true);
   const [confirm, setConfirm] = useState<ConfirmState>(null);
+  const [confirmNotify, setConfirmNotify] = useState(true);
+  const confirmNotifyRef = useRef(true);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [chatModalOpen, setChatModalOpen] = useState(false);
   const chatUnread = useAdminOrderChatUnreadForOrder(orderId, Boolean(order?.userId));
@@ -153,10 +157,26 @@ export function OrderDetailClient({
   const [softPollStale, setSoftPollStale] = useState(false);
   const softPollFailsRef = useRef(0);
 
-  const showFlash = useCallback((msg: string) => {
+  const showFlash = useCallback((msg: string, ms = 2800) => {
     setFlash(msg);
-    window.setTimeout(() => setFlash(null), 2800);
+    window.setTimeout(() => setFlash(null), ms);
   }, []);
+
+  function flashAfterEdit(
+    row: {
+      previousTotal?: number;
+      newTotal?: number;
+      pendingPaymentsCanceled?: boolean;
+    },
+    baseMsg: string,
+  ) {
+    if (row.pendingPaymentsCanceled) {
+      // CTA «новая ссылка» откроет offerSettleDelta — короткий flash.
+      showFlash(`${baseMsg} Старые ссылки ЮKassa отменены.`, 4000);
+      return;
+    }
+    showFlash(baseMsg);
+  }
 
   const load = useCallback(async () => {
     setError(null);
@@ -326,12 +346,53 @@ export function OrderDetailClient({
     newTotal?: number;
     balanceDue?: number;
     refundSuggested?: number;
+    pendingPaymentsCanceled?: boolean;
     surcharge?: { amount: number; confirmationUrl: string; paymentId: string };
+    checkout?: { amount: number; confirmationUrl: string; paymentId: string };
   };
 
   function offerSettleDelta(row: EditResult) {
     const due = row.balanceDue ?? 0;
     const refundSug = row.refundSuggested ?? 0;
+    const unpaid =
+      row.status === 'AWAITING_PAYMENT' || row.status === 'NEW';
+    const checkoutAmount = row.newTotal ?? row.total;
+
+    // После cancel PENDING неоплаченного — CTA новой ссылки (surcharge только для PAID).
+    if (unpaid && row.pendingPaymentsCanceled && checkoutAmount > 0) {
+      askConfirm({
+        title: 'Новая ссылка на оплату',
+        message: `Старые ссылки ЮKassa отменены. Выставить клиенту новую ссылку на оплату ${formatAdminMoney(checkoutAmount)}? Письмо уйдёт автоматически.`,
+        confirmLabel: 'Выставить оплату',
+        run: async () => {
+          setBusy(true);
+          setError(null);
+          try {
+            const res = await adminBackendJson<EditResult>(
+              `orders/admin/${orderId}/checkout-payment`,
+              { method: 'POST', body: JSON.stringify({}) },
+            );
+            if (res.items && res.actions) setOrder(res);
+            else await load();
+            if (res.checkout?.confirmationUrl) {
+              setSurchargeUrl(res.checkout.confirmationUrl);
+            }
+            showFlash('Ссылка на оплату создана, письмо отправлено');
+          } catch (e) {
+            setError(
+              e instanceof AdminBackendRequestError
+                ? e.message
+                : 'Не удалось создать ссылку на оплату',
+            );
+          } finally {
+            setBusy(false);
+            setConfirm(null);
+          }
+        },
+      });
+      return;
+    }
+
     if (due > 0 && row.actions?.canCreateSurcharge) {
       askConfirm({
         title: 'Доплата',
@@ -388,7 +449,7 @@ export function OrderDetailClient({
             `orders/admin/${orderId}/refund`,
             {
               amount: refundSug,
-              reason: 'Корректировка состава/адреса заказа',
+              reason: 'Корректировка заказа',
               providerRefund: true,
             },
             'Возврат оформлен',
@@ -421,7 +482,7 @@ export function OrderDetailClient({
       );
       setOrder(row);
       setAddressModalOpen(false);
-      showFlash('Адрес обновлён');
+      flashAfterEdit(row, 'Адрес обновлён');
       offerSettleDelta(row);
     } catch (e) {
       setError(
@@ -453,7 +514,7 @@ export function OrderDetailClient({
       );
       setOrder(row);
       setShippingCostModalOpen(false);
-      showFlash('Стоимость доставки обновлена');
+      flashAfterEdit(row, 'Стоимость доставки обновлена');
       offerSettleDelta(row);
     } catch (e) {
       setError(
@@ -479,7 +540,6 @@ export function OrderDetailClient({
     notifyCustomer: boolean;
   }) {
     setBusy(true);
-    setError(null);
     try {
       const row = await adminBackendJson<EditResult>(
         `orders/admin/${orderId}/items`,
@@ -490,17 +550,62 @@ export function OrderDetailClient({
       );
       setOrder(row);
       setItemsModalOpen(false);
-      showFlash('Состав обновлён');
+      flashAfterEdit(row, 'Состав обновлён');
       offerSettleDelta(row);
     } catch (e) {
-      setError(
-        e instanceof AdminBackendRequestError
-          ? e.message
-          : 'Ошибка сохранения состава',
-      );
+      // Ошибку показывает OrderItemsEditModal (под overlay страничный setError не виден).
+      throw e instanceof AdminBackendRequestError
+        ? e
+        : new Error('Ошибка сохранения состава');
     } finally {
       setBusy(false);
     }
+  }
+
+  function askRemovePromo() {
+    if (!order || busy) return;
+    const code = order.promoCode || 'промо';
+    const discount = order.discountTotal;
+    confirmNotifyRef.current = true;
+    setConfirmNotify(true);
+    askConfirm({
+      title: 'Снять промокод',
+      message:
+        discount > 0
+          ? `Убрать ${code} (скидка ${formatAdminMoney(discount)})? Сумма заказа пересчитается без скидки — затем предложим доплату или возврат.`
+          : `Убрать промокод ${code}?`,
+      confirmLabel: 'Снять промокод',
+      danger: true,
+      showNotify: true,
+      run: async () => {
+        setBusy(true);
+        setError(null);
+        try {
+          const row = await adminBackendJson<EditResult>(
+            `orders/admin/${orderId}/remove-promo`,
+            {
+              method: 'POST',
+              body: JSON.stringify({
+                notifyCustomer: confirmNotifyRef.current,
+              }),
+            },
+          );
+          setOrder(row);
+          flashAfterEdit(row, 'Промокод снят');
+          setConfirm(null);
+          offerSettleDelta(row);
+        } catch (e) {
+          setError(
+            e instanceof AdminBackendRequestError
+              ? e.message
+              : 'Не удалось снять промокод',
+          );
+          setConfirm(null);
+        } finally {
+          setBusy(false);
+        }
+      },
+    });
   }
 
   async function copyOrderNumber(number: string) {
@@ -955,10 +1060,29 @@ export function OrderDetailClient({
               </div>
               <div className={styles.orderAccordionBody}>
                 <dl className={styles.detailDl}>
-                  {order.promoCode ? (
+                  {order.promoCode || order.discountTotal > 0 ? (
                     <div className={styles.detailDlRow}>
                       <dt>Промокод</dt>
-                      <dd>{order.promoCode}</dd>
+                      <dd>
+                        <div className={styles.itemsEditPromoRow}>
+                          <span>
+                            {order.promoCode || '—'}
+                            {order.discountTotal > 0
+                              ? ` (−${formatAdminMoney(order.discountTotal)})`
+                              : ''}
+                          </span>
+                          {order.actions.canRemovePromo ? (
+                            <AdminCompactBtn
+                              type="button"
+                              variant="outline"
+                              disabled={busy}
+                              onClick={askRemovePromo}
+                            >
+                              Отменить промокод
+                            </AdminCompactBtn>
+                          ) : null}
+                        </div>
+                      </dd>
                     </div>
                   ) : null}
                   {order.giftCertificateCode ? (
@@ -1390,6 +1514,47 @@ export function OrderDetailClient({
                 }
               >
                 Выставить доплату
+              </AdminCompactBtn>
+            ) : null}
+            {order.actions.canCreateCheckoutPayment ? (
+              <AdminCompactBtn
+                type="button"
+                className={styles.orderTotalAction}
+                disabled={busy}
+                onClick={() =>
+                  askConfirm({
+                    title: 'Ссылка на оплату',
+                    message: `Выставить клиенту ссылку на оплату ${formatAdminMoney(order.total)}? Письмо уйдёт автоматически.`,
+                    confirmLabel: 'Выставить',
+                    run: async () => {
+                      setBusy(true);
+                      setError(null);
+                      try {
+                        const res = await adminBackendJson<EditResult>(
+                          `orders/admin/${orderId}/checkout-payment`,
+                          { method: 'POST', body: JSON.stringify({}) },
+                        );
+                        if (res.items && res.actions) setOrder(res);
+                        else await load();
+                        if (res.checkout?.confirmationUrl) {
+                          setSurchargeUrl(res.checkout.confirmationUrl);
+                        }
+                        showFlash('Ссылка на оплату создана, письмо отправлено');
+                      } catch (e) {
+                        setError(
+                          e instanceof AdminBackendRequestError
+                            ? e.message
+                            : 'Не удалось создать ссылку на оплату',
+                        );
+                      } finally {
+                        setBusy(false);
+                        setConfirm(null);
+                      }
+                    },
+                  })
+                }
+              >
+                Ссылка на оплату
               </AdminCompactBtn>
             ) : null}
           </div>
@@ -1924,17 +2089,39 @@ export function OrderDetailClient({
         message={confirm?.message ?? ''}
         confirmLabel={confirm?.confirmLabel}
         danger={confirm?.danger}
-        onCancel={() => setConfirm(null)}
+        busy={busy}
+        onCancel={() => {
+          if (!busy) setConfirm(null);
+        }}
         onConfirm={() => {
           if (!confirm || busy) return;
           void confirm.run();
         }}
-      />
+      >
+        {confirm?.showNotify ? (
+          <div className={styles.labelCheckboxRow}>
+            <AdminCheckbox
+              id="confirm-notify-customer"
+              className={styles.adminCheckboxForm}
+              checked={confirmNotify}
+              disabled={busy}
+              onChange={(e) => {
+                const next = e.target.checked;
+                confirmNotifyRef.current = next;
+                setConfirmNotify(next);
+              }}
+            />
+            <label htmlFor="confirm-notify-customer">
+              Уведомить клиента письмом
+            </label>
+          </div>
+        ) : null}
+      </AdminConfirmDialog>
 
       {surchargeUrl ? (
         <AdminConfirmDialog
           open
-          title="Ссылка на доплату"
+          title="Ссылка на оплату"
           message={surchargeUrl}
           confirmLabel="Скопировать"
           onCancel={() => setSurchargeUrl(null)}
@@ -1985,6 +2172,14 @@ export function OrderDetailClient({
           (order.giftCertificateAmount ?? 0) > 0 ||
           Boolean(order.giftCertificateCode)
         }
+        pricing={{
+          discountTotal: order.discountTotal,
+          giftCertificateAmount: order.giftCertificateAmount ?? 0,
+          shippingCost: order.shippingCost,
+          netPaid: order.netPaid ?? 0,
+          currentTotal: order.total,
+          promoCode: order.promoCode,
+        }}
         onClose={() => setItemsModalOpen(false)}
         onSave={saveItems}
       />

@@ -179,8 +179,60 @@ describe('useAdminOrderChat session', () => {
     expect(localStorage.getItem('miraflores.adminChat.suppressRead:order:o2')).toBeNull();
   });
 
-  it('cold-open вкладка подхватывает suppress из localStorage и не шлёт /read', async () => {
-    localStorage.setItem('miraflores.adminChat.suppressRead:order:o3', '1');
+  it('повторный вход после ухода снимает sticky и шлёт /read', async () => {
+    wsTokenFetch.mockResolvedValue({ token: 'ws', sub: 'staff1', exp: 9_999_999_999 });
+    messageListFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ conversationId: 'c1', messages: [], hasOlder: false }),
+    });
+
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/chat/messages') && (!init?.method || init.method === 'GET')) {
+        return messageListFetch();
+      }
+      if (url.includes('/chat/unread')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ ok: true, changed: true, unreadGeneration: 2 }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ ok: true }) });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result, rerender } = renderHook(
+      ({ panelVisible }) =>
+        useAdminOrderChat({
+          target: { kind: 'order', orderId: 'o3' },
+          enabled: true,
+          staffUserId: 'staff1',
+          panelVisible,
+        }),
+      { initialProps: { panelVisible: true } },
+    );
+
+    await waitFor(() => expect(messageListFetch).toHaveBeenCalledTimes(1));
+    const ok = await result.current.markChatUnread();
+    expect(ok).toBe(true);
+
+    rerender({ panelVisible: false });
+    await new Promise((r) => setTimeout(r, 750));
+    rerender({ panelVisible: true });
+
+    await waitFor(() => {
+      const readCalls = fetchMock.mock.calls.filter(
+        ([input, init]) =>
+          String(input).includes('/chat/read') && init?.method === 'POST',
+      );
+      expect(readCalls.length).toBeGreaterThan(0);
+    });
+    expect(localStorage.getItem('miraflores.adminChat.suppressRead:order:o3')).toBeNull();
+  });
+
+  it('cold-open не держит sticky из localStorage — шлёт /read', async () => {
+    localStorage.setItem('miraflores.adminChat.suppressRead:order:o4', '1');
+    localStorage.setItem('miraflores.adminChat.unreadGen:order:o4', '3');
     wsTokenFetch.mockResolvedValue({ token: 'ws', sub: 'staff1', exp: 9_999_999_999 });
     messageListFetch.mockResolvedValue({
       ok: true,
@@ -198,7 +250,7 @@ describe('useAdminOrderChat session', () => {
 
     renderHook(() =>
       useAdminOrderChat({
-        target: { kind: 'order', orderId: 'o3' },
+        target: { kind: 'order', orderId: 'o4' },
         enabled: true,
         staffUserId: 'staff1',
         panelVisible: true,
@@ -206,11 +258,13 @@ describe('useAdminOrderChat session', () => {
     );
 
     await waitFor(() => expect(messageListFetch).toHaveBeenCalledTimes(1));
-    await new Promise((r) => setTimeout(r, 80));
-
-    const readCalls = fetchMock.mock.calls.filter(
-      ([input, init]) => String(input).includes('/chat/read') && init?.method === 'POST',
-    );
-    expect(readCalls).toHaveLength(0);
+    await waitFor(() => {
+      const readCalls = fetchMock.mock.calls.filter(
+        ([input, init]) =>
+          String(input).includes('/chat/read') && init?.method === 'POST',
+      );
+      expect(readCalls.length).toBeGreaterThan(0);
+    });
+    expect(localStorage.getItem('miraflores.adminChat.suppressRead:order:o4')).toBeNull();
   });
 });

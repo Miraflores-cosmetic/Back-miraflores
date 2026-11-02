@@ -24,16 +24,13 @@ describe('releaseGiftCertificateForOrder + REVOKED', () => {
       $executeRaw: vi.fn().mockResolvedValue(undefined),
       giftCertificate: { update },
       giftCertificateLedger: {
-        findMany: vi
-          .fn()
-          .mockResolvedValueOnce([
-            {
-              certificateId: 'c1',
-              amount: -400,
-              kind: GiftCertificateLedgerKind.CAPTURE,
-            },
-          ])
-          .mockResolvedValueOnce([]),
+        findMany: vi.fn().mockResolvedValue([
+          {
+            certificateId: 'c1',
+            amount: -400,
+            kind: GiftCertificateLedgerKind.CAPTURE,
+          },
+        ]),
         create,
       },
     };
@@ -51,6 +48,68 @@ describe('releaseGiftCertificateForOrder + REVOKED', () => {
           amount: 400,
           balanceAfter: 0,
           note: expect.stringMatching(/отозван/i),
+        }),
+      }),
+    );
+  });
+
+  it('release после release→re-hold снимает только net CAPTURE', async () => {
+    const create = vi.fn().mockResolvedValue({});
+    const update = vi.fn().mockResolvedValue({});
+    const tx = {
+      $queryRaw: vi.fn().mockImplementation(async (strings: TemplateStringsArray) => {
+        const sql = String(strings);
+        if (sql.includes('current_setting')) return [{ v: 'off' }];
+        return [
+          {
+            id: 'c1',
+            code: 'JC-NET-TEST',
+            balance: 0,
+            faceValue: 1000,
+            status: GiftCertificateStatus.USED_UP,
+            expiresAt: null,
+          },
+        ];
+      }),
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
+      giftCertificate: { update },
+      giftCertificateLedger: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            certificateId: 'c1',
+            amount: -800,
+            kind: GiftCertificateLedgerKind.CAPTURE,
+          },
+          {
+            certificateId: 'c1',
+            amount: 800,
+            kind: GiftCertificateLedgerKind.RELEASE,
+          },
+          {
+            certificateId: 'c1',
+            amount: -100,
+            kind: GiftCertificateLedgerKind.CAPTURE,
+          },
+        ]),
+        create,
+      },
+    };
+
+    const ok = await releaseGiftCertificateForOrder(tx as never, 'ord1', {
+      note: 'full refund',
+    });
+
+    expect(ok).toBe(true);
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ balance: 100 }),
+      }),
+    );
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          kind: GiftCertificateLedgerKind.RELEASE,
+          amount: 100,
         }),
       }),
     );

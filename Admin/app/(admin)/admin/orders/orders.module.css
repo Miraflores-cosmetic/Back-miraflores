@@ -1907,3 +1907,216 @@
   line-height: 18px;
   text-align: center;
 }
+
+/* —— Изменить состав —— */
+.itemsEditToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px 16px;
+  margin-bottom: 14px;
+}
+
+.itemsEditBulk {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.itemsEditBulkLabel {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--admin-muted-fg, #6e6d67);
+}
+
+.itemsEditPctRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.itemsEditPctBtn {
+  appearance: none;
+  margin: 0;
+  padding: 0 10px;
+  height: 28px;
+  border: 1px solid var(--account-hairline-color, #e2e6e8);
+  border-radius: 6px;
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: inherit;
+  cursor: pointer;
+}
+
+.itemsEditPctBtn:hover:not(:disabled) {
+  border-color: #c5cbcf;
+  background: #f7f8f8;
+}
+
+.itemsEditPctBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.itemsEditPctBtn[aria-pressed='true'] {
+  border-color: var(--color-brand-green, #297230);
+  background: color-mix(in srgb, var(--color-brand-green, #297230) 12%, #fff);
+  font-weight: 600;
+}
+
+.itemsEditPreview {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--account-hairline-color, #e2e6e8);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 13px;
+}
+
+.itemsEditPreviewRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.itemsEditPreviewRow + .itemsEditPreviewRow {
+  margin-top: 4px;
+}
+
+.itemsEditPreviewRowTotal {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--account-hairline-color, #e2e6e8);
+  font-weight: 600;
+}
+
+.itemsEditPreviewSettle {
+  margin-top: 8px;
+  font-weight: 500;
+}
+
+.itemsEditDualWarn {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid #e2b86a;
+  border-radius: 8px;
+  background: #fff8eb;
+  color: #6b4e16;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.itemsEditPctField {
+  width: 64px;
+  flex: 0 0 auto;
+}
+
+.itemsEditList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.itemsEditCard {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--account-hairline-color, #e2e6e8);
+  border-radius: 8px;
+  background: #fafbfb;
+}
+
+.itemsEditCardHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.itemsEditCardTitle {
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.itemsEditFields {
+  display: grid;
+  grid-template-columns: 88px minmax(100px, 140px) minmax(80px, 1fr);
+  gap: 10px 12px;
+  align-items: end;
+  margin-bottom: 10px;
+}
+
+.itemsEditQtyField,
+.itemsEditPriceField {
+  min-width: 0;
+}
+
+.itemsEditLineSum {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  justify-content: flex-end;
+  padding-bottom: 2px;
+}
+
+.itemsEditLineSumLabel {
+  font-size: 12px;
+  color: var(--admin-muted-fg, #6e6d67);
+}
+
+.itemsEditLineSumValue {
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.itemsEditPriceTools {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--account-hairline-color, #e2e6e8);
+}
+
+.itemsEditPriceHint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--admin-muted-fg, #6e6d67);
+  font-variant-numeric: tabular-nums;
+}
+
+.itemsEditSummary {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--account-hairline-color, #e2e6e8);
+  font-size: 14px;
+}
+
+.itemsEditPromoRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+@media (max-width: 560px) {
+  .itemsEditFields {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .itemsEditLineSum {
+    grid-column: 1 / -1;
+  }
+}

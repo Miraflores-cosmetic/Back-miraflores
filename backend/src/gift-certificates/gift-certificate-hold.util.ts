@@ -158,9 +158,12 @@ export async function holdGiftCertificateForOrder(
 }
 
 /**
- * Идемпотентный RELEASE по orderId (CAPTURE без RELEASE на этот certificateId).
- * REVOKED: баланс не восстанавливаем, но пишем RELEASE — иначе hold «сгорает»
- * без закрытия в ledger и повторные попытки не догоняют остальные CAPTURE.
+ * Идемпотентный RELEASE по orderId: net outstanding =
+ * Σ|CAPTURE| − ΣRELEASE на пару (orderId, certificateId).
+ * Нужен net (не «есть ли хоть один RELEASE»), иначе release→re-hold
+ * (clamp состава) оставлял бы новый CAPTURE «навсегда».
+ * REVOKED: баланс не восстанавливаем, но пишем RELEASE на net —
+ * иначе hold «сгорает» без закрытия в ledger.
  */
 export async function releaseGiftCertificateForOrder(
   tx: Prisma.TransactionClient,
@@ -168,30 +171,41 @@ export async function releaseGiftCertificateForOrder(
   opts?: { note?: string },
 ): Promise<boolean> {
   return withLocalRlsBypass(tx, async () => {
-    const captures = await tx.giftCertificateLedger.findMany({
-      where: { orderId, kind: GiftCertificateLedgerKind.CAPTURE },
+    const entries = await tx.giftCertificateLedger.findMany({
+      where: {
+        orderId,
+        kind: {
+          in: [
+            GiftCertificateLedgerKind.CAPTURE,
+            GiftCertificateLedgerKind.RELEASE,
+          ],
+        },
+      },
+      select: { certificateId: true, kind: true, amount: true },
       orderBy: { createdAt: 'asc' },
     });
-    if (!captures.length) return false;
+    if (!entries.length) return false;
 
-    const alreadyReleased = await tx.giftCertificateLedger.findMany({
-      where: { orderId, kind: GiftCertificateLedgerKind.RELEASE },
-      select: { certificateId: true },
-    });
-    const releasedCertIds = new Set(alreadyReleased.map((r) => r.certificateId));
+    const netByCert = new Map<string, number>();
+    for (const e of entries) {
+      const prev = netByCert.get(e.certificateId) ?? 0;
+      if (e.kind === GiftCertificateLedgerKind.CAPTURE) {
+        netByCert.set(e.certificateId, prev + Math.abs(e.amount));
+      } else {
+        netByCert.set(e.certificateId, prev - Math.max(0, e.amount));
+      }
+    }
 
     const note = opts?.note?.trim() || 'Возврат при отмене заказа';
     let released = false;
-    for (const cap of captures) {
-      if (releasedCertIds.has(cap.certificateId)) continue;
-
-      const restore = Math.abs(cap.amount);
+    for (const [certificateId, net] of netByCert) {
+      const restore = Math.floor(net);
       if (restore <= 0) continue;
 
       const locked = await tx.$queryRaw<LockedCert[]>`
         SELECT id, code, balance, "faceValue", status, "expiresAt"
         FROM "GiftCertificate"
-        WHERE id = ${cap.certificateId}
+        WHERE id = ${certificateId}
         FOR UPDATE
       `;
       const row = locked[0];
@@ -208,7 +222,6 @@ export async function releaseGiftCertificateForOrder(
             note: `${note} (сертификат отозван — баланс не восстановлен)`,
           },
         });
-        releasedCertIds.add(row.id);
         released = true;
         continue;
       }
@@ -234,7 +247,6 @@ export async function releaseGiftCertificateForOrder(
           note,
         },
       });
-      releasedCertIds.add(row.id);
       released = true;
     }
     return released;

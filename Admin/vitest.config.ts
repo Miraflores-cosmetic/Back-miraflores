@@ -9,6 +9,7 @@ export default defineConfig({
       'lib/**/*.test.ts',
       'lib/**/*.spec.ts',
       'app/**/*.test.ts',
+      'app/**/*.test.tsx',
       'app/**/*.spec.ts',
       'hooks/**/*.test.ts',
       'hooks/**/*.test.tsx',

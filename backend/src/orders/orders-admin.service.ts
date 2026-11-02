@@ -14,11 +14,8 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { scheduleAfterRlsCommitWithBypass } from '../rls/rls-after-commit';
-import {
-  releaseStockReserve,
-  reserveStockForLines,
-  restoreStockOnPaidCancel,
-} from './order-stock';
+import { restoreStockOnPaidCancel } from './order-stock';
+import { adjustStockForItemEdit } from './order-item-stock-edit';
 import { lockOrderForUpdate } from './order-lock';
 import { applyPaidInTx } from './mark-order-paid';
 import { cancelUnpaidOrderInTx } from './cancel-unpaid-order';
@@ -62,6 +59,7 @@ import {
 import type {
   OrderItemUpdateLineDto,
   OrderItemsUpdateDto,
+  OrderRemovePromoDto,
   OrderShippingAddressUpdateDto,
 } from './dto/order-admin-actions.dto';
 import { OrderChatService } from '../order-chat/order-chat.service';
@@ -590,6 +588,16 @@ export class OrdersAdminService {
           canEditCore &&
           isPaidEditableStatus(order.status) &&
           balanceDue > 0,
+        /** Неоплаченный заказ: выдать новую redirect-ссылку ЮKassa на актуальный total. */
+        canCreateCheckoutPayment:
+          canEditCore &&
+          isUnpaidEditableStatus(order.status) &&
+          !order.giftPurchaseDenominationId &&
+          order.total > 0,
+        canRemovePromo:
+          canEditCore &&
+          !order.giftPurchaseDenominationId &&
+          (Boolean(order.promoCode) || order.discountTotal > 0),
       },
       /** @deprecated use actions.canCancel */
       canCancel: canCancel(order.status),
@@ -722,6 +730,7 @@ export class OrdersAdminService {
               qty: number;
               unitPrice: number;
               isGratitudeGift: boolean;
+              variantId: string | null;
             }>;
           };
         }
@@ -744,6 +753,7 @@ export class OrdersAdminService {
               qty: true,
               unitPrice: true,
               isGratitudeGift: true,
+              variantId: true,
             },
           },
           shipments: { orderBy: { createdAt: 'desc' }, take: 5 },
@@ -1054,6 +1064,7 @@ export class OrdersAdminService {
               qty: true,
               unitPrice: true,
               isGratitudeGift: true,
+              variantId: true,
             },
           },
           shipments: { orderBy: { createdAt: 'desc' }, take: 5 },
@@ -1840,6 +1851,8 @@ export class OrdersAdminService {
       });
     }
 
+    this.scheduleYourichTouch(id);
+
     const detail = await this.getById(id);
     return {
       ...detail,
@@ -1847,6 +1860,7 @@ export class OrdersAdminService {
       newTotal,
       balanceDue: detail.balanceDue,
       refundSuggested: detail.refundSuggested,
+      pendingPaymentsCanceled: pendingExternalIds.length > 0,
     };
   }
 
@@ -1901,8 +1915,9 @@ export class OrdersAdminService {
       let giftCertificateId = order.giftCertificateId;
       let giftCertificateCode = order.giftCertificateCode;
 
+      // Clamp на любом editable-статусе должен совпадать с ledger (CAPTURE).
+      // Иначе PAID/PACKING: order.gift↓, CAPTURE прежний → ложный refundSuggested.
       if (
-        isUnpaidEditableStatus(order.status) &&
         order.giftCertificateId &&
         giftCertificateAmount !== order.giftCertificateAmount
       ) {
@@ -1920,10 +1935,7 @@ export class OrdersAdminService {
           giftCertificateCode = null;
           giftCertificateAmount = 0;
         }
-      } else if (
-        giftCertificateAmount <= 0 &&
-        isUnpaidEditableStatus(order.status)
-      ) {
+      } else if (giftCertificateAmount <= 0) {
         giftCertificateId = null;
         giftCertificateCode = null;
         giftCertificateAmount = 0;
@@ -1937,7 +1949,7 @@ export class OrdersAdminService {
         shippingCost: order.shippingCost,
       });
 
-      await this.adjustStockForItemEdit(
+      await adjustStockForItemEdit(
         tx,
         order.status,
         order.items.map((i) => ({
@@ -2049,6 +2061,8 @@ export class OrdersAdminService {
       });
     }
 
+    this.scheduleYourichTouch(id);
+
     const detail = await this.getById(id);
     return {
       ...detail,
@@ -2056,6 +2070,291 @@ export class OrdersAdminService {
       newTotal,
       balanceDue: detail.balanceDue,
       refundSuggested: detail.refundSuggested,
+      pendingPaymentsCanceled: pendingExternalIds.length > 0,
+    };
+  }
+
+  /**
+   * Снять промокод с заказа: discountTotal → 0, удаляет redemption (слот лимита),
+   * пересчитывает total. Разница → balanceDue / refundSuggested (как updateItems).
+   */
+  async removePromo(
+    id: string,
+    actorUserId: string,
+    dto: OrderRemovePromoDto = {},
+  ) {
+    const notify = dto.notifyCustomer === true;
+    const mailPayload: {
+      email: string;
+      number: string;
+      summary: string;
+    } = { email: '', number: '', summary: '' };
+    let shouldNotify = false;
+    let pendingExternalIds: string[] = [];
+    let previousTotal = 0;
+    let newTotal = 0;
+
+    await this.prisma.$transaction(async (tx) => {
+      await lockOrderForUpdate(tx, id);
+      const order = await tx.order.findUnique({
+        where: { id },
+        include: {
+          payments: true,
+          promoRedemption: { select: { id: true, promoCodeId: true } },
+        },
+      });
+      if (!order) throw new NotFoundException('Заказ не найден');
+      if (order.giftPurchaseDenominationId) {
+        throw new BadRequestException('Заказ сертификата нельзя менять');
+      }
+      assertOrderEditable(order.status);
+
+      if (!order.promoCode && order.discountTotal <= 0) {
+        throw new BadRequestException('На заказе нет промокода');
+      }
+
+      const removedCode = order.promoCode;
+      const removedDiscount = Math.max(0, order.discountTotal);
+      const discountTotal = 0;
+
+      const maxGift = Math.max(
+        0,
+        order.subtotal - discountTotal + Math.max(0, order.shippingCost),
+      );
+      let giftCertificateAmount = Math.min(
+        Math.max(0, order.giftCertificateAmount),
+        maxGift,
+      );
+      let giftCertificateId = order.giftCertificateId;
+      let giftCertificateCode = order.giftCertificateCode;
+
+      if (
+        order.giftCertificateId &&
+        giftCertificateAmount !== order.giftCertificateAmount
+      ) {
+        await releaseGiftCertificateForOrder(tx, id, {
+          note: 'Пересчёт при снятии промокода',
+        });
+        if (giftCertificateAmount > 0) {
+          await holdGiftCertificateForOrder(tx, {
+            certificateId: order.giftCertificateId,
+            orderId: id,
+            applyAmount: giftCertificateAmount,
+          });
+        } else {
+          giftCertificateId = null;
+          giftCertificateCode = null;
+          giftCertificateAmount = 0;
+        }
+      } else if (giftCertificateAmount <= 0) {
+        giftCertificateId = null;
+        giftCertificateCode = null;
+        giftCertificateAmount = 0;
+      }
+
+      previousTotal = order.total;
+      newTotal = recalcOrderTotal({
+        subtotal: order.subtotal,
+        discountTotal,
+        giftCertificateAmount,
+        shippingCost: order.shippingCost,
+      });
+
+      await tx.promoCodeRedemption.deleteMany({ where: { orderId: id } });
+
+      await tx.order.update({
+        where: { id },
+        data: {
+          promoCode: null,
+          discountTotal,
+          total: newTotal,
+          giftCertificateAmount,
+          giftCertificateId,
+          giftCertificateCode,
+        },
+      });
+
+      if (isUnpaidEditableStatus(order.status) && newTotal !== previousTotal) {
+        const pending = await tx.payment.findMany({
+          where: { orderId: id, status: PaymentStatus.PENDING },
+          select: { externalId: true },
+        });
+        pendingExternalIds = pending
+          .map((p) => p.externalId)
+          .filter((x): x is string => Boolean(x));
+        if (pending.length) {
+          await tx.payment.updateMany({
+            where: { orderId: id, status: PaymentStatus.PENDING },
+            data: { status: PaymentStatus.CANCELED },
+          });
+        }
+      }
+
+      const summary = removedCode
+        ? `Промокод ${removedCode} снят (−${removedDiscount} ₽). Итого ${previousTotal} → ${newTotal} ₽`
+        : `Скидка по промо снята (−${removedDiscount} ₽). Итого ${previousTotal} → ${newTotal} ₽`;
+
+      await this.lifecycle.addEvent(tx, {
+        orderId: id,
+        type: 'PROMO_REMOVED',
+        message: summary,
+        actorUserId,
+        meta: {
+          previousTotal,
+          newTotal,
+          removedCode,
+          removedDiscount,
+          giftCertificateAmount,
+        },
+      });
+
+      if (notify) {
+        shouldNotify = true;
+        mailPayload.email = order.email;
+        mailPayload.number = order.number;
+        mailPayload.summary = summary;
+      }
+    });
+
+    if (pendingExternalIds.length) {
+      await this.yookassa.cancelPaymentsBestEffort(pendingExternalIds);
+    }
+    if (shouldNotify && mailPayload.email) {
+      await this.lifecycle.notifyOrderUpdated({
+        to: mailPayload.email,
+        orderNumber: mailPayload.number,
+        changesSummary: mailPayload.summary,
+      });
+    }
+
+    this.scheduleYourichTouch(id);
+
+    const detail = await this.getById(id);
+    return {
+      ...detail,
+      previousTotal,
+      newTotal,
+      balanceDue: detail.balanceDue,
+      refundSuggested: detail.refundSuggested,
+      pendingPaymentsCanceled: pendingExternalIds.length > 0,
+    };
+  }
+
+  /**
+   * Неоплаченный заказ: новая redirect-ссылка ЮKassa на актуальный total
+   * (после cancel PENDING при правке состава/адреса/промо).
+   */
+  async createCheckoutPayment(id: string, actorUserId: string) {
+    if (!this.yookassa.isConfigured()) {
+      throw new BadRequestException('ЮKassa не настроена');
+    }
+
+    const order = await this.prisma.order.findUnique({
+      where: { id },
+      include: { payments: true },
+    });
+    if (!order) throw new NotFoundException('Заказ не найден');
+    if (order.giftPurchaseDenominationId) {
+      throw new BadRequestException(
+        'Для заказа сертификата оплата через эту кнопку недоступна',
+      );
+    }
+    assertOrderEditable(order.status);
+    if (!isUnpaidEditableStatus(order.status)) {
+      throw new BadRequestException(
+        'Новая ссылка на оплату — только для неоплаченных заказов',
+      );
+    }
+    if (order.total < 1) {
+      throw new BadRequestException('Сумма заказа 0 ₽ — ссылка не нужна');
+    }
+
+    const stalePending = order.payments.filter(
+      (p) => p.status === PaymentStatus.PENDING && p.externalId,
+    );
+    if (stalePending.length) {
+      await this.prisma.payment.updateMany({
+        where: {
+          orderId: id,
+          status: PaymentStatus.PENDING,
+        },
+        data: { status: PaymentStatus.CANCELED },
+      });
+      await this.yookassa.cancelPaymentsBestEffort(
+        stalePending.map((p) => p.externalId!).filter(Boolean),
+      );
+    }
+
+    const amount = order.total;
+    const site =
+      this.config.get<string>('FRONTEND_PUBLIC_URL')?.replace(/\/+$/, '') ||
+      'http://localhost:5173';
+    const returnQs = new URLSearchParams({
+      orderId: order.id,
+      number: order.number,
+    });
+    const returnUrl = `${site}/order/success?${returnQs.toString()}`;
+
+    const { payment, confirmationUrl } =
+      await this.yookassa.createRedirectPayment({
+        amountRub: amount,
+        description: `Оплата заказа ${order.number}`,
+        orderId: order.id,
+        orderNumber: order.number,
+        customerEmail: order.email,
+        returnUrl,
+        kind: 'checkout',
+        receiptItems: [
+          {
+            description: `Заказ ${order.number}`.slice(0, 128),
+            quantity: 1,
+            amountRub: amount,
+          },
+        ],
+      });
+
+    await this.prisma.payment.create({
+      data: {
+        orderId: order.id,
+        provider: 'yookassa',
+        status: PaymentStatus.PENDING,
+        amount,
+        externalId: payment.id,
+        confirmationUrl,
+        raw: {
+          kind: 'checkout',
+          yookassa: payment,
+        } as Prisma.InputJsonValue,
+      },
+    });
+
+    await this.lifecycle.addEvent(this.prisma, {
+      orderId: id,
+      type: 'NOTE',
+      message: `Выставлена ссылка на оплату ${amount} ₽`,
+      actorUserId,
+      meta: {
+        kind: 'checkout',
+        amount,
+        yookassaPaymentId: payment.id,
+        confirmationUrl,
+      },
+    });
+
+    await this.lifecycle.notifyOrderUpdated({
+      to: order.email,
+      orderNumber: order.number,
+      changesSummary: `Ссылка на оплату заказа на сумму ${amount} ₽. Оплатите заказ в личном кабинете или по ссылке от поддержки.`,
+    });
+
+    const detail = await this.getById(id);
+    return {
+      ...detail,
+      checkout: {
+        amount,
+        confirmationUrl,
+        paymentId: payment.id,
+      },
     };
   }
 
@@ -2234,87 +2533,6 @@ export class OrdersAdminService {
     }
 
     return out;
-  }
-
-  private async adjustStockForItemEdit(
-    tx: Prisma.TransactionClient,
-    status: OrderStatus,
-    oldLines: Array<{
-      variantId: string | null;
-      qty: number;
-      title?: string;
-    }>,
-    newLines: Array<{
-      variantId: string | null;
-      qty: number;
-      title?: string;
-    }>,
-  ) {
-    const qtyMap = (
-      lines: Array<{ variantId: string | null; qty: number }>,
-    ) => {
-      const m = new Map<string, number>();
-      for (const l of lines) {
-        const id = l.variantId?.trim();
-        if (!id || l.qty <= 0) continue;
-        m.set(id, (m.get(id) ?? 0) + l.qty);
-      }
-      return m;
-    };
-    const oldMap = qtyMap(oldLines);
-    const newMap = qtyMap(newLines);
-    const ids = new Set([...oldMap.keys(), ...newMap.keys()]);
-
-    const increases: Array<{ variantId: string; qty: number; title?: string }> =
-      [];
-    const decreases: Array<{ variantId: string; qty: number }> = [];
-
-    for (const id of ids) {
-      const delta = (newMap.get(id) ?? 0) - (oldMap.get(id) ?? 0);
-      if (delta > 0) {
-        const title = newLines.find((l) => l.variantId === id)?.title;
-        increases.push({ variantId: id, qty: delta, title });
-      } else if (delta < 0) {
-        decreases.push({ variantId: id, qty: -delta });
-      }
-    }
-
-    if (isUnpaidEditableStatus(status)) {
-      if (decreases.length) await releaseStockReserve(tx, decreases);
-      if (increases.length) await reserveStockForLines(tx, increases);
-      return;
-    }
-
-    if (isPaidEditableStatus(status)) {
-      if (decreases.length) await restoreStockOnPaidCancel(tx, decreases);
-      for (const line of increases) {
-        const rows = await tx.$queryRaw<
-          Array<{ id: string; stock: number; stockReserve: number }>
-        >`
-          SELECT id, stock, "stockReserve"
-          FROM "ProductVariant"
-          WHERE id = ${line.variantId}
-          FOR UPDATE
-        `;
-        const v = rows[0];
-        if (!v) {
-          throw new BadRequestException(
-            `Вариант недоступен${line.title ? `: ${line.title}` : ''}`,
-          );
-        }
-        const available = Math.max(0, v.stock - v.stockReserve);
-        if (available < line.qty) {
-          throw new BadRequestException(
-            `Недостаточно наличия${line.title ? ` («${line.title}»)` : ''}: доступно ${available}, нужно ${line.qty}`,
-          );
-        }
-        await tx.$executeRaw`
-          UPDATE "ProductVariant"
-          SET stock = GREATEST(0, stock - ${line.qty})
-          WHERE id = ${line.variantId}
-        `;
-      }
-    }
   }
 
   private async setStatus(

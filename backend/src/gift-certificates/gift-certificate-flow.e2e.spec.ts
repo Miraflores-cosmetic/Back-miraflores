@@ -83,21 +83,60 @@ function createGiftStore(seed: {
         async ({
           where,
         }: {
-          where: { orderId: string; kind: GiftCertificateLedgerKind };
+          where: {
+            orderId?: string | null;
+            certificateId?: string;
+            kind?:
+              | GiftCertificateLedgerKind
+              | { in: GiftCertificateLedgerKind[] };
+          };
         }) =>
-          ledger.filter(
-            (e) => e.orderId === where.orderId && e.kind === where.kind,
-          ),
+          ledger.filter((e) => {
+            if (
+              where.orderId !== undefined &&
+              e.orderId !== where.orderId
+            ) {
+              return false;
+            }
+            if (
+              where.certificateId !== undefined &&
+              e.certificateId !== where.certificateId
+            ) {
+              return false;
+            }
+            if (where.kind == null) return true;
+            if (typeof where.kind === 'object' && 'in' in where.kind) {
+              return where.kind.in.includes(e.kind);
+            }
+            return e.kind === where.kind;
+          }),
       ),
       count: vi.fn().mockImplementation(
         async ({
           where,
         }: {
-          where: { orderId: string; kind: GiftCertificateLedgerKind };
+          where: {
+            orderId?: string | null;
+            certificateId?: string;
+            kind?: GiftCertificateLedgerKind;
+          };
         }) =>
-          ledger.filter(
-            (e) => e.orderId === where.orderId && e.kind === where.kind,
-          ).length,
+          ledger.filter((e) => {
+            if (
+              where.orderId !== undefined &&
+              e.orderId !== where.orderId
+            ) {
+              return false;
+            }
+            if (
+              where.certificateId !== undefined &&
+              e.certificateId !== where.certificateId
+            ) {
+              return false;
+            }
+            if (where.kind != null && e.kind !== where.kind) return false;
+            return true;
+          }).length,
       ),
       create: vi.fn().mockImplementation(
         async ({
@@ -205,6 +244,41 @@ describe('gift certificate flow E2E', () => {
     // Идемпотентность второго RELEASE
     const again = await releaseGiftCertificateForOrder(tx as never, 'ord-paid');
     expect(again).toBe(false);
+    expect(cert.balance).toBe(5000);
+  });
+
+  it('release→re-hold (clamp) → full RELEASE снимает только net', async () => {
+    const { cert, tx } = createGiftStore({
+      id: 'c3',
+      code: 'JC-FLOW-TEST-0003',
+      faceValue: 5000,
+      balance: 5000,
+      status: GiftCertificateStatus.ACTIVE,
+    });
+
+    await holdGiftCertificateForOrder(tx as never, {
+      certificateId: cert.id,
+      orderId: 'ord-clamp',
+      applyAmount: 800,
+    });
+    expect(cert.balance).toBe(4200);
+
+    await releaseGiftCertificateForOrder(tx as never, 'ord-clamp', {
+      note: 'Пересчёт при изменении состава',
+    });
+    expect(cert.balance).toBe(5000);
+
+    await holdGiftCertificateForOrder(tx as never, {
+      certificateId: cert.id,
+      orderId: 'ord-clamp',
+      applyAmount: 100,
+    });
+    expect(cert.balance).toBe(4900);
+
+    const released = await releaseGiftCertificateForOrder(tx as never, 'ord-clamp', {
+      note: 'Возврат при полном refund заказа',
+    });
+    expect(released).toBe(true);
     expect(cert.balance).toBe(5000);
   });
 

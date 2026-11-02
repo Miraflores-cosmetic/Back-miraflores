@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildCdekPackagesFromOrderItems } from './carrier-shipment.service';
+import { buildCdekPackagesFromOrderItems } from './cdek-package.util';
 
 describe('buildCdekPackagesFromOrderItems', () => {
   it('включает подарок благодарности в состав накладной СДЭК', () => {
@@ -19,9 +19,8 @@ describe('buildCdekPackagesFromOrderItems', () => {
         isGratitudeGift: true,
       },
     ]);
-    expect(pkgs).toHaveLength(1);
-    expect(pkgs[0].items).toHaveLength(2);
-    expect(pkgs[0].items[1]).toMatchObject({
+    expect(pkgs).toHaveLength(2);
+    expect(pkgs[1].items[0]).toMatchObject({
       name: 'Подарок',
       ware_key: '4694872410287',
       cost: 0,

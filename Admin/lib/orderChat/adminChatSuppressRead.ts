@@ -1,8 +1,8 @@
 /**
- * Sticky «непрочитанным» across tabs: localStorage + BroadcastChannel.
- * localStorage (не session) — cold-open вкладка с тем же origin видит suppress
- * и не POST /read. Не привязывать к panelVisible.
- * Хранит unreadGeneration для CAS /read на Nest.
+ * Sticky «непрочитанным» across live tabs: localStorage + BroadcastChannel.
+ * Suppress живёт только пока staff в диалоге после «Непрочитанным»;
+ * повторный вход в тред (useAdminOrderChat) снимает флаг и шлёт /read.
+ * unreadGeneration — для CAS /read на Nest.
  */
 
 const STORAGE_PREFIX = 'miraflores.adminChat.suppressRead:';

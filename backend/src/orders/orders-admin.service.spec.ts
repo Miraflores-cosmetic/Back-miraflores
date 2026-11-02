@@ -866,6 +866,56 @@ describe('OrdersAdminService.updateItems', () => {
     );
   });
 
+  it('paid: sync ledger при clamp gift (не только order field)', async () => {
+    order.findUnique.mockResolvedValue(
+      baseItemsOrder({
+        status: OrderStatus.PAID,
+        discountTotal: 0,
+        giftCertificateAmount: 900,
+        giftCertificateId: 'gc1',
+        giftCertificateCode: 'GIFT',
+        shippingCost: 100,
+        subtotal: 1000,
+        total: 200,
+        payments: [{ status: 'SUCCEEDED', amount: 200 }],
+      }),
+    );
+    await service.updateItems('o1', 'admin1', {
+      items: [
+        {
+          variantId: null,
+          qty: 1,
+          unitPrice: 300,
+          title: 'Serum',
+          sku: 'SKU-1',
+        },
+      ],
+      notifyCustomer: false,
+    });
+    // maxGift = 400 → clamp 400; PAID тоже release+re-hold
+    expect(releaseGiftCertificateForOrder).toHaveBeenCalledWith(
+      tx,
+      'o1',
+      expect.objectContaining({ note: expect.stringMatching(/состав/i) }),
+    );
+    expect(holdGiftCertificateForOrder).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        certificateId: 'gc1',
+        orderId: 'o1',
+        applyAmount: 400,
+      }),
+    );
+    expect(order.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          giftCertificateAmount: 400,
+          total: 0,
+        }),
+      }),
+    );
+  });
+
   it('блокирует пустой состав', async () => {
     await expect(
       service.updateItems('o1', 'admin1', { items: [] }),
@@ -889,5 +939,290 @@ describe('OrdersAdminService.updateItems', () => {
         ],
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+describe('OrdersAdminService.removePromo', () => {
+  let service: OrdersAdminService;
+
+  beforeEach(() => {
+    order.findUnique.mockReset();
+    order.update.mockReset();
+    payment.findMany.mockReset();
+    payment.findMany.mockResolvedValue([]);
+    payment.updateMany.mockReset();
+    promoCodeRedemption.deleteMany.mockReset();
+    promoCodeRedemption.deleteMany.mockResolvedValue({ count: 1 });
+    $queryRaw.mockReset();
+    $queryRaw.mockResolvedValue([{ id: 'o1' }]);
+    lifecycle.addEvent.mockClear();
+    lifecycle.notifyOrderUpdated.mockClear();
+    prisma.$transaction.mockClear();
+    prisma.order.findUnique.mockResolvedValue({
+      ...detailOrder,
+      status: OrderStatus.PAID,
+      promoCode: null,
+      discountTotal: 0,
+      giftCertificateAmount: 0,
+      shippingCost: 200,
+      subtotal: 1000,
+      total: 1200,
+      items: [
+        {
+          id: 'i1',
+          title: 'X',
+          sku: 's',
+          qty: 1,
+          unitPrice: 1000,
+          lineTotal: 1000,
+        },
+      ],
+    });
+    service = new OrdersAdminService(
+      prisma as never,
+      lifecycle as never,
+      yookassa as never,
+      {
+        isCdekConfigured: () => false,
+        register: vi.fn(),
+      } as never,
+      { get: vi.fn().mockReturnValue('http://localhost:5173') } as never,
+      {
+        applyRetentionForOrder: vi.fn(),
+        seedCustomerNoteFromOrder: vi.fn(),
+      } as never,
+    );
+  });
+
+  it('снимает промокод и пересчитывает total', async () => {
+    order.findUnique.mockResolvedValue({
+      id: 'o1',
+      number: 'JCOS-1',
+      status: OrderStatus.PAID,
+      email: 'a@b.com',
+      giftPurchaseDenominationId: null,
+      giftCertificateId: null,
+      giftCertificateCode: null,
+      giftCertificateAmount: 0,
+      shippingCost: 200,
+      subtotal: 1000,
+      discountTotal: 150,
+      promoCode: 'SALE15',
+      total: 1050,
+      payments: [],
+      promoRedemption: { id: 'r1', promoCodeId: 'p1' },
+    });
+
+    await service.removePromo('o1', 'admin1', { notifyCustomer: false });
+
+    expect(promoCodeRedemption.deleteMany).toHaveBeenCalledWith({
+      where: { orderId: 'o1' },
+    });
+    expect(order.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          promoCode: null,
+          discountTotal: 0,
+          // 1000 - 0 - 0 + 200
+          total: 1200,
+        }),
+      }),
+    );
+    expect(lifecycle.addEvent).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        type: 'PROMO_REMOVED',
+        meta: expect.objectContaining({
+          removedCode: 'SALE15',
+          removedDiscount: 150,
+          previousTotal: 1050,
+          newTotal: 1200,
+        }),
+      }),
+    );
+  });
+
+  it('ошибка если промокода нет', async () => {
+    order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.PAID,
+      giftPurchaseDenominationId: null,
+      giftCertificateAmount: 0,
+      shippingCost: 0,
+      subtotal: 1000,
+      discountTotal: 0,
+      promoCode: null,
+      total: 1000,
+      payments: [],
+      promoRedemption: null,
+    });
+    await expect(
+      service.removePromo('o1', 'admin1'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('блокирует заказ сертификата', async () => {
+    order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.PAID,
+      giftPurchaseDenominationId: 'den1',
+      giftCertificateAmount: 0,
+      shippingCost: 0,
+      subtotal: 1000,
+      discountTotal: 100,
+      promoCode: 'SALE',
+      total: 900,
+      payments: [],
+      promoRedemption: null,
+    });
+    await expect(
+      service.removePromo('o1', 'admin1'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('unpaid: гасит PENDING при росте total и pendingPaymentsCanceled', async () => {
+    yookassa.cancelPaymentsBestEffort.mockClear();
+    order.findUnique.mockResolvedValue({
+      id: 'o1',
+      number: 'JCOS-1',
+      status: OrderStatus.AWAITING_PAYMENT,
+      email: 'a@b.com',
+      giftPurchaseDenominationId: null,
+      giftCertificateId: null,
+      giftCertificateCode: null,
+      giftCertificateAmount: 0,
+      shippingCost: 200,
+      subtotal: 1000,
+      discountTotal: 150,
+      promoCode: 'SALE15',
+      total: 1050,
+      payments: [],
+      promoRedemption: { id: 'r1', promoCodeId: 'p1' },
+    });
+    payment.findMany.mockResolvedValue([{ externalId: 'yk-pending-1' }]);
+
+    const res = await service.removePromo('o1', 'admin1', {
+      notifyCustomer: false,
+    });
+
+    expect(payment.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          orderId: 'o1',
+          status: 'PENDING',
+        }),
+        data: { status: 'CANCELED' },
+      }),
+    );
+    expect(yookassa.cancelPaymentsBestEffort).toHaveBeenCalledWith([
+      'yk-pending-1',
+    ]);
+    expect(res.pendingPaymentsCanceled).toBe(true);
+    expect(order.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          promoCode: null,
+          discountTotal: 0,
+          total: 1200,
+        }),
+      }),
+    );
+  });
+
+  it('unpaid: без PENDING — pendingPaymentsCanceled false', async () => {
+    yookassa.cancelPaymentsBestEffort.mockClear();
+    order.findUnique.mockResolvedValue({
+      id: 'o1',
+      number: 'JCOS-1',
+      status: OrderStatus.AWAITING_PAYMENT,
+      email: 'a@b.com',
+      giftPurchaseDenominationId: null,
+      giftCertificateId: null,
+      giftCertificateCode: null,
+      giftCertificateAmount: 0,
+      shippingCost: 0,
+      subtotal: 1000,
+      discountTotal: 100,
+      promoCode: 'SALE',
+      total: 900,
+      payments: [],
+      promoRedemption: null,
+    });
+    payment.findMany.mockResolvedValue([]);
+
+    const res = await service.removePromo('o1', 'admin1', {
+      notifyCustomer: false,
+    });
+
+    expect(payment.updateMany).not.toHaveBeenCalled();
+    expect(yookassa.cancelPaymentsBestEffort).not.toHaveBeenCalled();
+    expect(res.pendingPaymentsCanceled).toBe(false);
+  });
+
+  it('notifyCustomer: true → письмо клиенту', async () => {
+    order.findUnique.mockResolvedValue({
+      id: 'o1',
+      number: 'JCOS-1',
+      status: OrderStatus.PAID,
+      email: 'a@b.com',
+      giftPurchaseDenominationId: null,
+      giftCertificateId: null,
+      giftCertificateCode: null,
+      giftCertificateAmount: 0,
+      shippingCost: 0,
+      subtotal: 1000,
+      discountTotal: 100,
+      promoCode: 'SALE',
+      total: 900,
+      payments: [],
+      promoRedemption: { id: 'r1', promoCodeId: 'p1' },
+    });
+
+    await service.removePromo('o1', 'admin1', { notifyCustomer: true });
+
+    expect(lifecycle.notifyOrderUpdated).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: 'a@b.com',
+        orderNumber: 'JCOS-1',
+        changesSummary: expect.stringMatching(/SALE|промо/i),
+      }),
+    );
+  });
+
+  it('paid + gift: sync ledger при clamp после снятия скидки не нужен если gift ≤ max', async () => {
+    releaseGiftCertificateForOrder.mockClear();
+    holdGiftCertificateForOrder.mockClear();
+    order.findUnique.mockResolvedValue({
+      id: 'o1',
+      number: 'JCOS-1',
+      status: OrderStatus.PAID,
+      email: 'a@b.com',
+      giftPurchaseDenominationId: null,
+      giftCertificateId: 'gc1',
+      giftCertificateCode: 'GIFT',
+      giftCertificateAmount: 300,
+      shippingCost: 0,
+      subtotal: 1000,
+      discountTotal: 100,
+      promoCode: 'SALE',
+      total: 600,
+      payments: [],
+      promoRedemption: { id: 'r1', promoCodeId: 'p1' },
+    });
+
+    await service.removePromo('o1', 'admin1', { notifyCustomer: false });
+
+    // maxGift растёт (1000), gift 300 остаётся — amount не меняется → без release
+    expect(releaseGiftCertificateForOrder).not.toHaveBeenCalled();
+    expect(order.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          discountTotal: 0,
+          giftCertificateAmount: 300,
+          // 1000 - 0 - 300 + 0
+          total: 700,
+        }),
+      }),
+    );
   });
 });

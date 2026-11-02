@@ -51,6 +51,9 @@ import { readUpstreamJsonErrorMessage } from '@/lib/readUpstreamJsonError';
 
 const PROFILE_AVATAR_PLACEHOLDER = DEFAULT_STAFF_AVATAR;
 
+/** Дольше типичного IO flicker — считаем, что диалог реально закрыли. */
+const LEAVE_THREAD_DEBOUNCE_MS = 700;
+
 function dispatchAdminChatUnreadRefresh(): void {
   if (typeof document === 'undefined') return;
   document.dispatchEvent(new Event('admin-orders-chat-unread-refresh'));
@@ -143,11 +146,14 @@ export function useAdminOrderChat(opts: {
   panelVisibleRef.current = panelVisible;
   const markReadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /**
-   * Sticky unread: после «Непрочитанным» не слать /read, пока staff не ответит.
-   * localStorage + BroadcastChannel (cold-open вкладки + live peers с тем же тредом).
-   * Не снимать от IntersectionObserver / tab blur / panelVisible.
+   * Sticky unread: после «Непрочитанным» не слать /read, пока диалог не покинули
+   * по-настоящему (не IO flicker) или staff не ответил.
+   * localStorage + BC — live peers; повторный вход в тред сбрасывает suppress.
    */
   const suppressAutoMarkReadRef = useRef(false);
+  /** Ушли из панели дольше LEAVE_DEBOUNCE — следующий visible = повторный вход. */
+  const leftThreadRef = useRef(false);
+  const leaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Инвалидирует in-flight /read (поколение + AbortController). */
   const markReadEpochRef = useRef(0);
   const markReadAbortRef = useRef<AbortController | null>(null);
@@ -177,9 +183,17 @@ export function useAdminOrderChat(opts: {
   );
 
   useEffect(() => {
-    suppressAutoMarkReadRef.current = targetKey
-      ? readAdminChatSuppressRead(targetKey)
-      : false;
+    // Не восстанавливаем sticky с прошлого визита — иначе повторный вход
+    // не снимает «непрочитанное». Suppress только после «Непрочитанным» в этой сессии.
+    suppressAutoMarkReadRef.current = false;
+    leftThreadRef.current = false;
+    if (targetKey) {
+      publishAdminChatSuppressRead({ type: 'clear', targetKey });
+    }
+    if (leaveTimerRef.current != null) {
+      clearTimeout(leaveTimerRef.current);
+      leaveTimerRef.current = null;
+    }
     setMarkUnreadKnownEmpty(false);
     markReadEpochRef.current += 1;
     markReadAbortRef.current?.abort();
@@ -380,10 +394,46 @@ export function useAdminOrderChat(opts: {
   messagesRef.current = messages;
 
   useEffect(() => {
-    if (panelVisible && enabled && target) {
-      void markReadIfVisible();
+    if (!enabled || !target || !targetKey) return;
+
+    if (!panelVisible) {
+      if (leaveTimerRef.current != null) clearTimeout(leaveTimerRef.current);
+      leaveTimerRef.current = setTimeout(() => {
+        leaveTimerRef.current = null;
+        if (suppressAutoMarkReadRef.current) {
+          leftThreadRef.current = true;
+        }
+      }, LEAVE_THREAD_DEBOUNCE_MS);
+      return () => {
+        if (leaveTimerRef.current != null) {
+          clearTimeout(leaveTimerRef.current);
+          leaveTimerRef.current = null;
+        }
+      };
     }
-  }, [panelVisible, enabled, targetKey, markReadIfVisible, target]);
+
+    if (leaveTimerRef.current != null) {
+      clearTimeout(leaveTimerRef.current);
+      leaveTimerRef.current = null;
+    }
+
+    // Повторный вход после реального ухода → снять sticky и /read.
+    if (leftThreadRef.current) {
+      leftThreadRef.current = false;
+      setSuppressAutoMarkRead(targetKey, false);
+      void markReadIfVisible(true, true);
+      return;
+    }
+
+    void markReadIfVisible();
+  }, [
+    panelVisible,
+    enabled,
+    targetKey,
+    markReadIfVisible,
+    target,
+    setSuppressAutoMarkRead,
+  ]);
 
   const syncNewerMessages = useCallback(async () => {
     const t = targetRef.current;

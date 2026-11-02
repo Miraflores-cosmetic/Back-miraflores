@@ -89,6 +89,9 @@ export type AdminOrderActions = {
   canEditAddress?: boolean;
   canEditItems?: boolean;
   canCreateSurcharge?: boolean;
+  /** Неоплаченный: выдать новую ссылку ЮKassa на актуальный total. */
+  canCreateCheckoutPayment?: boolean;
+  canRemovePromo?: boolean;
 };
 
 export type AdminOrderEvent = {

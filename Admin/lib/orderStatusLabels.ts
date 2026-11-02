@@ -34,6 +34,7 @@ const ORDER_EVENT_TYPE_LABELS: Record<string, string> = {
   CARRIER_COST: 'Стоимость доставки (факт)',
   ADDRESS_UPDATED: 'Адрес изменён',
   ITEMS_UPDATED: 'Состав изменён',
+  PROMO_REMOVED: 'Промокод снят',
   SURCHARGE_PAID: 'Доплата получена',
   PAYMENT_REMIND: 'Напоминание об оплате',
 };

@@ -9,6 +9,10 @@ import {
   type OzonTariffResult,
 } from '../ozon/ozon-tariff';
 import { loadOzonTariffLines } from '../ozon/ozon-variant-dims';
+import {
+  packageDimsForQuantity,
+  resolveCdekVariantDims,
+} from './cdek-package.util';
 
 type EstimateLine = { variantId: string; qty: number };
 
@@ -69,25 +73,6 @@ function normalizePostalRu(raw?: string | null): string | null {
   if (!raw) return null;
   const digits = raw.replace(/\D/g, '');
   return digits.length === 6 ? digits : null;
-}
-
-function packageDimsForQuantity(
-  lengthCm: number,
-  widthCm: number,
-  heightCm: number,
-  quantity: number,
-): { length: number; width: number; height: number } {
-  const q = Math.max(1, Math.floor(quantity) || 1);
-  const l = Math.max(1, Math.round(lengthCm));
-  const w = Math.max(1, Math.round(widthCm));
-  const h = Math.max(1, Math.round(heightCm));
-  if (q <= 1) return { length: l, width: w, height: h };
-  const scale = Math.cbrt(q);
-  return {
-    length: Math.max(1, Math.round(l * scale)),
-    width: Math.max(1, Math.round(w * scale)),
-    height: Math.max(1, Math.round(h * scale)),
-  };
 }
 
 function tariffMatchesModes(t: CdekTariffRow, modes: number[]): boolean {
@@ -261,13 +246,10 @@ export class ShippingServerEstimateService {
     for (const line of lines) {
       const row = byId.get(line.variantId);
       const q = Math.max(1, Math.floor(line.qty || 1));
-      const weightG = (row?.weightGrams ?? 300) * q;
-      const lCm = Math.max(1, Math.round((row?.lengthMm ?? 200) / 10));
-      const wCm = Math.max(1, Math.round((row?.widthMm ?? 150) / 10));
-      const hCm = Math.max(1, Math.round((row?.heightMm ?? 100) / 10));
+      const { weightG, lengthCm, widthCm, heightCm } = resolveCdekVariantDims(row);
       packages.push({
-        weight: Math.max(1, Math.round(weightG)),
-        ...packageDimsForQuantity(lCm, wCm, hCm, q),
+        weight: Math.max(1, Math.round(weightG * q)),
+        ...packageDimsForQuantity(lengthCm, widthCm, heightCm, q),
       });
     }
     if (!packages.length) return null;

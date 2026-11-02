@@ -190,6 +190,12 @@ export class OrderItemsUpdateDto {
   notifyCustomer?: boolean;
 }
 
+export class OrderRemovePromoDto {
+  @IsOptional()
+  @IsBoolean()
+  notifyCustomer?: boolean;
+}
+
 export class OrderSurchargePaymentDto {
   /** Если не передан — balanceDue по текущему заказу. */
   @IsOptional()
