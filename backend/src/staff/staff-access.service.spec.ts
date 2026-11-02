@@ -64,8 +64,33 @@ describe('StaffAccessService', () => {
     expect(
       await svc.canAccessApiPath('m1', UserRole.MODERATOR, '/api/v1/orders/admin/abc'),
     ).toBe(true);
+    // GET products — picker (catalog_read) для orders; мутации — полный catalog.
     expect(
-      await svc.canAccessApiPath('m1', UserRole.MODERATOR, '/api/v1/catalog/admin/products'),
+      await svc.canAccessApiPath(
+        'm1',
+        UserRole.MODERATOR,
+        '/api/v1/catalog/admin/products',
+        undefined,
+        'GET',
+      ),
+    ).toBe(true);
+    expect(
+      await svc.canAccessApiPath(
+        'm1',
+        UserRole.MODERATOR,
+        '/api/v1/catalog/admin/products',
+        undefined,
+        'POST',
+      ),
+    ).toBe(false);
+    expect(
+      await svc.canAccessApiPath(
+        'm1',
+        UserRole.MODERATOR,
+        '/api/v1/catalog/admin/categories',
+        undefined,
+        'GET',
+      ),
     ).toBe(false);
   });
 
@@ -99,6 +124,71 @@ describe('StaffAccessService', () => {
     ).toBe(true);
     expect(
       await svc.canAccessApiPath('m1', UserRole.MODERATOR, '/api/v1/orders/admin/x/packing'),
+    ).toBe(false);
+  });
+
+  it('orders-only: GET catalog products (picker) разрешён, мутации — нет', async () => {
+    prisma = makePrisma({
+      role: UserRole.MODERATOR,
+      isActive: true,
+      adminSections: ['orders'],
+    });
+    svc = new StaffAccessService(prisma as never);
+
+    expect(
+      await svc.canAccessApiPath(
+        'm1',
+        UserRole.MODERATOR,
+        '/api/v1/catalog/admin/products',
+        undefined,
+        'GET',
+      ),
+    ).toBe(true);
+    expect(
+      await svc.canAccessApiPath(
+        'm1',
+        UserRole.MODERATOR,
+        '/api/v1/catalog/admin/products/p1',
+        undefined,
+        'GET',
+      ),
+    ).toBe(true);
+    expect(
+      await svc.canAccessApiPath(
+        'm1',
+        UserRole.MODERATOR,
+        '/api/v1/catalog/admin/products',
+        undefined,
+        'POST',
+      ),
+    ).toBe(false);
+  });
+
+  it('orders-only: GET gift denoms (order create) разрешён', async () => {
+    prisma = makePrisma({
+      role: UserRole.MODERATOR,
+      isActive: true,
+      adminSections: ['orders'],
+    });
+    svc = new StaffAccessService(prisma as never);
+
+    expect(
+      await svc.canAccessApiPath(
+        'm1',
+        UserRole.MODERATOR,
+        '/api/v1/gift-certificates/admin/denominations',
+        undefined,
+        'GET',
+      ),
+    ).toBe(true);
+    expect(
+      await svc.canAccessApiPath(
+        'm1',
+        UserRole.MODERATOR,
+        '/api/v1/gift-certificates/admin',
+        undefined,
+        'GET',
+      ),
     ).toBe(false);
   });
 

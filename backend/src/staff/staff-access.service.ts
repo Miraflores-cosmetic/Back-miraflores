@@ -3,6 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import {
   ALL_STAFF_SECTIONS_WITH_DASHBOARD,
   ADMIN_SECTION_DASHBOARD,
+  CATALOG_READ_GRANT_SECTIONS,
+  GIFT_DENOMS_READ_GRANT_SECTIONS,
   normalizeStoredAdminSections,
   resolveAdminSectionFromApiPath,
   type AdminSectionId,
@@ -153,6 +155,12 @@ export class StaffAccessService implements OnModuleInit, OnModuleDestroy {
       return (
         sections.includes('certificates') || sections.includes('certificates_finance')
       );
+    }
+    if (target === 'catalog_read') {
+      return CATALOG_READ_GRANT_SECTIONS.some((s) => sections.includes(s));
+    }
+    if (target === 'gift_denoms_read') {
+      return GIFT_DENOMS_READ_GRANT_SECTIONS.some((s) => sections.includes(s));
     }
     return sections.includes(target);
   }

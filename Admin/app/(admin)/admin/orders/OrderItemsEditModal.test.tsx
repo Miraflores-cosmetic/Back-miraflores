@@ -12,7 +12,39 @@ import { OrderItemsEditModal } from './OrderItemsEditModal';
 import type { AdminOrderItem } from '@/lib/adminOrderTypes';
 
 vi.mock('@/app/(admin)/admin/settings/gratitude/VariantPickerModal', () => ({
-  VariantPickerModal: () => null,
+  VariantPickerModal: ({
+    open,
+    onApply,
+  }: {
+    open: boolean;
+    onApply: (
+      variantId: string,
+      label: string,
+      details?: {
+        sku: string;
+        price: number;
+        title: string;
+        shadeId: string | null;
+        shadeName: string | null;
+      },
+    ) => void;
+  }) =>
+    open ? (
+      <button
+        type="button"
+        onClick={() =>
+          onApply('v-shade', 'Serum · Нюд', {
+            sku: 'SKU-S',
+            price: 1200,
+            title: 'Serum · Нюд',
+            shadeId: 'sh1',
+            shadeName: 'Нюд',
+          })
+        }
+      >
+        mock-apply-shade
+      </button>
+    ) : null,
 }));
 
 afterEach(() => {
@@ -258,6 +290,50 @@ describe('OrderItemsEditModal', () => {
     const warn = screen.getByRole('status').textContent ?? '';
     expect(warn).toMatch(/промокод/i);
     expect(warn).not.toMatch(/clamp|freeze|unitPrice/i);
+  });
+
+  it('add from catalog передаёт shadeId в save payload', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(
+      <OrderItemsEditModal
+        open
+        initialItems={[]}
+        busy={false}
+        hasPromoOrGift={false}
+        pricing={{
+          discountTotal: 0,
+          giftCertificateAmount: 0,
+          shippingCost: 0,
+          netPaid: 0,
+          currentTotal: 0,
+          promoCode: null,
+        }}
+        onClose={() => {}}
+        onSave={onSave}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Добавить из каталога' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'mock-apply-shade' }));
+    expect(screen.getByText(/Оттенок:\s*Нюд/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+    const dialog = await screen.findByRole('alertdialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Сохранить' }));
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        items: [
+          expect.objectContaining({
+            variantId: 'v-shade',
+            shadeId: 'sh1',
+            unitPrice: 1200,
+          }),
+        ],
+      }),
+    );
   });
 
   it('превью: промо без слова clamp', () => {

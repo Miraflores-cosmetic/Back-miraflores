@@ -20,6 +20,8 @@ import {
 } from '../gift-certificates/gift-certificate-hold.util';
 import { SettingsPublicService } from '../settings/settings.service';
 import type { CreateOrderDto } from './dto/create-order.dto';
+import type { AdminCreateOrderDto } from './dto/admin-create-order.dto';
+import { createAdminOrder, previewAdminOrder } from './create-admin-order';
 import { cancelUnpaidOrderInTx } from './cancel-unpaid-order';
 import {
   reserveStockForLines,
@@ -904,6 +906,36 @@ export class OrdersPublicService {
     );
 
     return this.serializeCreated(order);
+  }
+
+  /**
+   * Создание заказа сотрудником: без HMAC quote, guestId/idempotencyKey серверные.
+   * @see createAdminOrder
+   */
+  private adminCreateDeps() {
+    return {
+      prisma: this.prisma,
+      catalogPublic: this.catalogPublic,
+      promoPublic: this.promoPublic,
+      giftsPublic: this.giftsPublic,
+      lifecycle: this.lifecycle,
+      orderChat: this.orderChat,
+      awaitingPayment: this.awaitingPayment,
+      yourichSync: this.yourichSync,
+      yourichClient: this.yourichClient,
+      resolveGratitudeGiftLines: (goodsAfterPromo: number) =>
+        this.resolveGratitudeGiftLines(goodsAfterPromo),
+      logger: this.logger,
+    };
+  }
+
+  async createAdmin(dto: AdminCreateOrderDto, opts: { actorUserId: string }) {
+    return createAdminOrder(this.adminCreateDeps(), dto, opts);
+  }
+
+  /** Dry-run того же quote, что createAdmin (promo/gift/overrides). */
+  async previewAdmin(dto: AdminCreateOrderDto) {
+    return previewAdminOrder(this.adminCreateDeps(), dto);
   }
 
   /**

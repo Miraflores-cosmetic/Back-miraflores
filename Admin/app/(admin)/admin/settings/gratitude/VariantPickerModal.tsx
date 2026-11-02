@@ -9,10 +9,23 @@ import {
   AdminBackendRequestError,
   adminBackendJson,
 } from '@/lib/adminBackendFetch';
-import type { AdminProduct, AdminProductListItem, AdminProductListResponse } from '@/lib/adminCatalogTypes';
+import type {
+  AdminProduct,
+  AdminProductListItem,
+  AdminProductListResponse,
+} from '@/lib/adminCatalogTypes';
 import styles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
 
 const PRODUCT_PAGE_SIZE = 50;
+
+export type VariantPickerApplyDetails = {
+  sku: string;
+  price: number;
+  title: string;
+  /** Platform field; Miraflores catalog has no shades — always null. */
+  shadeId: string | null;
+  shadeName: string | null;
+};
 
 function variantLabel(productName: string, variantName: string, sku?: string) {
   const base = `${productName} — ${variantName}`;
@@ -33,7 +46,7 @@ export function VariantPickerModal({
   onApply: (
     variantId: string,
     label: string,
-    details?: { sku: string; price: number; title: string },
+    details?: VariantPickerApplyDetails,
   ) => void;
 }) {
   const [step, setStep] = useState<'products' | 'variants'>('products');
@@ -92,7 +105,7 @@ export function VariantPickerModal({
           setError(
             e instanceof AdminBackendRequestError
               ? e.status === 403
-                ? 'Нет доступа к каталогу. Нужен раздел «Каталог» у модератора.'
+                ? 'Нет доступа к товарам. Нужен раздел «Каталог» или «Заказы» у модератора.'
                 : e.message
               : 'Ошибка загрузки',
           );
@@ -116,8 +129,9 @@ export function VariantPickerModal({
       setStep('variants');
       const variants = data.variants ?? [];
       if (variants.length === 1) {
-        const v = variants[0]!;
-        setDraftVariantId(v.id);
+        setDraftVariantId(variants[0]!.id);
+      } else {
+        setDraftVariantId('');
       }
     } catch (e) {
       setError(e instanceof AdminBackendRequestError ? e.message : 'Ошибка загрузки вариантов');
@@ -137,6 +151,8 @@ export function VariantPickerModal({
       sku: v.sku,
       price: v.price,
       title: label,
+      shadeId: null,
+      shadeName: null,
     });
     onClose();
   }

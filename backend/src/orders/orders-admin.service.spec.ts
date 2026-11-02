@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { OrderStatus } from '@prisma/client';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
+import { OrderStatus, PaymentStatus } from '@prisma/client';
 import { OrdersAdminService } from './orders-admin.service';
 
 const releaseGiftCertificateForOrder = vi.fn(async () => true);
@@ -113,6 +117,7 @@ const prisma = {
     findUniqueOrThrow: vi.fn(),
     update: vi.fn().mockResolvedValue({}),
   },
+  payment,
 };
 
 const lifecycle = {
@@ -126,6 +131,7 @@ const lifecycle = {
 const yookassa = {
   isConfigured: vi.fn(() => false),
   createRefund: vi.fn(),
+  createRedirectPayment: vi.fn(),
   cancelPaymentsBestEffort: vi.fn(async () => undefined),
 };
 
@@ -160,6 +166,7 @@ describe('OrdersAdminService.cancel', () => {
         applyRetentionForOrder: vi.fn(),
         seedCustomerNoteFromOrder: vi.fn(),
       } as never,
+      { createAdmin: vi.fn() } as never,
     );
   });
 
@@ -296,6 +303,7 @@ describe('OrdersAdminService.refund + gift RELEASE', () => {
         applyRetentionForOrder: vi.fn(),
         seedCustomerNoteFromOrder: vi.fn(),
       } as never,
+      { createAdmin: vi.fn() } as never,
     );
   });
 
@@ -518,6 +526,7 @@ describe('OrdersAdminService.updateShippingAddress', () => {
         applyRetentionForOrder: vi.fn(),
         seedCustomerNoteFromOrder: vi.fn(),
       } as never,
+      { createAdmin: vi.fn() } as never,
     );
   });
 
@@ -694,6 +703,7 @@ describe('OrdersAdminService.updateItems', () => {
         applyRetentionForOrder: vi.fn(),
         seedCustomerNoteFromOrder: vi.fn(),
       } as never,
+      { createAdmin: vi.fn() } as never,
     );
   });
 
@@ -991,6 +1001,7 @@ describe('OrdersAdminService.removePromo', () => {
         applyRetentionForOrder: vi.fn(),
         seedCustomerNoteFromOrder: vi.fn(),
       } as never,
+      { createAdmin: vi.fn() } as never,
     );
   });
 
@@ -1224,5 +1235,279 @@ describe('OrdersAdminService.removePromo', () => {
         }),
       }),
     );
+  });
+});
+
+describe('OrdersAdminService.create pay modes', () => {
+  let service: OrdersAdminService;
+  const createAdmin = vi.fn();
+  const markPaidSpy = vi.fn();
+  const checkoutSpy = vi.fn();
+
+  beforeEach(() => {
+    createAdmin.mockReset();
+    createAdmin.mockResolvedValue({
+      id: 'o-new',
+      number: 'JCOS-42',
+      status: 'AWAITING_PAYMENT',
+      email: 'a@b.com',
+      phone: '+7999',
+      subtotal: 1000,
+      discountTotal: 0,
+      giftCertificateAmount: 0,
+      total: 1000,
+      promoCode: null,
+      giftCertificateCode: null,
+    });
+    prisma.order.findUnique.mockResolvedValue({ ...detailOrder, id: 'o-new' });
+
+    service = new OrdersAdminService(
+      prisma as never,
+      lifecycle as never,
+      yookassa as never,
+      {
+        isCdekConfigured: () => false,
+        register: vi.fn(),
+      } as never,
+      { get: vi.fn().mockReturnValue('http://localhost:5173') } as never,
+      {
+        applyRetentionForOrder: vi.fn(),
+        seedCustomerNoteFromOrder: vi.fn(),
+      } as never,
+      { createAdmin } as never,
+    );
+
+    markPaidSpy.mockReset();
+    checkoutSpy.mockReset();
+    markPaidSpy.mockResolvedValue({ ...detailOrder, id: 'o-new', status: OrderStatus.PAID });
+    checkoutSpy.mockResolvedValue({
+      ...detailOrder,
+      id: 'o-new',
+      checkout: {
+        amount: 1000,
+        confirmationUrl: 'https://pay.example/link',
+        paymentId: 'yk1',
+      },
+    });
+    vi.spyOn(service, 'markPaid').mockImplementation(markPaidSpy as never);
+    vi.spyOn(service, 'createCheckoutPayment').mockImplementation(
+      checkoutSpy as never,
+    );
+    vi.spyOn(service, 'getById').mockResolvedValue({
+      ...detailOrder,
+      id: 'o-new',
+    } as never);
+  });
+
+  const dtoBase = {
+    lines: [{ variantId: 'v1', qty: 1 }],
+    email: 'a@b.com',
+    phone: '+79991234567',
+    customerName: 'Иван',
+    shippingAddress: { city: 'Москва', address: 'Тверская 1' },
+    shippingMethod: 'CDEK',
+    shippingCost: 0,
+    attachGratitude: false,
+  };
+
+  it('awaiting: только create, без mark-paid / link', async () => {
+    const res = await service.create(
+      { ...dtoBase, payMode: 'awaiting' },
+      'staff1',
+    );
+    expect(createAdmin).toHaveBeenCalled();
+    expect(markPaidSpy).not.toHaveBeenCalled();
+    expect(checkoutSpy).not.toHaveBeenCalled();
+    expect(res.paymentLink).toBeNull();
+    expect(res.paymentError).toBeNull();
+    expect(res.order.id).toBe('o-new');
+  });
+
+  it('mark_paid без orders_finance → Forbidden до create', async () => {
+    await expect(
+      service.create(
+        { ...dtoBase, payMode: 'mark_paid' },
+        'staff1',
+        { canOrdersFinance: false },
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(createAdmin).not.toHaveBeenCalled();
+  });
+
+  it('mark_paid: вызывает markPaid с notifyCustomer', async () => {
+    await service.create(
+      { ...dtoBase, payMode: 'mark_paid', notifyCustomer: false },
+      'staff1',
+      { canOrdersFinance: true },
+    );
+    expect(markPaidSpy).toHaveBeenCalledWith('o-new', 'staff1', {
+      notifyCustomer: false,
+    });
+    expect(checkoutSpy).not.toHaveBeenCalled();
+  });
+
+  it('awaiting_link: createCheckoutPayment и paymentLink', async () => {
+    const res = await service.create(
+      { ...dtoBase, payMode: 'awaiting_link', notifyCustomer: true },
+      'staff1',
+    );
+    expect(checkoutSpy).toHaveBeenCalledWith('o-new', 'staff1', {
+      notifyCustomer: true,
+      reuseExisting: true,
+    });
+    expect(res.paymentLink).toBe('https://pay.example/link');
+    expect(res.paymentError).toBeNull();
+  });
+
+  it('awaiting_link: ЮKassa down → заказ есть, paymentError, без throw', async () => {
+    checkoutSpy.mockRejectedValueOnce(
+      new BadRequestException('ЮKassa не настроена'),
+    );
+    const res = await service.create(
+      { ...dtoBase, payMode: 'awaiting_link' },
+      'staff1',
+    );
+    expect(createAdmin).toHaveBeenCalled();
+    expect(res.order.id).toBe('o-new');
+    expect(res.paymentLink).toBeNull();
+    expect(res.paymentError).toMatch(/ЮKassa/i);
+  });
+});
+
+describe('OrdersAdminService.createCheckoutPayment reuseExisting', () => {
+  let service: OrdersAdminService;
+
+  beforeEach(() => {
+    yookassa.isConfigured.mockReturnValue(true);
+    yookassa.createRedirectPayment.mockReset();
+    yookassa.cancelPaymentsBestEffort.mockClear();
+    payment.create.mockClear();
+    lifecycle.addEvent.mockClear();
+    lifecycle.notifyOrderUpdated.mockClear();
+
+    service = new OrdersAdminService(
+      prisma as never,
+      lifecycle as never,
+      yookassa as never,
+      {
+        isCdekConfigured: () => false,
+        register: vi.fn(),
+      } as never,
+      { get: vi.fn().mockReturnValue('http://localhost:5173') } as never,
+      {
+        applyRetentionForOrder: vi.fn(),
+        seedCustomerNoteFromOrder: vi.fn(),
+      } as never,
+      { createAdmin: vi.fn() } as never,
+    );
+
+    vi.spyOn(service, 'getById').mockResolvedValue({
+      ...detailOrder,
+      id: 'o-link',
+      status: OrderStatus.AWAITING_PAYMENT,
+      total: 1500,
+    } as never);
+  });
+
+  it('reuseExisting: возвращает PENDING link без нового ЮKassa', async () => {
+    prisma.order.findUnique.mockResolvedValue({
+      id: 'o-link',
+      number: 'JCOS-9',
+      status: OrderStatus.AWAITING_PAYMENT,
+      email: 'a@b.com',
+      total: 1500,
+      giftPurchaseDenominationId: null,
+      payments: [
+        {
+          id: 'pay1',
+          status: PaymentStatus.PENDING,
+          amount: 1500,
+          externalId: 'yk-existing',
+          confirmationUrl: 'https://pay.example/existing',
+        },
+      ],
+    });
+
+    const res = await service.createCheckoutPayment('o-link', 'staff1', {
+      reuseExisting: true,
+      notifyCustomer: false,
+    });
+
+    expect(res.checkout).toEqual({
+      amount: 1500,
+      confirmationUrl: 'https://pay.example/existing',
+      paymentId: 'yk-existing',
+      reused: true,
+    });
+    expect(yookassa.createRedirectPayment).not.toHaveBeenCalled();
+    expect(yookassa.cancelPaymentsBestEffort).not.toHaveBeenCalled();
+    expect(payment.create).not.toHaveBeenCalled();
+  });
+
+  it('без reuseExisting: cancel PENDING + новый платёж', async () => {
+    prisma.order.findUnique.mockResolvedValue({
+      id: 'o-link',
+      number: 'JCOS-9',
+      status: OrderStatus.AWAITING_PAYMENT,
+      email: 'a@b.com',
+      total: 1500,
+      giftPurchaseDenominationId: null,
+      payments: [
+        {
+          id: 'pay1',
+          status: PaymentStatus.PENDING,
+          amount: 1500,
+          externalId: 'yk-old',
+          confirmationUrl: 'https://pay.example/old',
+        },
+      ],
+    });
+    yookassa.createRedirectPayment.mockResolvedValue({
+      payment: { id: 'yk-new' },
+      confirmationUrl: 'https://pay.example/new',
+    });
+    payment.create.mockResolvedValue({});
+
+    const res = await service.createCheckoutPayment('o-link', 'staff1', {
+      notifyCustomer: false,
+    });
+
+    expect(yookassa.cancelPaymentsBestEffort).toHaveBeenCalledWith(['yk-old']);
+    expect(yookassa.createRedirectPayment).toHaveBeenCalled();
+    expect(res.checkout?.confirmationUrl).toBe('https://pay.example/new');
+    expect(res.checkout?.reused).toBe(false);
+  });
+
+  it('reuseExisting при другом amount — перевыпускает', async () => {
+    prisma.order.findUnique.mockResolvedValue({
+      id: 'o-link',
+      number: 'JCOS-9',
+      status: OrderStatus.AWAITING_PAYMENT,
+      email: 'a@b.com',
+      total: 2000,
+      giftPurchaseDenominationId: null,
+      payments: [
+        {
+          id: 'pay1',
+          status: PaymentStatus.PENDING,
+          amount: 1500,
+          externalId: 'yk-old',
+          confirmationUrl: 'https://pay.example/old',
+        },
+      ],
+    });
+    yookassa.createRedirectPayment.mockResolvedValue({
+      payment: { id: 'yk-new' },
+      confirmationUrl: 'https://pay.example/new',
+    });
+    payment.create.mockResolvedValue({});
+
+    await service.createCheckoutPayment('o-link', 'staff1', {
+      reuseExisting: true,
+      notifyCustomer: false,
+    });
+
+    expect(yookassa.createRedirectPayment).toHaveBeenCalled();
+    expect(yookassa.cancelPaymentsBestEffort).toHaveBeenCalledWith(['yk-old']);
   });
 });

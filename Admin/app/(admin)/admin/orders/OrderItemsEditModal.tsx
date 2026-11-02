@@ -760,13 +760,14 @@ export function OrderItemsEditModal({
         onClose={() => setPickerOpen(false)}
         onApply={(variantId, label, details) => {
           const price = details?.price ?? 0;
+          const shadeId = details?.shadeId ?? null;
           setLines((prev) => [
             ...prev,
             {
-              key: `new-${variantId}-${Date.now()}`,
+              key: `new-${variantId}-${shadeId ?? 'noshade'}-${Date.now()}`,
               variantId,
-              shadeId: null,
-              shadeName: null,
+              shadeId,
+              shadeName: details?.shadeName ?? null,
               title: details?.title || label,
               sku: details?.sku || '—',
               qty: 1,

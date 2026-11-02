@@ -136,7 +136,15 @@ describe('resolveAdminSectionFromApiPath', () => {
     expect(resolveAdminSectionFromApiPath('/api/v1/assistant/admin/threads')).toBe('assistant');
     expect(resolveAdminSectionFromApiPath('/api/v1/settings/admin/gratitude')).toBe('settings');
     expect(resolveAdminSectionFromApiPath('/api/v1/settings/applicable-gift')).toBe(null);
-    expect(resolveAdminSectionFromApiPath('/api/v1/catalog/admin/products')).toBe('catalog');
+    expect(resolveAdminSectionFromApiPath('/api/v1/catalog/admin/products', 'GET')).toBe(
+      'catalog_read',
+    );
+    expect(
+      resolveAdminSectionFromApiPath('/api/v1/catalog/admin/products/abc', 'GET'),
+    ).toBe('catalog_read');
+    expect(
+      resolveAdminSectionFromApiPath('/api/v1/catalog/admin/products', 'POST'),
+    ).toBe('catalog');
     expect(resolveAdminSectionFromApiPath('/api/v1/promo/admin')).toBe('discounts');
     expect(resolveAdminSectionFromApiPath('/api/v1/gift-certificates/admin')).toBe(
       'certificates_read',
@@ -149,7 +157,7 @@ describe('resolveAdminSectionFromApiPath', () => {
     ).toBe('certificates_finance');
     expect(
       resolveAdminSectionFromApiPath('/api/v1/gift-certificates/admin/denominations', 'GET'),
-    ).toBe('certificates_read');
+    ).toBe('gift_denoms_read');
     expect(
       resolveAdminSectionFromApiPath('/api/v1/gift-certificates/admin/denominations', 'POST'),
     ).toBe('certificates');
@@ -199,7 +207,7 @@ describe('staffCanAccessAdminPath', () => {
 });
 
 describe('sectionsMissingCatalogHint', () => {
-  it('подсказывает catalog для discounts / certificates / reviews', () => {
+  it('подсказывает catalog для discounts / certificates / reviews / orders', () => {
     expect(sectionsMissingCatalogHint(['discounts'])).toEqual(['discounts']);
     expect(sectionsMissingCatalogHint(['discounts', 'catalog'])).toEqual([]);
     expect(sectionsMissingCatalogHint(['reviews'])).toEqual(['reviews']);
@@ -208,6 +216,8 @@ describe('sectionsMissingCatalogHint', () => {
       'certificates',
       'reviews',
     ]);
+    expect(sectionsMissingCatalogHint(['orders'])).toEqual(['orders']);
+    expect(sectionsMissingCatalogHint(['orders', 'catalog'])).toEqual([]);
   });
 });
 

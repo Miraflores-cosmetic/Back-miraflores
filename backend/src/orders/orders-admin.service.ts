@@ -1,6 +1,9 @@
 import {
   BadRequestException,
+  ForbiddenException,
+  HttpException,
   Injectable,
+  Logger,
   NotFoundException,
   Optional,
 } from '@nestjs/common';
@@ -62,12 +65,14 @@ import type {
   OrderRemovePromoDto,
   OrderShippingAddressUpdateDto,
 } from './dto/order-admin-actions.dto';
+import type { AdminCreateOrderDto } from './dto/admin-create-order.dto';
 import { OrderChatService } from '../order-chat/order-chat.service';
 import { estimateOzonDelivery } from '../ozon/ozon-tariff';
 import { loadOzonTariffLines } from '../ozon/ozon-variant-dims';
 import { ozonFlagWhere, ozonRowFlags, parseOzonFlagFilter } from './order-ozon-flags';
 import { isManualChecklistStep, serializeChecklistMarks } from './order-checklist';
 import { YourichSyncService } from '../yourich/yourich-sync.service';
+import { OrdersPublicService } from './orders.public.service';
 
 const LIST_MAX = 100;
 const LIST_DEFAULT = 20;
@@ -99,6 +104,8 @@ type ShippingAddressSnap = {
 
 @Injectable()
 export class OrdersAdminService {
+  private readonly logger = new Logger(OrdersAdminService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly lifecycle: OrderLifecycleService,
@@ -106,6 +113,7 @@ export class OrdersAdminService {
     private readonly carrier: CarrierShipmentService,
     private readonly config: ConfigService,
     private readonly orderChat: OrderChatService,
+    private readonly ordersPublic: OrdersPublicService,
     @Optional() private readonly yourichSync?: YourichSyncService,
   ) {}
 
@@ -641,7 +649,12 @@ export class OrdersAdminService {
     return this.getById(id);
   }
 
-  async markPaid(id: string, actorUserId: string) {
+  async markPaid(
+    id: string,
+    actorUserId: string,
+    opts: { notifyCustomer?: boolean } = {},
+  ) {
+    const notifyCustomer = opts.notifyCustomer !== false;
     const result = await this.prisma.$transaction(async (tx) => {
       return applyPaidInTx(tx, this.lifecycle, id, {
         kind: 'admin',
@@ -656,37 +669,112 @@ export class OrdersAdminService {
 
     this.scheduleYourichTouch(id);
 
-    if (result.isGiftPurchase) {
-      const order = await this.prisma.order.findUnique({
-        where: { id: result.orderId },
-        select: {
-          email: true,
-          giftPurchaseRecipientEmail: true,
-        },
-      });
-      const certs = await this.prisma.giftCertificate.findMany({
-        where: { purchaseOrderId: result.orderId },
-        select: { code: true, faceValue: true, expiresAt: true },
-        orderBy: { createdAt: 'asc' },
-      });
-      if (order && certs.length) {
-        const to = order.giftPurchaseRecipientEmail || order.email;
-        await this.lifecycle.notifyGiftPurchasePaid({
-          to,
-          orderNumber: result.number,
-          items: certs.map((c) => ({
-            code: c.code,
-            faceValue: c.faceValue,
-            expiresAt: c.expiresAt,
-          })),
-          buyerEmail: order.email !== to ? order.email : undefined,
+    if (notifyCustomer) {
+      if (result.isGiftPurchase) {
+        const order = await this.prisma.order.findUnique({
+          where: { id: result.orderId },
+          select: {
+            email: true,
+            giftPurchaseRecipientEmail: true,
+          },
         });
+        const certs = await this.prisma.giftCertificate.findMany({
+          where: { purchaseOrderId: result.orderId },
+          select: { code: true, faceValue: true, expiresAt: true },
+          orderBy: { createdAt: 'asc' },
+        });
+        if (order && certs.length) {
+          const to = order.giftPurchaseRecipientEmail || order.email;
+          await this.lifecycle.notifyGiftPurchasePaid({
+            to,
+            orderNumber: result.number,
+            items: certs.map((c) => ({
+              code: c.code,
+              faceValue: c.faceValue,
+              expiresAt: c.expiresAt,
+            })),
+            buyerEmail: order.email !== to ? order.email : undefined,
+          });
+        }
+      } else {
+        await this.lifecycle.notifyOrderPaid(result.email, result.number);
       }
-    } else {
-      await this.lifecycle.notifyOrderPaid(result.email, result.number);
     }
 
     return this.getById(id);
+  }
+
+  /** Preview итога wizard — тот же quote, что create (без записи). */
+  async preview(dto: AdminCreateOrderDto) {
+    return this.ordersPublic.previewAdmin(dto);
+  }
+
+  /**
+   * Staff wizard: create → optional mark-paid / checkout-payment link.
+   * mark_paid требует orders_finance (как POST :id/mark-paid).
+   * Follow-up после commit не валит весь create: заказ уже есть → paymentError.
+   */
+  async create(
+    dto: AdminCreateOrderDto,
+    actorUserId: string,
+    opts: { canOrdersFinance?: boolean } = {},
+  ) {
+    if (dto.payMode === 'mark_paid' && !opts.canOrdersFinance) {
+      throw new ForbiddenException(
+        'Отметить оплату может только сотрудник с доступом «Заказы: оплата и возвраты»',
+      );
+    }
+
+    const created = await this.ordersPublic.createAdmin(dto, { actorUserId });
+    const notifyCustomer = dto.notifyCustomer !== false;
+    let paymentLink: string | null = null;
+    let paymentError: string | null = null;
+
+    try {
+      if (dto.payMode === 'mark_paid') {
+        await this.markPaid(created.id, actorUserId, { notifyCustomer });
+      } else if (dto.payMode === 'awaiting_link') {
+        // Idempotent create retry / multi-tab: reuse PENDING link if amount matches
+        // (не cancel + новый платёж в ЮKassa).
+        const withCheckout = await this.createCheckoutPayment(
+          created.id,
+          actorUserId,
+          { notifyCustomer, reuseExisting: true },
+        );
+        paymentLink =
+          (withCheckout as { checkout?: { confirmationUrl?: string } }).checkout
+            ?.confirmationUrl ?? null;
+      }
+    } catch (e) {
+      const message =
+        e instanceof HttpException
+          ? (() => {
+              const body = e.getResponse();
+              if (typeof body === 'string') return body;
+              if (
+                body &&
+                typeof body === 'object' &&
+                'message' in body &&
+                (typeof (body as { message: unknown }).message === 'string' ||
+                  Array.isArray((body as { message: unknown }).message))
+              ) {
+                const m = (body as { message: string | string[] }).message;
+                return Array.isArray(m) ? m.join('; ') : m;
+              }
+              return e.message;
+            })()
+          : e instanceof Error
+            ? e.message
+            : 'Не удалось завершить оплату';
+      this.logger.warn(
+        `Admin create follow-up failed order=${created.id} payMode=${dto.payMode}: ${message}`,
+      );
+      paymentError = message;
+      paymentLink = null;
+    }
+
+    const order = await this.getById(created.id);
+    return { order, paymentLink, paymentError };
   }
 
   async startPacking(id: string, actorUserId: string) {
@@ -2241,10 +2329,17 @@ export class OrdersAdminService {
   }
 
   /**
-   * Неоплаченный заказ: новая redirect-ссылка ЮKassa на актуальный total
-   * (после cancel PENDING при правке состава/адреса/промо).
+   * Неоплаченный заказ: redirect-ссылка ЮKassa на актуальный total.
+   * По умолчанию cancel PENDING + новый платёж (кнопка после правки состава).
+   * `reuseExisting: true` — для idempotent admin create: если уже есть PENDING
+   * checkout с тем же amount и confirmationUrl, не трогаем ЮKassa.
    */
-  async createCheckoutPayment(id: string, actorUserId: string) {
+  async createCheckoutPayment(
+    id: string,
+    actorUserId: string,
+    opts: { notifyCustomer?: boolean; reuseExisting?: boolean } = {},
+  ) {
+    const notifyCustomer = opts.notifyCustomer !== false;
     if (!this.yookassa.isConfigured()) {
       throw new BadRequestException('ЮKassa не настроена');
     }
@@ -2269,6 +2364,30 @@ export class OrdersAdminService {
       throw new BadRequestException('Сумма заказа 0 ₽ — ссылка не нужна');
     }
 
+    const amount = order.total;
+    const pendingCheckout = order.payments.filter(
+      (p) =>
+        p.status === PaymentStatus.PENDING &&
+        p.externalId &&
+        p.confirmationUrl?.trim(),
+    );
+
+    if (opts.reuseExisting) {
+      const reusable = pendingCheckout.find((p) => p.amount === amount);
+      if (reusable?.confirmationUrl && reusable.externalId) {
+        const detail = await this.getById(id);
+        return {
+          ...detail,
+          checkout: {
+            amount,
+            confirmationUrl: reusable.confirmationUrl,
+            paymentId: reusable.externalId,
+            reused: true,
+          },
+        };
+      }
+    }
+
     const stalePending = order.payments.filter(
       (p) => p.status === PaymentStatus.PENDING && p.externalId,
     );
@@ -2285,7 +2404,6 @@ export class OrdersAdminService {
       );
     }
 
-    const amount = order.total;
     const site =
       this.config.get<string>('FRONTEND_PUBLIC_URL')?.replace(/\/+$/, '') ||
       'http://localhost:5173';
@@ -2341,11 +2459,13 @@ export class OrdersAdminService {
       },
     });
 
-    await this.lifecycle.notifyOrderUpdated({
-      to: order.email,
-      orderNumber: order.number,
-      changesSummary: `Ссылка на оплату заказа на сумму ${amount} ₽. Оплатите заказ в личном кабинете или по ссылке от поддержки.`,
-    });
+    if (notifyCustomer) {
+      await this.lifecycle.notifyOrderUpdated({
+        to: order.email,
+        orderNumber: order.number,
+        changesSummary: `Ссылка на оплату заказа на сумму ${amount} ₽. Оплатите заказ в личном кабинете или по ссылке от поддержки.`,
+      });
+    }
 
     const detail = await this.getById(id);
     return {
@@ -2354,6 +2474,7 @@ export class OrdersAdminService {
         amount,
         confirmationUrl,
         paymentId: payment.id,
+        reused: false,
       },
     };
   }

@@ -33,6 +33,10 @@ import {
   parseGiftDenomCartVariantId,
 } from '../gift-certificates/gift-certificate-purchase.util';
 import { queryCatalogProductIdsPage } from './catalog-list-sql.util';
+import {
+  cartSyncLineKey,
+  mergeCartSyncInputLines,
+} from './catalog-cart-sync-merge.util';
 
 type ProductCardSource = {
   id: string;
@@ -1135,15 +1139,8 @@ export class CatalogPublicService {
     userId?: string | null,
   ) {
     const ctx = await this.resolveBuyerContext(userId);
-    const merged = new Map<string, number>();
-    for (const line of lines) {
-      if (!line?.variantId || !Number.isFinite(line.qty) || line.qty <= 0) continue;
-      const id = line.variantId.trim();
-      merged.set(id, (merged.get(id) ?? 0) + Math.floor(line.qty));
-    }
-    const cleaned = [...merged.entries()]
-      .map(([variantId, qty]) => ({ variantId, qty }))
-      .slice(0, 100);
+    const lineKey = cartSyncLineKey;
+    const cleaned = mergeCartSyncInputLines(lines, 100);
     if (!cleaned.length) {
       return {
         items: [] as const,
@@ -1201,7 +1198,11 @@ export class CatalogPublicService {
 
     const giftLines: Array<{ variantId: string; denomId: string; qty: number }> =
       [];
-    const catalogLines: Array<{ variantId: string; qty: number }> = [];
+    const catalogLines: Array<{
+      variantId: string;
+      shadeId: string | null;
+      qty: number;
+    }> = [];
     for (const line of cleaned) {
       const denomId = parseGiftDenomCartVariantId(line.variantId);
       if (denomId) {
@@ -1309,6 +1310,20 @@ export class CatalogPublicService {
         })
       : [];
     const byId = new Map(variants.map((v) => [v.id, v]));
+    const shadeIds = [
+      ...new Set(
+        catalogLines
+          .map((l) => l.shadeId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    const shades = shadeIds.length
+      ? await this.prisma.productVariantShade.findMany({
+          where: { id: { in: shadeIds } },
+          select: { id: true, name: true, variantId: true },
+        })
+      : [];
+    const shadeById = new Map(shades.map((s) => [s.id, s]));
     const groupPriceMap = await this.groupPricing.resolveVariantPrices(
       ctx,
       [...byId.values()].map((v) => ({
@@ -1319,12 +1334,24 @@ export class CatalogPublicService {
     );
 
     for (const line of catalogLines) {
-      const key = line.variantId;
+      const key = lineKey(line.variantId, line.shadeId);
       const v = byId.get(line.variantId);
       if (!v) {
         removedKeys.push(key);
         removedLines.push({ key, reason: 'missing' });
         continue;
+      }
+
+      let shadeId: string | null = line.shadeId;
+      let shadeName: string | null = null;
+      if (shadeId) {
+        const shade = shadeById.get(shadeId);
+        if (!shade || shade.variantId !== v.id) {
+          // Невалидный / чужой shade — не роняем позицию, сбрасываем оттенок.
+          shadeId = null;
+        } else {
+          shadeName = shade.name;
+        }
       }
 
       const itemVisible = await this.catalogVisibility.isTargetVisible(ctx, {
@@ -1364,12 +1391,12 @@ export class CatalogPublicService {
       const sellingPrice = resolved?.groupPrice ?? v.price;
 
       rawItems.push({
-        key,
+        key: lineKey(v.id, shadeId),
         productId: v.product.id,
         categoryId: v.product.categoryId,
         variantId: v.id,
-        shadeId: null,
-        shadeName: null,
+        shadeId,
+        shadeName,
         slug: v.product.slug,
         name: v.product.name,
         productType: v.product.productType,

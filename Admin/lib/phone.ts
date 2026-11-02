@@ -94,6 +94,13 @@ export function formatPhoneInputValue(rawInput: string): string {
 }
 
 /** РФ/KZ +7; BY +375; KG +996; UZ +998; иначе 10–15 цифр. */
+/** Простая проверка формата email (до class-validator IsEmail на BE). */
+export function isValidEmail(raw: string): boolean {
+  const e = raw.trim();
+  if (!e || e.length > 320) return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+}
+
 export function isValidPhone(raw: string): boolean {
   const d = normalizePhoneDigits(raw);
   if (!d) return false;

@@ -75,7 +75,14 @@ export const ADMIN_SECTION_LABELS_RU: Record<AdminSectionId, string> = {
   assistant: '🤦‍♀️ Ассистент',
 };
 
-export type AdminApiAccessTarget = AdminSectionId | 'staff' | 'certificates_read';
+export type AdminApiAccessTarget =
+  | AdminSectionId
+  | 'staff'
+  | 'certificates_read'
+  /** GET products list/detail для пикеров (gratitude / orders / discounts). */
+  | 'catalog_read'
+  /** GET nominals list для order-create gift-denom пикера. */
+  | 'gift_denoms_read';
 
 /**
  * Префиксы Nest admin API, разрешённые через Next BFF (`/api/admin/backend/...`).
@@ -164,8 +171,8 @@ export function resolveAdminSectionFromApiPath(
       p.includes('/gift-certificates/admin/denominations') ||
       p.includes('/gift-certificates/admin/denomination-images')
     ) {
-      // GET denoms — для вкладки «Выпуск»; мутации — только certificates.
-      return m === 'GET' ? 'certificates_read' : 'certificates';
+      // GET denoms — order create / выпуск; мутации — только certificates.
+      return m === 'GET' ? 'gift_denoms_read' : 'certificates';
     }
     // GET list / GET :id
     return 'certificates_read';
@@ -174,7 +181,17 @@ export function resolveAdminSectionFromApiPath(
   if (p.includes('/assistant/admin')) return 'assistant';
   if (p.includes('/dashboard/admin')) return 'dashboard';
   if (p.includes('/settings/admin/')) return 'settings';
-  if (p.includes('/catalog/admin')) return 'catalog';
+  if (p.includes('/catalog/admin')) {
+    // VariantPicker / order create: list + one product (variants). Мутации — catalog.
+    if (
+      m === 'GET' &&
+      (/\/catalog\/admin\/products\/?$/.test(p) ||
+        /\/catalog\/admin\/products\/[^/]+\/?$/.test(p))
+    ) {
+      return 'catalog_read';
+    }
+    return 'catalog';
+  }
   if (p.includes('/auth/admin/me') || p.endsWith('/auth/me')) return 'dashboard';
 
   return null;
@@ -330,6 +347,29 @@ export const SECTIONS_NEEDING_CATALOG: readonly ModeratorAssignableSectionId[] =
   'certificates',
   'certificates_finance',
   'reviews',
+  'orders',
+];
+
+/**
+ * Кто может GET catalog/admin/products (пикер) без полного grant `catalog`.
+ * `orders_finance` — UI заказов без `orders`.
+ */
+export const CATALOG_READ_GRANT_SECTIONS: readonly string[] = [
+  'catalog',
+  'orders',
+  'orders_finance',
+  ...SECTIONS_NEEDING_CATALOG.filter((id) => id !== 'orders'),
+];
+
+/**
+ * Кто может GET gift-certificates/admin/denominations без полного certificates.
+ * Нужно для gift-denom в admin order create.
+ */
+export const GIFT_DENOMS_READ_GRANT_SECTIONS: readonly string[] = [
+  'certificates',
+  'certificates_finance',
+  'orders',
+  'orders_finance',
 ];
 
 export function sectionsMissingCatalogHint(

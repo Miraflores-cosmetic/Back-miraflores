@@ -2120,3 +2120,335 @@
     grid-column: 1 / -1;
   }
 }
+
+/* —— Order create wizard —— */
+.wizardHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
+.wizardLead {
+  margin: 4px 0 0;
+  color: var(--admin-muted-fg, #6e6d67);
+  font-size: 14px;
+}
+
+.wizardSteps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0 20px;
+}
+
+.wizardStep {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--account-hairline-color, #e2e6e8);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--admin-muted-fg, #6e6d67);
+}
+
+.wizardStep:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.wizardStepActive {
+  border-color: var(--admin-accent, #1a5c4a);
+  color: var(--admin-fg, #1a1a18);
+  font-weight: 600;
+}
+
+.wizardStepDone {
+  border-color: #b8d4cb;
+  color: var(--admin-fg, #1a1a18);
+}
+
+.wizardStepNum {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #f0f2f1;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.wizardStepActive .wizardStepNum {
+  background: var(--admin-accent, #1a5c4a);
+  color: #fff;
+}
+
+.wizardPanel {
+  border: 1px solid var(--account-hairline-color, #e2e6e8);
+  border-radius: 10px;
+  background: #fff;
+  padding: 20px;
+  padding-bottom: 28px;
+  min-height: 280px;
+}
+
+.wizardPanelTitle {
+  margin: 0 0 16px;
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--admin-fg, #1a1a18);
+}
+
+.wizardPriceTools {
+  margin-top: 8px;
+}
+
+.wizardPriceToolsToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--admin-accent, #1a5c4a);
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.wizardPriceToolsToggle:hover {
+  color: var(--admin-fg, #1a1a18);
+}
+
+.wizardStack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.wizardModeRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.wizardHint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--admin-muted-fg, #6e6d67);
+}
+
+.wizardError {
+  margin: 0 0 12px;
+  color: #b42318;
+  font-size: 14px;
+}
+
+.wizardLineList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wizardLineRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--account-hairline-color, #e2e6e8);
+}
+
+.wizardLineMain {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.wizardLineTitle {
+  font-size: 14px;
+  font-weight: 550;
+}
+
+.wizardInlineField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--admin-muted-fg, #6e6d67);
+}
+
+.wizardInlineField .input {
+  width: 100px;
+}
+
+.wizardSubtotal {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.wizardShippingCard {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px 14px;
+  border: 1px solid var(--account-hairline-color, #e2e6e8);
+  border-radius: 8px;
+}
+
+.wizardSummary {
+  margin: 0;
+}
+
+.wizardSummaryTitle {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--admin-muted-fg, #6e6d67);
+}
+
+.wizardPayModes {
+  border: 1px solid var(--account-hairline-color, #e2e6e8);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wizardPayModes legend {
+  padding: 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.wizardRadio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.wizardRadioBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.wizardRadioHelp {
+  margin: 0 0 0 24px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--admin-muted-fg, #6e6d67);
+}
+
+.wizardFooterSticky {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  margin-top: 20px;
+  margin-left: -4px;
+  margin-right: -4px;
+  padding: 10px 4px calc(10px + env(safe-area-inset-bottom, 0px));
+  background: color-mix(in srgb, #f4f5f4 88%, transparent);
+  border-top: 1px solid var(--account-hairline-color, #e2e6e8);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.wizardFooter {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.wizardFooterRight {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.wizardNextHint {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.35;
+  color: #8a5a00;
+}
+
+.wizardLineCard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--account-hairline-color, #e2e6e8);
+}
+
+.wizardLineCard .wizardLineRow {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.wizardUserList {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.wizardUserBtn {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--account-hairline-color, #e2e6e8);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.wizardUserBtn:hover {
+  background: #f6f7f6;
+}
+
+.wizardPayLink {
+  display: block;
+  word-break: break-all;
+  font-size: 12px;
+  padding: 10px;
+  background: #f6f7f6;
+  border-radius: 6px;
+}
+
+.linkBtn {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--admin-accent, #1a5c4a);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+}

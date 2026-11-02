@@ -9,9 +9,14 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { UserRole } from '@prisma/client';
+import { staffCanOrdersFinance } from '@miraflores/admin-sections';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
+import {
+  CurrentUser,
+  type JwtPayload,
+} from '../common/decorators/current-user.decorator';
 import { parseOptionalPositiveInt } from '../common/parse-positive-int';
 import {
   OrderChecklistMarkDto,
@@ -26,17 +31,23 @@ import {
   OrderShippingAddressUpdateDto,
   OrderSurchargePaymentDto,
 } from './dto/order-admin-actions.dto';
+import { AdminCreateOrderDto } from './dto/admin-create-order.dto';
 import { OrdersAdminService } from './orders-admin.service';
+import { StaffAccessService } from '../staff/staff-access.service';
 
 /**
  * ACL (AdminGuard + @miraflores/admin-sections):
  * list/detail/packing/ship/… → `orders`;
  * mark-paid / refund → `orders_finance` (суперадмин — всегда).
+ * create + payMode=mark_paid — тот же grant, проверка в сервисе (path ACL тела не видит).
  */
 @Controller('orders/admin')
 @UseGuards(JwtAuthGuard, AdminGuard)
 export class OrdersAdminController {
-  constructor(private readonly orders: OrdersAdminService) {}
+  constructor(
+    private readonly orders: OrdersAdminService,
+    private readonly staffAccess: StaffAccessService,
+  ) {}
 
   @Get()
   list(
@@ -69,6 +80,30 @@ export class OrdersAdminController {
   @Get('ozon-flags')
   ozonFlagCounts() {
     return this.orders.ozonFlagCounts();
+  }
+
+  /** Dry-run итога (promo/gift/unitPrice) — тот же путь, что create. */
+  @Post('preview')
+  preview(@Body() dto: AdminCreateOrderDto) {
+    return this.orders.preview(dto);
+  }
+
+  /** Staff wizard: создать заказ (клиент / состав / доставка / payMode). */
+  @Post()
+  async create(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: AdminCreateOrderDto,
+  ) {
+    const role =
+      user.role === UserRole.ADMIN || user.role === UserRole.MODERATOR
+        ? user.role
+        : UserRole.USER;
+    const ctx = await this.staffAccess.getStaffContext(user.sub, role, user.tv);
+    const canOrdersFinance = staffCanOrdersFinance(
+      ctx?.sections ?? [],
+      Boolean(ctx?.isSuperAdmin),
+    );
+    return this.orders.create(dto, user.sub, { canOrdersFinance });
   }
 
   @Get(':id')

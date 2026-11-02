@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AdminListPagination } from '@/components/admin/AdminListPagination/AdminListPagination';
 import { AdminListShell } from '@/components/admin/AdminListShell/AdminListShell';
+import { AdminCompactBtnLink } from '@/components/AdminCompactBtn/AdminCompactBtn';
 import { AdminSearchBox } from '@/components/SearchBox/SearchBox';
 import {
   AdminBackendRequestError,
@@ -203,6 +204,9 @@ export function OrdersListClient() {
                 </span>
               </button>
             ) : null}
+            <AdminCompactBtnLink href="/admin/orders/new" variant="accent">
+              Новый заказ
+            </AdminCompactBtnLink>
           </div>
         }
         pagination={
