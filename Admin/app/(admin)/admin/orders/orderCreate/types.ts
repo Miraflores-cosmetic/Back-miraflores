@@ -24,6 +24,7 @@ export type DraftLine = {
   catalogPrice: number;
   unitPrice: number;
   qty: number;
+  imageUrl?: string | null;
 };
 
 export type ShippingDraft = {
@@ -53,6 +54,7 @@ export type AdminOrderPreview = {
   promoCode: string | null;
   giftCertificateCode: string | null;
   gratitudeCount: number;
+  gratitudeItems?: Array<{ title: string; qty: number }>;
   priceOverrides: Array<{
     variantId: string;
     catalogPrice: number;

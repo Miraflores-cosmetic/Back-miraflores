@@ -306,6 +306,8 @@ model Product {
   applicationHtml    String?          @db.Text
   /// Состав
   compositionHtml    String?          @db.Text
+  /// Plain: composition + description + actionEffect (strip HTML); GIN pg_trgm
+  compositionSearchText String?       @db.Text
   /// Важно знать!
   importantNoteHtml  String?          @db.Text
   /// Комментарий Miraflores
@@ -1034,6 +1036,8 @@ model BlogPost {
   title       String
   excerpt     String?       @db.Text
   body        String        @db.Text
+  /// Plain-text body для поиска (strip HTML при записи); GIN pg_trgm
+  bodySearchText String?    @db.Text
   coverUrl    String?
   metaTitle          String?
   metaDescription    String?          @db.VarChar(500)

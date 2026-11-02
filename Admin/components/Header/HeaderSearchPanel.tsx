@@ -59,6 +59,7 @@ async function fetchSearchGroups(
 ): Promise<SearchGroup[]> {
   const res = await fetch(`/api/public/search?q=${encodeURIComponent(q)}`, {
     cache: 'no-store',
+    credentials: 'same-origin',
     headers: { Accept: 'application/json' },
     signal,
   });
@@ -378,7 +379,7 @@ export function HeaderSearchPanel({ open, closing, onClose, onNavigate }: Props)
                       inputMode="search"
                       enterKeyHint="search"
                       className={styles.searchInput}
-                      placeholder="Название товара или категории"
+                      placeholder="Товар, состав, статья или категория"
                       value={q}
                       onChange={(e) => setQ(e.target.value)}
                       autoComplete="off"

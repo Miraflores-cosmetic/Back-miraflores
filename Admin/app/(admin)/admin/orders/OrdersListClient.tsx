@@ -154,59 +154,65 @@ export function OrdersListClient() {
         isFetching={fetching}
         toolbar={
           <div className={styles.toolbar}>
-            <div className={styles.searchBoxToolbar}>
-              <AdminSearchBox
-                placeholder="Номер, email, телефон, имя"
-                ariaLabel="Поиск заказов"
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-              />
+            <div className={styles.toolbarLeft}>
+              <div className={styles.searchBoxToolbar}>
+                <AdminSearchBox
+                  placeholder="Номер, email, телефон, имя"
+                  ariaLabel="Поиск заказов"
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                />
+              </div>
             </div>
-            <label className={styles.filterLabel}>
-              <span className={styles.srOnly}>Статус</span>
-              <select
-                className={styles.select}
-                value={status}
-                onChange={(e) => {
-                  setStatus(e.target.value);
-                  setPage(1);
-                }}
-                disabled={fetching}
-              >
-                {STATUS_FILTERS.map((s) => (
-                  <option key={s.value || 'all'} value={s.value}>
-                    {s.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {unviewedSidebarCount > 0 || unviewedOnly ? (
-              <button
-                type="button"
-                className={`${styles.orderUnviewedChip} ${
-                  unviewedOnly ? styles.orderUnviewedChipActive : ''
-                }`}
-                aria-pressed={unviewedOnly}
-                title="Оплаченные заказы, карточку которых ещё не открывали — как зелёная «1» у пункта «Заказы»"
-                disabled={fetching}
-                onClick={() => {
-                  setUnviewedOnly((v) => !v);
-                  setPage(1);
-                }}
-              >
-                Непросмотренные
-                <span
-                  className={`${styles.orderUnviewedChipCount} ${
-                    unviewedSidebarCount < 1 ? styles.orderUnviewedChipCountZero : ''
-                  }`}
+            <div className={styles.ordersToolbarEnd}>
+              <label className={styles.filterLabel}>
+                <span className={styles.srOnly}>Статус</span>
+                <select
+                  className={styles.select}
+                  value={status}
+                  onChange={(e) => {
+                    setStatus(e.target.value);
+                    setPage(1);
+                  }}
+                  disabled={fetching}
                 >
-                  {unviewedSidebarCount > 99 ? '99+' : unviewedSidebarCount}
-                </span>
-              </button>
-            ) : null}
-            <AdminCompactBtnLink href="/admin/orders/new" variant="accent">
-              Новый заказ
-            </AdminCompactBtnLink>
+                  {STATUS_FILTERS.map((s) => (
+                    <option key={s.value || 'all'} value={s.value}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {unviewedSidebarCount > 0 || unviewedOnly ? (
+                <button
+                  type="button"
+                  className={`${styles.orderUnviewedChip} ${
+                    unviewedOnly ? styles.orderUnviewedChipActive : ''
+                  }`}
+                  aria-pressed={unviewedOnly}
+                  title="Оплаченные заказы, карточку которых ещё не открывали — как зелёная «1» у пункта «Заказы»"
+                  disabled={fetching}
+                  onClick={() => {
+                    setUnviewedOnly((v) => !v);
+                    setPage(1);
+                  }}
+                >
+                  Непросмотренные
+                  <span
+                    className={`${styles.orderUnviewedChipCount} ${
+                      unviewedSidebarCount < 1
+                        ? styles.orderUnviewedChipCountZero
+                        : ''
+                    }`}
+                  >
+                    {unviewedSidebarCount > 99 ? '99+' : unviewedSidebarCount}
+                  </span>
+                </button>
+              ) : null}
+              <AdminCompactBtnLink href="/admin/orders/new" variant="accent">
+                Новый заказ
+              </AdminCompactBtnLink>
+            </div>
           </div>
         }
         pagination={

@@ -126,6 +126,10 @@ export function OrderCreateWizard({
   const [preview, setPreview] = useState<AdminOrderPreview | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [gratitudeItems, setGratitudeItems] = useState<
+    Array<{ title: string; qty: number }>
+  >([]);
+  const [gratitudeBusy, setGratitudeBusy] = useState(false);
 
   useEffect(() => {
     if (!canOrdersFinance && payMode === 'mark_paid') {
@@ -384,6 +388,7 @@ export function OrderCreateWizard({
     const catalogPrice = Math.max(0, Math.round(details?.price ?? 0));
     const shadeId = details?.shadeId ?? null;
     const shadeName = details?.shadeName ?? null;
+    const imageUrl = details?.imageUrl ?? null;
     const mergeKey = draftLineMergeKey(variantId, shadeId);
     setLines((prev) => {
       const existing = prev.find(
@@ -408,6 +413,7 @@ export function OrderCreateWizard({
           catalogPrice,
           unitPrice: catalogPrice,
           qty: 1,
+          imageUrl,
         },
       ];
     });
@@ -673,6 +679,54 @@ export function OrderCreateWizard({
     payMode,
   ]);
 
+  useEffect(() => {
+    if (step !== 2 || giftOnly || !attachGratitude || lines.length < 1) {
+      setGratitudeItems([]);
+      setGratitudeBusy(false);
+      return;
+    }
+    let cancelled = false;
+    const t = window.setTimeout(() => {
+      setGratitudeBusy(true);
+      void (async () => {
+        const body = buildPayload({ allowMissingShipping: true });
+        if (!body) {
+          if (!cancelled) {
+            setGratitudeItems([]);
+            setGratitudeBusy(false);
+          }
+          return;
+        }
+        try {
+          const res = await adminBackendJson<AdminOrderPreview>(
+            'orders/admin/preview',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                ...body,
+                attachGratitude: true,
+                previewAllowMissingShipping: true,
+              }),
+            },
+          );
+          if (!cancelled) {
+            setGratitudeItems(res.gratitudeItems ?? []);
+          }
+        } catch {
+          if (!cancelled) setGratitudeItems([]);
+        } finally {
+          if (!cancelled) setGratitudeBusy(false);
+        }
+      })();
+    }, 350);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- gratitude preview for step 2
+  }, [step, giftOnly, attachGratitude, lines, email, phone, customerName, userId]);
+
   async function submit() {
     if ((!shipping && !giftOnly) || nextBlockedReason) return;
     if (submitLockRef.current || busy) return;
@@ -737,12 +791,7 @@ export function OrderCreateWizard({
   return (
     <>
       <div className={styles.wizardHeader}>
-        <div>
-          <h1 className={styles.title}>Новый заказ</h1>
-          <p className={styles.wizardLead}>
-            Пошаговое оформление почти как на витрине
-          </p>
-        </div>
+        <h1 className={styles.title}>Новый заказ</h1>
         <AdminCompactBtnLink href="/admin/orders" variant="outline">
           К списку
         </AdminCompactBtnLink>
@@ -817,6 +866,8 @@ export function OrderCreateWizard({
             attachGratitude={attachGratitude}
             giftOnly={giftOnly}
             goodsSubtotal={goodsSubtotal}
+            gratitudeItems={gratitudeItems}
+            gratitudeBusy={gratitudeBusy}
             onAddFromCatalog={openCatalogPicker}
             onAddGiftDenom={openGiftDenomPicker}
             onChangeQty={(key, qty) =>

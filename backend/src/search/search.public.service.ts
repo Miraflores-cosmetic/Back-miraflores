@@ -1,7 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import {
+  htmlToSearchText,
+  isHtmlNoiseQuery,
+} from '../common/html-to-search-text.util';
 import { catalogSellablePrices } from '../catalog/catalog-price.util';
 import { PrismaService } from '../prisma/prisma.service';
+import { CatalogVisibilityService } from '../user-groups/catalog-visibility.service';
+import { CommerceContextService } from '../user-groups/commerce-context.service';
+import { GroupPricingService } from '../user-groups/group-pricing.service';
 
 function formatRub(value: number): string {
   return `${Math.round(value).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} р.`;
@@ -60,27 +67,100 @@ export type SearchGroup = {
   items: SearchHit[];
 };
 
-const PRODUCT_TAKE = 24;
-const PRODUCT_LIMIT = 10;
+/** Primary (title/sku/…) window — enough before content fillers. */
+const PRODUCT_PRIMARY_TAKE = 40;
+/** Content-only fillers (composition/description/actionEffect plain). */
+const PRODUCT_CONTENT_TAKE = 40;
+const PRODUCT_LIMIT = 48;
 const CATEGORY_TAKE = 16;
 const CATEGORY_LIMIT = 8;
 const TAG_TAKE = 12;
 const TAG_LIMIT = 6;
 const COLLECTION_TAKE = 12;
 const COLLECTION_LIMIT = 6;
-const BLOG_TAKE = 16;
+const BLOG_PRIMARY_TAKE = 16;
+const BLOG_BODY_TAKE = 16;
 const BLOG_LIMIT = 8;
+
+type ProductSearchRow = {
+  id: string;
+  name: string;
+  slug: string;
+  categoryId: string;
+  images: Array<{ url: string }>;
+  variants: Array<{ id: string; price: number }>;
+};
+
+type BlogSearchRow = {
+  id: string;
+  title: string;
+  slug: string;
+  excerpt: string | null;
+  coverUrl: string | null;
+  category: { name: string } | null;
+};
+
+const productSelect = {
+  id: true,
+  name: true,
+  slug: true,
+  categoryId: true,
+  images: {
+    take: 1,
+    orderBy: { sortOrder: 'asc' as const },
+    select: { url: true },
+  },
+  variants: {
+    where: { active: true },
+    select: { id: true, price: true },
+    orderBy: { price: 'asc' as const },
+    take: 20,
+  },
+} satisfies Prisma.ProductSelect;
+
+const blogSelect = {
+  id: true,
+  title: true,
+  slug: true,
+  excerpt: true,
+  coverUrl: true,
+  category: { select: { name: true } },
+} satisfies Prisma.BlogPostSelect;
+
+function mergeUniqueById<T extends { id: string }>(
+  primary: T[],
+  secondary: T[],
+): T[] {
+  const seen = new Set(primary.map((r) => r.id));
+  const out = [...primary];
+  for (const row of secondary) {
+    if (seen.has(row.id)) continue;
+    seen.add(row.id);
+    out.push(row);
+  }
+  return out;
+}
 
 @Injectable()
 export class SearchPublicService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly commerceContext: CommerceContextService,
+    private readonly groupPricing: GroupPricingService,
+    private readonly catalogVisibility: CatalogVisibilityService,
+  ) {}
 
-  async search(qRaw: string): Promise<{ q: string; groups: SearchGroup[] }> {
+  async search(
+    qRaw: string,
+    opts?: { userId?: string | null },
+  ): Promise<{ q: string; groups: SearchGroup[] }> {
     const q = qRaw.trim().slice(0, 80);
     const forms = searchForms(q);
     if (q.length < 2 || forms.length === 0) {
       return { q, groups: [] };
     }
+
+    const skipRichText = isHtmlNoiseQuery(q);
 
     const hasActiveProducts: Prisma.CategoryWhereInput = {
       OR: [
@@ -93,10 +173,11 @@ export class SearchPublicService {
       ],
     };
 
-    const productOr: Prisma.ProductWhereInput[] = [];
+    const productPrimaryOr: Prisma.ProductWhereInput[] = [];
+    const productContentOr: Prisma.ProductWhereInput[] = [];
     for (const f of forms) {
       const c = containsInsensitive(f);
-      productOr.push(
+      productPrimaryOr.push(
         { name: c },
         { slug: c },
         { shortDescription: c },
@@ -113,9 +194,33 @@ export class SearchPublicService {
           },
         },
       );
+      if (!skipRichText) {
+        productContentOr.push({ compositionSearchText: c });
+      }
     }
 
-    const [categories, products, tags, collections, posts] = await Promise.all([
+    const blogPrimaryOr: Prisma.BlogPostWhereInput[] = [];
+    const blogBodyOr: Prisma.BlogPostWhereInput[] = [];
+    for (const f of forms) {
+      const c = containsInsensitive(f);
+      blogPrimaryOr.push({ title: c }, { excerpt: c });
+      if (!skipRichText) {
+        blogBodyOr.push({ bodySearchText: c });
+      }
+    }
+
+    const publishedBlog: Prisma.BlogPostWhereInput = {
+      isPublished: true,
+      OR: [{ publishedAt: null }, { publishedAt: { lte: new Date() } }],
+    };
+
+    const [
+      categories,
+      primaryProducts,
+      tags,
+      collections,
+      primaryPosts,
+    ] = await Promise.all([
       this.prisma.category.findMany({
         where: {
           AND: [{ OR: nameMatchesAnyForm(forms) }, hasActiveProducts],
@@ -134,26 +239,11 @@ export class SearchPublicService {
         where: {
           active: true,
           excludeFromCatalog: false,
-          OR: productOr,
+          OR: productPrimaryOr,
         },
-        take: PRODUCT_TAKE,
+        take: PRODUCT_PRIMARY_TAKE,
         orderBy: { name: 'asc' },
-        select: {
-          id: true,
-          name: true,
-          slug: true,
-          images: {
-            take: 1,
-            orderBy: { sortOrder: 'asc' },
-            select: { url: true },
-          },
-          variants: {
-            where: { active: true },
-            select: { price: true },
-            orderBy: { price: 'asc' },
-            take: 20,
-          },
-        },
+        select: productSelect,
       }),
       this.prisma.catalogTag.findMany({
         where: {
@@ -195,29 +285,56 @@ export class SearchPublicService {
       }),
       this.prisma.blogPost.findMany({
         where: {
-          isPublished: true,
-          OR: [{ publishedAt: null }, { publishedAt: { lte: new Date() } }],
-          AND: [
-            {
-              OR: forms.flatMap((f) => {
-                const c = containsInsensitive(f);
-                return [{ title: c }, { excerpt: c }];
-              }),
-            },
-          ],
+          ...publishedBlog,
+          AND: [{ OR: blogPrimaryOr }],
         },
-        take: BLOG_TAKE,
+        take: BLOG_PRIMARY_TAKE,
         orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
-        select: {
-          id: true,
-          title: true,
-          slug: true,
-          excerpt: true,
-          coverUrl: true,
-          category: { select: { name: true } },
-        },
+        select: blogSelect,
       }),
     ]);
+
+    const primaryProductIds = primaryProducts.map((p) => p.id);
+    const primaryPostIds = primaryPosts.map((p) => p.id);
+
+    const [contentProducts, bodyPosts] = await Promise.all([
+      productContentOr.length
+        ? this.prisma.product.findMany({
+            where: {
+              active: true,
+              excludeFromCatalog: false,
+              OR: productContentOr,
+              ...(primaryProductIds.length
+                ? { id: { notIn: primaryProductIds } }
+                : {}),
+            },
+            take: PRODUCT_CONTENT_TAKE,
+            orderBy: { name: 'asc' },
+            select: productSelect,
+          })
+        : Promise.resolve([] as ProductSearchRow[]),
+      blogBodyOr.length
+        ? this.prisma.blogPost.findMany({
+            where: {
+              ...publishedBlog,
+              AND: [{ OR: blogBodyOr }],
+              ...(primaryPostIds.length
+                ? { id: { notIn: primaryPostIds } }
+                : {}),
+            },
+            take: BLOG_BODY_TAKE,
+            orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
+            select: blogSelect,
+          })
+        : Promise.resolve([] as BlogSearchRow[]),
+    ]);
+
+    let products = mergeUniqueById<ProductSearchRow>(
+      primaryProducts,
+      contentProducts,
+    );
+    products = await this.applyBuyerCommerce(products, opts?.userId);
+    const posts = mergeUniqueById<BlogSearchRow>(primaryPosts, bodyPosts);
 
     const groups: SearchGroup[] = [];
 
@@ -313,12 +430,43 @@ export class SearchPublicService {
           id: p.id,
           title: p.title,
           href: `/articles/${encodeURIComponent(p.slug)}`,
-          subtitle: p.category?.name ?? p.excerpt ?? null,
+          subtitle:
+            p.category?.name ?? htmlToSearchText(p.excerpt) ?? null,
           imageUrl: p.coverUrl,
         })),
       });
     }
 
     return { q, groups };
+  }
+
+  /** Visibility + group price for search hit subtitles. */
+  private async applyBuyerCommerce(
+    products: ProductSearchRow[],
+    userId?: string | null,
+  ): Promise<ProductSearchRow[]> {
+    if (!products.length) return products;
+    const ctx = await this.commerceContext.resolveFromUserId(userId);
+    const visible =
+      await this.catalogVisibility.applyVariantVisibilityToProductSources(
+        ctx,
+        products,
+      );
+    if (!visible.length) return [];
+    const inputs = visible.flatMap((p) =>
+      p.variants.map((v) => ({
+        variantId: v.id,
+        categoryId: p.categoryId,
+        basePrice: v.price,
+      })),
+    );
+    const prices = await this.groupPricing.resolveVariantPrices(ctx, inputs);
+    return visible.map((p) => ({
+      ...p,
+      variants: p.variants.map((v) => {
+        const resolved = prices.get(v.id);
+        return resolved ? { ...v, price: resolved.groupPrice } : v;
+      }),
+    }));
   }
 }

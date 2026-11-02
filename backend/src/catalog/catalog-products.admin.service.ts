@@ -14,6 +14,7 @@ import {
   serializeVariant,
   variantInclude,
 } from './catalog-admin.serializers';
+import { buildProductContentSearchText } from '../common/html-to-search-text.util';
 import { sanitizeRichHtmlOrNull } from './catalog-html.util';
 import { slugify, volumeSlugPart } from './slug.util';
 import type {
@@ -266,6 +267,11 @@ export class CatalogProductsAdminService {
           actionEffectHtml: sanitizeRichHtmlOrNull(dto.actionEffectHtml),
           applicationHtml: sanitizeRichHtmlOrNull(dto.applicationHtml),
           compositionHtml: sanitizeRichHtmlOrNull(dto.compositionHtml),
+          compositionSearchText: buildProductContentSearchText({
+            compositionHtml: sanitizeRichHtmlOrNull(dto.compositionHtml),
+            descriptionHtml: sanitizeRichHtmlOrNull(dto.descriptionHtml),
+            actionEffectHtml: sanitizeRichHtmlOrNull(dto.actionEffectHtml),
+          }),
           importantNoteHtml: sanitizeRichHtmlOrNull(dto.importantNoteHtml),
           mirafloresNoteHtml: sanitizeRichHtmlOrNull(dto.mirafloresNoteHtml),
           storageHtml: attrs.storageHtml ?? null,
@@ -336,6 +342,26 @@ export class CatalogProductsAdminService {
       }
       if (dto.compositionHtml !== undefined) {
         data.compositionHtml = sanitizeRichHtmlOrNull(dto.compositionHtml);
+      }
+      if (
+        dto.compositionHtml !== undefined ||
+        dto.descriptionHtml !== undefined ||
+        dto.actionEffectHtml !== undefined
+      ) {
+        data.compositionSearchText = buildProductContentSearchText({
+          compositionHtml:
+            dto.compositionHtml !== undefined
+              ? sanitizeRichHtmlOrNull(dto.compositionHtml)
+              : existing.compositionHtml,
+          descriptionHtml:
+            dto.descriptionHtml !== undefined
+              ? sanitizeRichHtmlOrNull(dto.descriptionHtml)
+              : existing.descriptionHtml,
+          actionEffectHtml:
+            dto.actionEffectHtml !== undefined
+              ? sanitizeRichHtmlOrNull(dto.actionEffectHtml)
+              : existing.actionEffectHtml,
+        });
       }
       if (dto.importantNoteHtml !== undefined) {
         data.importantNoteHtml = sanitizeRichHtmlOrNull(dto.importantNoteHtml);

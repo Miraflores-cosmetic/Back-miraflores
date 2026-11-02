@@ -2,7 +2,7 @@
 
 import { AdminCompactBtn } from '@/components/AdminCompactBtn/AdminCompactBtn';
 import { AdminTextArea, AdminTextField } from '@/components/AdminTextField/AdminTextField';
-import { PhoneField } from '@/components/PhoneField/PhoneField';
+import { formatPhoneInputValue, ruPhoneDigits } from '@/lib/phone';
 import type { Step1FieldErrors } from './helpers';
 import type { ClientMode } from './types';
 import { orderCreateStyles as styles } from './styles';
@@ -41,6 +41,8 @@ export function OrderCreateStepClient({
   onCustomerNote: (v: string) => void;
 }) {
   const err = fieldErrors ?? {};
+  const phoneDisplay = formatPhoneInputValue(phone);
+
   return (
     <div className={styles.wizardStack}>
       <div
@@ -95,10 +97,27 @@ export function OrderCreateStepClient({
         autoComplete="email"
         error={err.email}
       />
-      <PhoneField
+      <AdminTextField
         label="Телефон"
-        value={phone}
-        onChange={onPhone}
+        type="tel"
+        inputMode="tel"
+        autoComplete="tel"
+        value={phoneDisplay}
+        onChange={(e) => onPhone(formatPhoneInputValue(e.target.value))}
+        onKeyDown={(e) => {
+          if (e.key !== 'Backspace') return;
+          const digits = ruPhoneDigits(phoneDisplay);
+          if (digits.length <= 1) {
+            e.preventDefault();
+            onPhone('');
+          }
+        }}
+        onBlur={() => {
+          if (phone.trim()) {
+            const next = formatPhoneInputValue(phone);
+            if (next !== phone) onPhone(next);
+          }
+        }}
         error={err.phone}
       />
       <AdminTextField

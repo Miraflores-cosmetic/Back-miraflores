@@ -400,7 +400,7 @@ On-demand: `POST /api/admin/revalidate-catalog`.
 | Поверхность | SSR (guest shell) | Client hydrate (buyer JWT) | Статус |
 |-------------|-------------------|----------------------------|--------|
 | PLP `/catalog/*` (без `?q`) | `fetchPublicProductsPage` | `CatalogClient` → `fetchPublicProductsPageClient` | ✅ |
-| PLP `/catalog?q=…` | `fetchPublicSearch` + `fetchPublicProductsPage(slugs)` | **`CatalogClient` skip hydrate при `q`** (`if (q) return`) | ❌ guest |
+| PLP `/catalog?q=…` | `fetchPublicSearch` + `fetchPublicProductsPage(slugs)` | `CatalogClient` → `fetchPublicProductsPageClient({ slugs })` | ✅ |
 | PDP `/product/[slug]` | `fetchPublicProduct` | `ProductInteractive` → refetch via BFF | ✅ |
 | Set siblings | ISR | `ProductSetSiblings` → `fetchPublicSetSiblingsClient` | ✅ |
 | **Home `/`** | `fetchPublicProducts` + `fetchPublicCollections` (featured + main collections, `includeProducts=1`) | `fetchPublicCollectionsClient()` **есть, не используется** | ❌ guest |
@@ -408,7 +408,7 @@ On-demand: `POST /api/admin/revalidate-catalog`.
 
 Первый paint для залогиненного на home — гостевые цены/видимость в «все товары», **FeaturedCollections** и остальных коллекциях; после client refetch (где есть) — актуальный контекст.
 
-**Search:** `GET /search` → `SearchPublicService` — прямой Prisma, **без** `CommerceContextService` (base `variant.price`, без visibility filter). PLP search hydrate: `catalogLoad.hydrateSearchPage` → guest `fetchPublicSearch` + guest cards by slug.
+**Search:** `GET /search` → `SearchPublicService` + optional buyer JWT (`CommerceContext` → visibility + group price на subtitle). Plain cols `compositionSearchText` / `bodySearchText` + pg_trgm. PLP `?q`: guest SSR shell → client slug hydrate с BFF JWT.
 
 ### Известные пробелы (groups / storefront)
 
@@ -416,14 +416,14 @@ On-demand: `POST /api/admin/revalidate-catalog`.
 |----|----------|----------------|---------------|
 | **N1** | `cart/sync` → `pricing.allowPromoCodes` | ✅ `CartContext` + checkout/drawer | ❌ нет в `CartSyncResponse` / `checkoutSlice` |
 | **H1** | Home: featured collections + product strip — guest ISR | ❌ `page.tsx` только `fetchPublicCollections` / `fetchPublicProducts`; **`fetchPublicCollectionsClient` не wired** | ❌ аналогично |
-| **S1** | Search без commerce ctx | ❌ `SearchPublicService` + `hydrateSearchPage`; при `?q` client hydrate **отключён** | ❌ `/search` + PLP search guest |
+| **S1** | Search без commerce ctx | ✅ JWT → group price/visibility; PLP `?q` slug hydrate | ✅ `/search` JWT + `fetchProductList` |
 | **ISR** | Guest shell (общее) | PLP/PDP/set-siblings ✅ | client refetch коллекций с buyer JWT |
 
 **N1 fix (Front):** parity `Admin/lib/cart/CartContext.tsx` — gating промо по `pricing.allowPromoCodes`.
 
 **H1 fix:** client wrapper на `Admin/app/(site)/page.tsx` → `fetchPublicCollectionsClient()` + refetch «все товары» (`fetchPublicProductsPageClient`) при login.
 
-**S1 fix:** `SearchPublicService.search()` через commerce pipeline (visibility + group price); PLP `?q` — buyer-aware hydrate (re-search + slugs через BFF); убрать `if (q) return` в `CatalogClient` или отдельный search hydrate path.
+**S1:** ✅ `SearchPublicService` + buyer JWT; PLP `?q` → `CatalogClient` slug hydrate через BFF.
 
 ### Улучшения (backlog)
 

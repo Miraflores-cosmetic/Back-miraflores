@@ -1933,18 +1933,20 @@
 
 .itemsEditPctRow {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 6px;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  padding-top: 8px;
 }
 
 .itemsEditPctBtn {
   appearance: none;
   margin: 0;
   padding: 0 10px;
-  height: 28px;
+  height: 36px;
   border: 1px solid var(--account-hairline-color, #e2e6e8);
-  border-radius: 6px;
+  border-radius: 8px;
   background: #fff;
   font: inherit;
   font-size: 12px;
@@ -1952,6 +1954,7 @@
   font-variant-numeric: tabular-nums;
   color: inherit;
   cursor: pointer;
+  flex: 0 0 auto;
 }
 
 .itemsEditPctBtn:hover:not(:disabled) {
@@ -2014,7 +2017,9 @@
 }
 
 .itemsEditPctField {
-  width: 64px;
+  width: 72px;
+  height: 36px;
+  min-height: 36px;
   flex: 0 0 auto;
 }
 
@@ -2130,10 +2135,13 @@
   margin-bottom: 8px;
 }
 
-.wizardLead {
-  margin: 4px 0 0;
-  color: var(--admin-muted-fg, #6e6d67);
-  font-size: 14px;
+.ordersToolbarEnd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-left: auto;
 }
 
 .wizardSteps {
@@ -2147,29 +2155,34 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
-  border: 1px solid var(--account-hairline-color, #e2e6e8);
-  border-radius: 8px;
-  background: #fff;
+  padding: 6px 14px 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: #eef1ef;
   font-size: 13px;
   cursor: pointer;
   color: var(--admin-muted-fg, #6e6d67);
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .wizardStep:disabled {
-  opacity: 0.55;
+  opacity: 0.5;
   cursor: default;
 }
 
 .wizardStepActive {
-  border-color: var(--admin-accent, #1a5c4a);
-  color: var(--admin-fg, #1a1a18);
+  background: var(--color-brand-green, #297230);
+  color: #fff;
   font-weight: 600;
 }
 
 .wizardStepDone {
-  border-color: #b8d4cb;
-  color: var(--admin-fg, #1a1a18);
+  background: color-mix(in srgb, var(--color-brand-green, #297230) 16%, #fff);
+  color: var(--color-brand-green, #297230);
+  border-color: color-mix(in srgb, var(--color-brand-green, #297230) 28%, #fff);
 }
 
 .wizardStepNum {
@@ -2179,14 +2192,19 @@
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: #f0f2f1;
+  background: rgba(255, 255, 255, 0.55);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
 .wizardStepActive .wizardStepNum {
-  background: var(--admin-accent, #1a5c4a);
+  background: rgba(255, 255, 255, 0.22);
   color: #fff;
+}
+
+.wizardStepDone .wizardStepNum {
+  background: color-mix(in srgb, var(--color-brand-green, #297230) 18%, #fff);
+  color: var(--color-brand-green, #297230);
 }
 
 .wizardPanel {
@@ -2207,25 +2225,108 @@
 }
 
 .wizardPriceTools {
-  margin-top: 8px;
+  margin-top: 4px;
 }
 
-.wizardPriceToolsToggle {
+.wizardCollapseBtn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--admin-accent, #1a5c4a);
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--account-hairline-color, #e2e6e8);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--admin-fg, #1a1a18);
   font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 2px;
 }
 
-.wizardPriceToolsToggle:hover {
-  color: var(--admin-fg, #1a1a18);
+.wizardCollapseBtn:hover {
+  border-color: #c5cbcf;
+  background: #fafafa;
+}
+
+.wizardCollapseBtnChevron {
+  display: inline-flex;
+  transition: transform 0.15s ease;
+}
+
+.wizardCollapseBtn[aria-expanded='true'] .wizardCollapseBtnChevron {
+  transform: rotate(180deg);
+}
+
+.wizardIconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--account-hairline-color, #e2e6e8);
+  border-radius: 8px;
+  background: #fff;
+  color: #6e6d67;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.wizardIconBtn:hover {
+  border-color: #d4a0a0;
+  color: #b42318;
+  background: #fff8f8;
+}
+
+.wizardLineThumb {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #f3f4f3;
+  flex: 0 0 auto;
+  border: 1px solid var(--account-hairline-color, #e2e6e8);
+}
+
+.wizardLineThumbEmpty {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: #9a9a96;
+}
+
+.wizardFieldInput {
+  box-sizing: border-box;
+  height: 36px;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--account-hairline-color, #e2e6e8);
+  border-radius: 8px;
+  background: #fff;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  color: inherit;
+}
+
+.wizardFieldInput:focus {
+  outline: none;
+  border-color: var(--color-brand-green, #297230);
+}
+
+.wizardGratitudePreview {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--color-brand-green, #297230) 25%, #e2e6e8);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-brand-green, #297230) 6%, #fff);
+  font-size: 13px;
+}
+
+.wizardGratitudePreview ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
 }
 
 .wizardStack {
@@ -2264,14 +2365,12 @@
 .wizardLineRow {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 10px 14px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--account-hairline-color, #e2e6e8);
+  align-items: center;
+  gap: 10px 12px;
 }
 
 .wizardLineMain {
-  flex: 1 1 200px;
+  flex: 1 1 180px;
   min-width: 0;
 }
 
@@ -2288,8 +2387,14 @@
   color: var(--admin-muted-fg, #6e6d67);
 }
 
+.wizardInlineField .wizardFieldInput,
 .wizardInlineField .input {
-  width: 100px;
+  width: 96px;
+}
+
+.wizardInlineFieldWide .wizardFieldInput,
+.wizardInlineFieldWide .input {
+  width: 140px;
 }
 
 .wizardSubtotal {

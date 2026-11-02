@@ -117,9 +117,30 @@ export function CatalogClient({
     const tag = searchParams.get('tag') ?? initial.tag;
     const collection = searchParams.get('collection') ?? initial.collection;
     const q = searchParams.get('q')?.trim() || initial.q || '';
-    if (q) return;
 
     void (async () => {
+      if (q) {
+        // S1: guest SSR cards → re-fetch by slug with buyer JWT (group price + visibility)
+        const slugs = initial.items
+          .map((it) => it.slug?.trim())
+          .filter((s): s is string => Boolean(s));
+        if (!slugs.length) return;
+        const data = await fetchPublicProductsPageClient({
+          slugs,
+          limit: slugs.length,
+          page: 1,
+        });
+        if (!data) return;
+        const bySlug = new Map(data.items.map((c) => [c.slug, c]));
+        const ordered = slugs
+          .map((s) => bySlug.get(s))
+          .filter((c): c is NonNullable<typeof c> => Boolean(c));
+        setItems(ordered);
+        setTotal(ordered.length);
+        setListPage(1);
+        return;
+      }
+
       const data = await fetchPublicProductsPageClient({
         page,
         limit: pageSize,
@@ -150,6 +171,7 @@ export function CatalogClient({
     initial.priceMax,
     initial.q,
     initial.page,
+    initial.items,
     pageSize,
   ]);
 

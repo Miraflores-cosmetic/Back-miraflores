@@ -172,7 +172,7 @@ async function hydrateSearchPage(
 ): Promise<{ items: PublicProductCard[]; total: number; page: number; limit: number } | null> {
   const search = await fetchPublicSearch(q);
   if (!search) return null;
-  const productGroup = search.groups?.find((g) => g.key === 'products');
+  const productGroup = search.groups?.find((g) => g.key === 'product');
   const hits = productGroup?.items ?? [];
   const total = hits.length;
   const limit = PUBLIC_CATALOG_PAGE_SIZE;

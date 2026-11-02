@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { buyerForwardHeaders } from '@/lib/buyerPublicBff';
 import { getServerApiBase } from '@/lib/serverApiBase';
 
 export const dynamic = 'force-dynamic';
@@ -11,7 +12,7 @@ export async function GET(request: NextRequest) {
       `${base}/search?q=${encodeURIComponent(q)}`,
       {
         cache: 'no-store',
-        headers: { Accept: 'application/json' },
+        headers: buyerForwardHeaders(),
         signal: request.signal,
       },
     );

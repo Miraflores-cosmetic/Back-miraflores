@@ -25,6 +25,7 @@ export type VariantPickerApplyDetails = {
   /** Platform field; Miraflores catalog has no shades — always null. */
   shadeId: string | null;
   shadeName: string | null;
+  imageUrl?: string | null;
 };
 
 function variantLabel(productName: string, variantName: string, sku?: string) {
@@ -147,12 +148,17 @@ export function VariantPickerModal({
     const v = variants.find((x) => x.id === draftVariantId);
     if (!v) return;
     const label = variantLabel(productDetail.name, v.name, v.sku);
+    const imageUrl =
+      productDetail.images?.find((img) => img.mediaType !== 'video')?.url ??
+      productDetail.images?.[0]?.url ??
+      null;
     onApply(draftVariantId, label, {
       sku: v.sku,
       price: v.price,
       title: label,
       shadeId: null,
       shadeName: null,
+      imageUrl,
     });
     onClose();
   }

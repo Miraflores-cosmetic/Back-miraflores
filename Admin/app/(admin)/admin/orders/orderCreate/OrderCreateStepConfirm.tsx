@@ -153,8 +153,20 @@ export function OrderCreateStepConfirm({
               {' = '}
               <strong>{formatAdminMoney(preview.total)}</strong>
             </p>
-            {preview.gratitudeCount > 0 ? (
-              <p>Подарки благодарности: {preview.gratitudeCount}</p>
+            {(preview.gratitudeItems?.length ?? preview.gratitudeCount) > 0 ? (
+              <div>
+                <p>Подарки благодарности:</p>
+                <ul className={styles.wizardLineList}>
+                  {(preview.gratitudeItems ?? []).map((g, i) => (
+                    <li key={`${g.title}-${i}`}>
+                      {g.title} × {g.qty}
+                    </li>
+                  ))}
+                </ul>
+                {!preview.gratitudeItems?.length ? (
+                  <p>{preview.gratitudeCount} поз.</p>
+                ) : null}
+              </div>
             ) : null}
             {preview.priceOverrides.length > 0 ? (
               <p>Override цен: {preview.priceOverrides.length} поз.</p>
@@ -200,9 +212,27 @@ export function OrderCreateStepConfirm({
         <label htmlFor="order-create-notify">Уведомить клиента</label>
       </div>
 
-      <button type="button" className={styles.linkBtn} onClick={onToggleAffiliate}>
-        {affiliateOpen ? 'Скрыть партнёрскую атрибуцию' : 'Партнёрская атрибуция (опционально)'}
-      </button>
+      <div>
+        <button
+          type="button"
+          className={styles.wizardCollapseBtn}
+          aria-expanded={affiliateOpen}
+          onClick={onToggleAffiliate}
+        >
+          Партнёрская атрибуция
+          <span className={styles.wizardCollapseBtnChevron} aria-hidden>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M6 9l6 6 6-6"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </span>
+        </button>
+      </div>
       {affiliateOpen ? (
         <div className={styles.wizardStack}>
           <div className={styles.wizardStack}>

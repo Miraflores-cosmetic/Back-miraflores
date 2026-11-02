@@ -12,6 +12,7 @@ import {
   normalizeCanonicalPath,
   trimOrNull,
 } from '../catalog/catalog-admin.helpers';
+import { htmlToSearchText } from '../common/html-to-search-text.util';
 import {
   extractMediaUrlsFromRichHtml,
   sanitizeBlogBodyForWrite,
@@ -154,6 +155,7 @@ export class BlogAdminService {
         categoryId,
         excerpt,
         body,
+        bodySearchText: htmlToSearchText(body),
         isPublished,
         publishedAt,
         coverUrl: dto.coverUrl?.trim() || null,
@@ -235,7 +237,12 @@ export class BlogAdminService {
         slug,
         ...(categoryId !== undefined ? { categoryId } : {}),
         ...(dto.excerpt !== undefined ? { excerpt: resolvedNextExcerpt } : {}),
-        ...(dto.body != null ? { body: resolvedNextBody } : {}),
+        ...(dto.body != null
+          ? {
+              body: resolvedNextBody,
+              bodySearchText: htmlToSearchText(resolvedNextBody),
+            }
+          : {}),
         ...(dto.isPublished !== undefined ? { isPublished: dto.isPublished } : {}),
         ...(publishedAt !== undefined ? { publishedAt } : {}),
         ...(dto.coverUrl !== undefined ? { coverUrl: dto.coverUrl?.trim() || null } : {}),

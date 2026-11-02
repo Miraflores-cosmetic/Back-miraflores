@@ -5,6 +5,9 @@ const productFindMany = vi.fn();
 const catalogTagFindMany = vi.fn();
 const collectionFindMany = vi.fn();
 const blogPostFindMany = vi.fn();
+const resolveFromUserId = vi.fn();
+const resolveVariantPrices = vi.fn();
+const applyVariantVisibilityToProductSources = vi.fn();
 
 vi.mock('../prisma/prisma.service', () => ({
   PrismaService: class {
@@ -16,6 +19,25 @@ vi.mock('../prisma/prisma.service', () => ({
   },
 }));
 
+vi.mock('../user-groups/commerce-context.service', () => ({
+  CommerceContextService: class {
+    resolveFromUserId = resolveFromUserId;
+  },
+}));
+
+vi.mock('../user-groups/group-pricing.service', () => ({
+  GroupPricingService: class {
+    resolveVariantPrices = resolveVariantPrices;
+  },
+}));
+
+vi.mock('../user-groups/catalog-visibility.service', () => ({
+  CatalogVisibilityService: class {
+    applyVariantVisibilityToProductSources =
+      applyVariantVisibilityToProductSources;
+  },
+}));
+
 import {
   normalizeSearchText,
   scoreTitleMatch,
@@ -23,6 +45,18 @@ import {
   SearchPublicService,
 } from './search.public.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { CommerceContextService } from '../user-groups/commerce-context.service';
+import { GroupPricingService } from '../user-groups/group-pricing.service';
+import { CatalogVisibilityService } from '../user-groups/catalog-visibility.service';
+
+function makeService() {
+  return new SearchPublicService(
+    new PrismaService() as never,
+    new CommerceContextService() as never,
+    new GroupPricingService() as never,
+    new CatalogVisibilityService() as never,
+  );
+}
 
 describe('search helpers', () => {
   it('normalizeSearchText: lower + ё→е', () => {
@@ -34,11 +68,14 @@ describe('search helpers', () => {
     expect(searchForms('крем')).toEqual(['крем']);
   });
 
-  it('scoreTitleMatch: exact > prefix > contains', () => {
+  it('scoreTitleMatch: exact > prefix > contains > composition-only', () => {
     expect(scoreTitleMatch('Крем', 'крем')).toBe(100);
     expect(scoreTitleMatch('Крем для лица', 'крем')).toBe(80);
     expect(scoreTitleMatch('Ночной крем', 'крем')).toBe(40);
     expect(scoreTitleMatch('Тональный', 'sku-xyz')).toBe(10);
+    expect(scoreTitleMatch('Ретинол сыворотка', 'ретинол')).toBeGreaterThan(
+      scoreTitleMatch('Крем с ниацинамидом', 'ретинол'),
+    );
   });
 });
 
@@ -51,14 +88,27 @@ describe('SearchPublicService.search', () => {
     catalogTagFindMany.mockReset();
     collectionFindMany.mockReset();
     blogPostFindMany.mockReset();
+    resolveFromUserId.mockReset();
+    resolveVariantPrices.mockReset();
+    applyVariantVisibilityToProductSources.mockReset();
 
     categoryFindMany.mockResolvedValue([]);
     productFindMany.mockResolvedValue([]);
     catalogTagFindMany.mockResolvedValue([]);
     collectionFindMany.mockResolvedValue([]);
     blogPostFindMany.mockResolvedValue([]);
+    resolveFromUserId.mockResolvedValue({
+      kind: 'guest',
+      groupId: 'g',
+      allowCatalogDiscounts: true,
+      priceRounding: 'NONE',
+    });
+    applyVariantVisibilityToProductSources.mockImplementation(
+      async (_ctx: unknown, sources: unknown) => sources,
+    );
+    resolveVariantPrices.mockResolvedValue(new Map());
 
-    service = new SearchPublicService(new PrismaService() as never);
+    service = makeService();
   });
 
   it('q < 2 → пустые groups без запросов', async () => {
@@ -67,45 +117,130 @@ describe('SearchPublicService.search', () => {
     expect(productFindMany).not.toHaveBeenCalled();
   });
 
-  it('товары ищутся по sku / nationalCatalogName / оттенкам / shortDescription', async () => {
+  it('фаза 1: name/sku; фаза 2: compositionSearchText (content)', async () => {
     await service.search('nude');
-    expect(productFindMany).toHaveBeenCalled();
-    const where = productFindMany.mock.calls[0]![0].where;
-    expect(where.active).toBe(true);
-    const or = where.OR as unknown[];
-    expect(or.length).toBeGreaterThan(3);
-    const blob = JSON.stringify(where);
-    expect(blob).toContain('shortDescription');
-    expect(blob).toContain('sku');
-    expect(blob).toContain('nationalCatalogName');
-    expect(blob).toContain('shades');
+    expect(productFindMany).toHaveBeenCalledTimes(2);
+    const primaryBlob = JSON.stringify(productFindMany.mock.calls[0]![0].where);
+    const contentBlob = JSON.stringify(productFindMany.mock.calls[1]![0].where);
+    expect(primaryBlob).toContain('shortDescription');
+    expect(primaryBlob).toContain('sku');
+    expect(primaryBlob).not.toContain('compositionSearchText');
+    expect(contentBlob).toContain('compositionSearchText');
   });
 
-  it('теги и категории фильтруют active products', async () => {
-    await service.search('лицо');
-    const tagWhere = catalogTagFindMany.mock.calls[0]![0].where;
-    expect(JSON.stringify(tagWhere)).toContain('"active":true');
-    const catWhere = categoryFindMany.mock.calls[0]![0].where;
-    expect(JSON.stringify(catWhere)).toContain('"active":true');
+  it('html-noise q: не ходит в composition/body', async () => {
+    await service.search('div');
+    expect(productFindMany).toHaveBeenCalledTimes(1);
+    expect(blogPostFindMany).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(productFindMany.mock.calls[0]![0].where)).not.toContain(
+      'compositionSearchText',
+    );
+  });
+
+  it('статьи: title/excerpt → bodySearchText', async () => {
+    await service.search('ретинол');
+    expect(blogPostFindMany).toHaveBeenCalledTimes(2);
+    const primaryBlob = JSON.stringify(blogPostFindMany.mock.calls[0]![0].where);
+    const bodyBlob = JSON.stringify(blogPostFindMany.mock.calls[1]![0].where);
+    expect(primaryBlob).toContain('title');
+    expect(primaryBlob).not.toContain('bodySearchText');
+    expect(bodyBlob).toContain('bodySearchText');
+  });
+
+  it('blog subtitle strips HTML excerpt', async () => {
+    productFindMany.mockResolvedValue([]);
+    blogPostFindMany
+      .mockResolvedValueOnce([
+        {
+          id: 'p1',
+          title: 'Про ретинол',
+          slug: 'retinol',
+          excerpt: '<p>Сыворотка <strong>с ретинолом</strong></p>',
+          coverUrl: null,
+          category: null,
+        },
+      ])
+      .mockResolvedValueOnce([]);
+    const res = await service.search('ретинол');
+    const blog = res.groups.find((g) => g.key === 'blog');
+    expect(blog?.items[0]?.subtitle).toBe('Сыворотка с ретинолом');
+  });
+
+  it('title-хит rank > composition-only; composition всё же в выдаче', async () => {
+    const compositionOnly = Array.from({ length: 5 }, (_, i) => ({
+      id: `c${i}`,
+      name: `Ааа крем ${i}`,
+      slug: `comp-${i}`,
+      categoryId: 'cat',
+      images: [],
+      variants: [{ id: `v-c${i}`, price: 100 }],
+    }));
+    productFindMany
+      .mockResolvedValueOnce([
+        {
+          id: 'title',
+          name: 'Ретинол сыворотка',
+          slug: 'retinol',
+          categoryId: 'cat',
+          images: [],
+          variants: [{ id: 'v-t', price: 2000 }],
+        },
+      ])
+      .mockResolvedValueOnce(compositionOnly);
+
+    const res = await service.search('ретинол');
+    const products = res.groups.find((g) => g.key === 'product');
+    expect(products?.items[0]?.id).toBe('title');
+    expect(
+      scoreTitleMatch(products!.items[0]!.title, 'ретинол'),
+    ).toBeGreaterThan(
+      scoreTitleMatch(products!.items.find((i) => i.id === 'c0')!.title, 'ретинол'),
+    );
+    expect(products?.items.some((i) => i.id === 'c0')).toBe(true);
+  });
+
+  it('buyer group price → subtitle', async () => {
+    productFindMany
+      .mockResolvedValueOnce([
+        {
+          id: '1',
+          name: 'Крем',
+          slug: 'k',
+          categoryId: 'cat',
+          images: [],
+          variants: [{ id: 'v1', price: 1000 }],
+        },
+      ])
+      .mockResolvedValueOnce([]);
+    resolveVariantPrices.mockResolvedValue(
+      new Map([['v1', { basePrice: 1000, groupPrice: 800 }]]),
+    );
+    const res = await service.search('крем', { userId: 'user-1' });
+    expect(resolveFromUserId).toHaveBeenCalledWith('user-1');
+    expect(res.groups[0]?.items[0]?.subtitle).toBe('800 р.');
   });
 
   it('ранжирует товары: prefix выше contains', async () => {
-    productFindMany.mockResolvedValueOnce([
-      {
-        id: '2',
-        name: 'Ночной крем',
-        slug: 'night',
-        images: [],
-        variants: [{ price: 1000 }],
-      },
-      {
-        id: '1',
-        name: 'Крем дневной',
-        slug: 'day',
-        images: [],
-        variants: [{ price: 900 }],
-      },
-    ]);
+    productFindMany
+      .mockResolvedValueOnce([
+        {
+          id: '2',
+          name: 'Ночной крем',
+          slug: 'night',
+          categoryId: 'cat',
+          images: [],
+          variants: [{ id: 'v2', price: 1000 }],
+        },
+        {
+          id: '1',
+          name: 'Крем дневной',
+          slug: 'day',
+          categoryId: 'cat',
+          images: [],
+          variants: [{ id: 'v1', price: 900 }],
+        },
+      ])
+      .mockResolvedValueOnce([]);
     const res = await service.search('крем');
     const products = res.groups.find((g) => g.key === 'product');
     expect(products?.items.map((i) => i.id)).toEqual(['1', '2']);
@@ -113,15 +248,21 @@ describe('SearchPublicService.search', () => {
   });
 
   it('subtitle «от …» при разбросе цен', async () => {
-    productFindMany.mockResolvedValueOnce([
-      {
-        id: '1',
-        name: 'Крем',
-        slug: 'k',
-        images: [],
-        variants: [{ price: 500 }, { price: 900 }],
-      },
-    ]);
+    productFindMany
+      .mockResolvedValueOnce([
+        {
+          id: '1',
+          name: 'Крем',
+          slug: 'k',
+          categoryId: 'cat',
+          images: [],
+          variants: [
+            { id: 'va', price: 500 },
+            { id: 'vb', price: 900 },
+          ],
+        },
+      ])
+      .mockResolvedValueOnce([]);
     const res = await service.search('крем');
     expect(res.groups[0]?.items[0]?.subtitle).toBe('от 500 р.');
   });

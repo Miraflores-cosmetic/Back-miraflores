@@ -1,6 +1,7 @@
 'use client';
 
 import { AdminCompactBtn } from '@/components/AdminCompactBtn/AdminCompactBtn';
+import { AdminTextField } from '@/components/AdminTextField/AdminTextField';
 import type { ShippingDraft } from './types';
 import { orderCreateStyles as styles } from './styles';
 
@@ -40,18 +41,15 @@ export function OrderCreateStepShipping({
               Изменить
             </AdminCompactBtn>
           </div>
-          <label className={styles.wizardInlineField}>
-            <span>Стоимость доставки ₽</span>
-            <input
-              className={styles.input}
-              type="number"
-              min={0}
-              max={500000}
-              value={costDraft}
-              onChange={(e) => onCostDraft(e.target.value)}
-              disabled={estimating}
-            />
-          </label>
+          <AdminTextField
+            label="Стоимость доставки ₽"
+            type="number"
+            min={0}
+            max={500000}
+            value={costDraft}
+            onChange={(e) => onCostDraft(e.target.value)}
+            disabled={estimating}
+          />
           {estimateHint ? (
             <p className={styles.wizardHint}>{estimateHint}</p>
           ) : null}

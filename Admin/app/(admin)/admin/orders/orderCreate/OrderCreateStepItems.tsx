@@ -12,12 +12,48 @@ import {
 import type { DraftLine } from './types';
 import { orderCreateStyles as styles } from './styles';
 
+function TrashIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M10 11v6M14 11v6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function ChevronIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M6 9l6 6 6-6"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function OrderCreateStepItems({
   lines,
   linePctDraft,
   attachGratitude,
   giftOnly = false,
   goodsSubtotal,
+  gratitudeItems = [],
+  gratitudeBusy = false,
   onAddFromCatalog,
   onAddGiftDenom,
   onChangeQty,
@@ -33,6 +69,8 @@ export function OrderCreateStepItems({
   attachGratitude: boolean;
   giftOnly?: boolean;
   goodsSubtotal: number;
+  gratitudeItems?: Array<{ title: string; qty: number }>;
+  gratitudeBusy?: boolean;
   onAddFromCatalog: () => void;
   onAddGiftDenom: () => void;
   onChangeQty: (key: string, qty: number) => void;
@@ -71,6 +109,21 @@ export function OrderCreateStepItems({
             return (
               <li key={l.key} className={styles.wizardLineCard}>
                 <div className={styles.wizardLineRow}>
+                  {l.imageUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={l.imageUrl}
+                      alt=""
+                      className={styles.wizardLineThumb}
+                    />
+                  ) : (
+                    <div
+                      className={`${styles.wizardLineThumb} ${styles.wizardLineThumbEmpty}`}
+                      aria-hidden
+                    >
+                      —
+                    </div>
+                  )}
                   <div className={styles.wizardLineMain}>
                     <div className={styles.wizardLineTitle}>{l.title}</div>
                     <div className={styles.wizardHint}>
@@ -81,7 +134,7 @@ export function OrderCreateStepItems({
                   <label className={styles.wizardInlineField}>
                     <span>Кол-во</span>
                     <input
-                      className={styles.input}
+                      className={styles.wizardFieldInput}
                       type="number"
                       min={1}
                       max={9999}
@@ -98,7 +151,7 @@ export function OrderCreateStepItems({
                   <label className={styles.wizardInlineField}>
                     <span>Цена ₽</span>
                     <input
-                      className={styles.input}
+                      className={styles.wizardFieldInput}
                       type="number"
                       min={0}
                       value={l.unitPrice}
@@ -111,18 +164,19 @@ export function OrderCreateStepItems({
                       }}
                     />
                   </label>
-                  <AdminCompactBtn
+                  <button
                     type="button"
-                    variant="outline"
+                    className={styles.wizardIconBtn}
+                    aria-label={`Удалить ${l.title}`}
                     onClick={() => onRemove(l.key)}
                   >
-                    Удалить
-                  </AdminCompactBtn>
+                    <TrashIcon />
+                  </button>
                 </div>
                 <div className={styles.wizardPriceTools}>
                   <button
                     type="button"
-                    className={styles.wizardPriceToolsToggle}
+                    className={styles.wizardCollapseBtn}
                     aria-expanded={toolsOpen}
                     onClick={() =>
                       setPctOpen((prev) => ({
@@ -131,8 +185,11 @@ export function OrderCreateStepItems({
                       }))
                     }
                   >
-                    {toolsOpen ? 'Скрыть скидку %' : 'Скидка % от каталога'}
+                    Скидка % от каталога
                     {priceChanged ? ` (−${pctOff > 0 ? pctOff : 0}%)` : ''}
+                    <span className={styles.wizardCollapseBtnChevron}>
+                      <ChevronIcon />
+                    </span>
                   </button>
                   {toolsOpen ? (
                     <div className={styles.itemsEditPriceTools}>
@@ -150,9 +207,9 @@ export function OrderCreateStepItems({
                           </button>
                         ))}
                         <label className={styles.wizardInlineField}>
-                          <span>%</span>
+                          <span className={styles.srOnly}>Своя скидка %</span>
                           <input
-                            className={`${styles.input} ${styles.itemsEditPctField}`}
+                            className={`${styles.wizardFieldInput} ${styles.itemsEditPctField}`}
                             inputMode="decimal"
                             value={draftPct}
                             placeholder="%"
@@ -222,17 +279,39 @@ export function OrderCreateStepItems({
           Электронные сертификаты — доставка и благодарности не применяются
         </p>
       ) : (
-        <div className={styles.labelCheckboxRow}>
-          <AdminCheckbox
-            id="order-create-gratitude"
-            className={styles.adminCheckboxForm}
-            checked={attachGratitude}
-            onChange={(e) => onAttachGratitude(e.target.checked)}
-          />
-          <label htmlFor="order-create-gratitude">
-            Добавить подарки благодарности (по порогу)
-          </label>
-        </div>
+        <>
+          <div className={styles.labelCheckboxRow}>
+            <AdminCheckbox
+              id="order-create-gratitude"
+              className={styles.adminCheckboxForm}
+              checked={attachGratitude}
+              onChange={(e) => onAttachGratitude(e.target.checked)}
+            />
+            <label htmlFor="order-create-gratitude">
+              Добавить подарки благодарности (по порогу)
+            </label>
+          </div>
+          {attachGratitude ? (
+            gratitudeBusy ? (
+              <p className={styles.wizardHint}>Считаем подарки благодарности…</p>
+            ) : gratitudeItems.length > 0 ? (
+              <div className={styles.wizardGratitudePreview}>
+                По порогу будут добавлены:
+                <ul>
+                  {gratitudeItems.map((g, i) => (
+                    <li key={`${g.title}-${i}`}>
+                      {g.title} × {g.qty}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : lines.length > 0 ? (
+              <p className={styles.wizardHint}>
+                Для текущей суммы товаров подарки благодарности не положены
+              </p>
+            ) : null
+          ) : null}
+        </>
       )}
     </div>
   );

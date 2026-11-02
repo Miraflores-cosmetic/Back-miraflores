@@ -389,6 +389,19 @@ async function main() {
           descriptionHtml: blocks.descriptionHtml || null,
           applicationHtml: blocks.applicationHtml,
           compositionHtml: blocks.compositionHtml,
+          compositionSearchText: [
+            blocks.compositionHtml,
+            blocks.descriptionHtml,
+          ]
+            .filter(Boolean)
+            .map((h) =>
+              String(h)
+                .replace(/<[^>]+>/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim(),
+            )
+            .filter(Boolean)
+            .join('\n') || null,
           storageHtml: blocks.storageHtml,
           categoryId: category.id,
           active: true,
@@ -405,6 +418,19 @@ async function main() {
           descriptionHtml: blocks.descriptionHtml || null,
           applicationHtml: blocks.applicationHtml,
           compositionHtml: blocks.compositionHtml,
+          compositionSearchText: [
+            blocks.compositionHtml,
+            blocks.descriptionHtml,
+          ]
+            .filter(Boolean)
+            .map((h) =>
+              String(h)
+                .replace(/<[^>]+>/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim(),
+            )
+            .filter(Boolean)
+            .join('\n') || null,
           storageHtml: blocks.storageHtml,
           categoryId: category.id,
           active: true,

@@ -324,6 +324,10 @@ export function serializeAdminCreatePreview(quote: AdminCreateQuote) {
     promoCode: quote.promoCode,
     giftCertificateCode: quote.giftCertificateCode,
     gratitudeCount: quote.gratitudeGifts.length,
+    gratitudeItems: quote.gratitudeGifts.map((g) => ({
+      title: [g.name, g.variantName].filter(Boolean).join(' · '),
+      qty: g.qty,
+    })),
     priceOverrides: quote.priceOverrides,
     lines: quote.items.map((l) => ({
       variantId: l.variantId,
