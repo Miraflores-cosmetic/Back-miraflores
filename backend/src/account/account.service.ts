@@ -497,6 +497,7 @@ export class AccountService {
         giftCertificateAmount: true,
         createdAt: true,
         guestId: true,
+        needsAddressClarification: true,
         items: {
           select: {
             id: true,
@@ -544,6 +545,7 @@ export class AccountService {
       (o) =>
         (o.status === OrderStatus.AWAITING_PAYMENT ||
           o.status === OrderStatus.NEW) &&
+        !o.needsAddressClarification &&
         !o.guestId?.trim(),
     );
     if (needGuestIds.length > 0) {
@@ -561,8 +563,10 @@ export class AccountService {
     }
 
     return orders.map((o) => {
-      const canPay =
+      const awaitingUnpaid =
         o.status === OrderStatus.AWAITING_PAYMENT || o.status === OrderStatus.NEW;
+      const needsAddressClarification = Boolean(o.needsAddressClarification);
+      const canPay = awaitingUnpaid && !needsAddressClarification;
       const guestId = o.guestId?.trim() || '';
       return {
         id: o.id,
@@ -577,6 +581,7 @@ export class AccountService {
         items: this.mapOrderItems(o.items),
         tracking: o.shipments[0]?.tracking?.trim() || null,
         trackingProvider: o.shipments[0]?.provider ?? null,
+        needsAddressClarification,
         canPay,
         payToken: canPay && guestId ? this.payTokens.issue(o.id, guestId) : null,
         // Авто-отмена отключена: оплата пока AWAITING/NEW — без hard cutoff в ЛК.
@@ -608,6 +613,7 @@ export class AccountService {
         giftCertificateCode: true,
         giftCertificateAmount: true,
         guestId: true,
+        needsAddressClarification: true,
         createdAt: true,
         shipments: {
           orderBy: { createdAt: 'desc' },
@@ -660,10 +666,12 @@ export class AccountService {
     if (!order) throw new NotFoundException('Заказ не найден');
 
     const snap = (order.shippingAddress ?? null) as ShippingAddressSnap | null;
-    const canPay =
+    const awaitingUnpaid =
       order.status === OrderStatus.AWAITING_PAYMENT ||
       order.status === OrderStatus.NEW;
-    const canCancelUnpaid = canPay;
+    const needsAddressClarification = Boolean(order.needsAddressClarification);
+    const canPay = awaitingUnpaid && !needsAddressClarification;
+    const canCancelUnpaid = awaitingUnpaid;
     let guestId = order.guestId?.trim() || '';
     if (canPay && !guestId) {
       const { randomUUID } = await import('node:crypto');
@@ -717,6 +725,7 @@ export class AccountService {
       items: this.mapOrderItems(order.items),
       payToken: canPay && guestId ? this.payTokens.issue(order.id, guestId) : null,
       payExpiresAt,
+      needsAddressClarification,
       canPay,
       canCancel: canCancelUnpaid,
     };

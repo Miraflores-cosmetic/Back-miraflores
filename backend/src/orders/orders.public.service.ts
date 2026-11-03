@@ -39,6 +39,10 @@ import {
   goodsSubtotalForFreePvzThreshold,
 } from './order-shipping.resolve';
 import {
+  buildAddressClarificationComment,
+  hasAddressClarificationEvidence,
+} from './address-clarification';
+import {
   hashCartLines,
   hashShippingAddress,
   ShippingQuoteService,
@@ -208,8 +212,10 @@ export class OrdersPublicService {
     giftCertificateCode: string | null;
     guestId: string | null;
     items: unknown;
+    needsAddressClarification?: boolean | null;
   }) {
     const guestId = order.guestId?.trim() || '';
+    const needsClarification = Boolean(order.needsAddressClarification);
     return {
       id: order.id,
       number: order.number,
@@ -223,8 +229,15 @@ export class OrdersPublicService {
       promoCode: order.promoCode,
       giftCertificateCode: order.giftCertificateCode,
       items: order.items,
-      /** Short-lived HMAC для pay / status / abandon. */
-      payToken: guestId ? this.payTokens.issue(order.id, guestId) : null,
+      needsAddressClarification: needsClarification,
+      /**
+       * HMAC для pay / status / abandon.
+       * Пока needsAddressClarification — не выдаём: оплата заблокирована.
+       */
+      payToken:
+        guestId && !needsClarification
+          ? this.payTokens.issue(order.id, guestId)
+          : null,
     };
   }
 
@@ -485,10 +498,24 @@ export class OrdersPublicService {
     }
 
     const { giftOnly } = assertGiftDenomCartNotMixedWithPhysical(items);
+    const wantsAddressClarification =
+      Boolean(dto.needsAddressClarification) && !giftOnly;
+    // Не доверяем одному boolean — иначе spoof = skip shippingQuote.
+    const needsAddressClarification =
+      wantsAddressClarification &&
+      hasAddressClarificationEvidence({
+        comment: dto.shippingAddress?.comment,
+        address: dto.shippingAddress?.address,
+      });
+    if (wantsAddressClarification && !needsAddressClarification) {
+      throw new BadRequestException(
+        'Некорректный запрос уточнения адреса: нужен маркер в comment или синтетический адрес',
+      );
+    }
 
     const city = dto.shippingAddress?.city?.trim() || '';
     const address = dto.shippingAddress?.address?.trim() || '';
-    if (!giftOnly && (!city || !address)) {
+    if (!giftOnly && !needsAddressClarification && (!city || !address)) {
       throw new BadRequestException('Укажите город и адрес доставки');
     }
 
@@ -563,7 +590,13 @@ export class OrdersPublicService {
     let createPvzCode: string | null = null;
     let quotePayload: ReturnType<ShippingQuoteService['verify']> | null = null;
 
-    if (!giftOnly) {
+    if (!giftOnly && needsAddressClarification) {
+      createComment = buildAddressClarificationComment(
+        dto.shippingAddress.comment,
+      );
+      shippingCost = 0;
+      shippingMethod = null;
+    } else if (!giftOnly) {
       if (!dto.shippingQuote?.trim() || !dto.shippingMethod?.trim()) {
         throw new BadRequestException('Укажите способ и расчёт доставки');
       }
@@ -701,6 +734,7 @@ export class OrdersPublicService {
               total,
               shippingCost,
               shippingMethod,
+              needsAddressClarification,
               shippingAddress: giftOnly
                 ? {
                     city: city || '—',
@@ -711,43 +745,59 @@ export class OrdersPublicService {
                     comment: 'digital-gift',
                     postalCode: '',
                   }
-                : {
-                    city,
-                    address,
-                    apartment: dto.shippingAddress.apartment?.trim() || '',
-                    region: dto.shippingAddress.region?.trim() || '',
-                    district: dto.shippingAddress.district?.trim() || '',
-                    comment: createComment,
-                    postalCode: dto.shippingAddress.postalCode?.trim() || '',
-                    pvzCode: createPvzCode || undefined,
-                    phone: dto.shippingAddress.phone?.trim() || undefined,
-                    recipientName:
-                      dto.shippingAddress.recipientName?.trim() || undefined,
-                    carrierQuote: {
-                      cost: shippingCost,
-                      method: shippingMethod,
-                      freePvz: Boolean(quotePayload?.freePvz),
-                      tariffId:
-                        dto.shippingAddress.carrierQuote?.tariffId ??
-                        quotePayload?.tariffId ??
-                        null,
-                      tariffName:
-                        dto.shippingAddress.carrierQuote?.tariffName ??
-                        quotePayload?.tariffName ??
-                        null,
-                      daysMin:
-                        dto.shippingAddress.carrierQuote?.daysMin ??
-                        quotePayload?.daysMin ??
-                        null,
-                      daysMax:
-                        dto.shippingAddress.carrierQuote?.daysMax ??
-                        quotePayload?.daysMax ??
-                        null,
-                      source: 'checkout',
-                      estimatedAt: new Date().toISOString(),
-                      quoteExp: quotePayload?.exp,
+                : needsAddressClarification
+                  ? {
+                      city: city || '—',
+                      address: address || 'Адрес уточнит оператор',
+                      apartment:
+                        dto.shippingAddress.apartment?.trim() || '',
+                      region: dto.shippingAddress.region?.trim() || '',
+                      district: dto.shippingAddress.district?.trim() || '',
+                      comment: createComment,
+                      postalCode:
+                        dto.shippingAddress.postalCode?.trim() || '',
+                      phone: dto.shippingAddress.phone?.trim() || undefined,
+                      recipientName:
+                        dto.shippingAddress.recipientName?.trim() ||
+                        undefined,
+                    }
+                  : {
+                      city,
+                      address,
+                      apartment: dto.shippingAddress.apartment?.trim() || '',
+                      region: dto.shippingAddress.region?.trim() || '',
+                      district: dto.shippingAddress.district?.trim() || '',
+                      comment: createComment,
+                      postalCode: dto.shippingAddress.postalCode?.trim() || '',
+                      pvzCode: createPvzCode || undefined,
+                      phone: dto.shippingAddress.phone?.trim() || undefined,
+                      recipientName:
+                        dto.shippingAddress.recipientName?.trim() || undefined,
+                      carrierQuote: {
+                        cost: shippingCost,
+                        method: shippingMethod,
+                        freePvz: Boolean(quotePayload?.freePvz),
+                        tariffId:
+                          dto.shippingAddress.carrierQuote?.tariffId ??
+                          quotePayload?.tariffId ??
+                          null,
+                        tariffName:
+                          dto.shippingAddress.carrierQuote?.tariffName ??
+                          quotePayload?.tariffName ??
+                          null,
+                        daysMin:
+                          dto.shippingAddress.carrierQuote?.daysMin ??
+                          quotePayload?.daysMin ??
+                          null,
+                        daysMax:
+                          dto.shippingAddress.carrierQuote?.daysMax ??
+                          quotePayload?.daysMax ??
+                          null,
+                        source: 'checkout',
+                        estimatedAt: new Date().toISOString(),
+                        quoteExp: quotePayload?.exp,
+                      },
                     },
-                  },
               giftPurchaseDenominationId: (() => {
                 for (const l of itemsForOrder) {
                   const denomId = parseGiftDenomCartVariantId(l.variantId);
@@ -1028,6 +1078,10 @@ export class OrdersPublicService {
       order.status !== OrderStatus.NEW
     ) {
       throw new BadRequestException('Заказ нельзя оплатить в текущем статусе');
+    }
+
+    if (order.needsAddressClarification) {
+      throw new BadRequestException('Оператор уточняет адрес');
     }
 
     if (order.total <= 0) {

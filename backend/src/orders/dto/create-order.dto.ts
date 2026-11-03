@@ -250,4 +250,12 @@ export class CreateOrderDto {
   @Min(0)
   @Max(500_000)
   shippingCost?: number;
+
+  /**
+   * Клиент не нашёл адрес в виджетах — заказ без shippingQuote / без оплаты на витрине.
+   * shippingCost = 0, shippingMethod = null, status AWAITING_PAYMENT.
+   */
+  @IsOptional()
+  @IsBoolean()
+  needsAddressClarification?: boolean;
 }

@@ -53,7 +53,9 @@ export function OrdersListClient() {
   const [status, setStatus] = useState('');
   const [unviewedOnly, setUnviewedOnly] = useState(false);
   const [overdueOnly, setOverdueOnly] = useState(false);
+  const [clarificationOnly, setClarificationOnly] = useState(false);
   const [overdueCount, setOverdueCount] = useState(0);
+  const [clarificationCount, setClarificationCount] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [fetching, setFetching] = useState(false);
@@ -81,6 +83,7 @@ export function OrdersListClient() {
       if (status) sp.set('status', status);
       if (unviewedOnly) sp.set('unviewed', '1');
       if (overdueOnly) sp.set('overdue', '1');
+      if (clarificationOnly) sp.set('clarification', '1');
       const res = await adminBackendJson<AdminOrderListResponse>(
         `orders/admin?${sp}`,
       );
@@ -96,7 +99,7 @@ export function OrdersListClient() {
       setLoading(false);
       if (!soft) setFetching(false);
     }
-  }, [page, qDebounced, status, unviewedOnly, overdueOnly]);
+  }, [page, qDebounced, status, unviewedOnly, overdueOnly, clarificationOnly]);
 
   useEffect(() => {
     void load();
@@ -113,14 +116,27 @@ export function OrdersListClient() {
     }
   }, []);
 
+  const refreshClarificationCount = useCallback(async () => {
+    try {
+      const res = await adminBackendJson<{ count: number }>(
+        'orders/admin/address-clarification-count',
+      );
+      setClarificationCount(Math.max(0, res.count ?? 0));
+    } catch {
+      /* leave previous count */
+    }
+  }, []);
+
   useEffect(() => {
     void refreshOverdueCount();
-  }, [refreshOverdueCount, data]);
+    void refreshClarificationCount();
+  }, [refreshOverdueCount, refreshClarificationCount, data]);
 
   useEffect(() => {
     const onRefresh = () => {
       void load({ soft: true });
       void refreshOverdueCount();
+      void refreshClarificationCount();
     };
     document.addEventListener(CHAT_UNREAD_REFRESH_EVENT, onRefresh);
     document.addEventListener(ADMIN_ORDERS_UNVIEWED_REFRESH_EVENT, onRefresh);
@@ -128,15 +144,17 @@ export function OrdersListClient() {
       document.removeEventListener(CHAT_UNREAD_REFRESH_EVENT, onRefresh);
       document.removeEventListener(ADMIN_ORDERS_UNVIEWED_REFRESH_EVENT, onRefresh);
     };
-  }, [load, refreshOverdueCount]);
+  }, [load, refreshOverdueCount, refreshClarificationCount]);
 
   const items = data?.items ?? [];
 
   const shouldSoftPoll = useMemo(() => {
-    if (overdueOnly || status === 'AWAITING_PAYMENT') return true;
+    if (overdueOnly || clarificationOnly || status === 'AWAITING_PAYMENT') return true;
     if (status) return false;
-    return items.some((o) => o.status === 'AWAITING_PAYMENT');
-  }, [items, status, overdueOnly]);
+    return items.some(
+      (o) => o.status === 'AWAITING_PAYMENT' || o.needsAddressClarification,
+    );
+  }, [items, status, overdueOnly, clarificationOnly]);
 
   useEffect(() => {
     if (!shouldSoftPoll) return;
@@ -168,11 +186,13 @@ export function OrdersListClient() {
         onRetry={() => void load()}
         loadingLabel="Загрузка заказов…"
         empty={
-          overdueOnly
-            ? 'Нет просроченных неоплаченных заказов'
-            : unviewedOnly
-              ? 'Нет непросмотренных оплаченных заказов'
-              : 'Заказов пока нет'
+          clarificationOnly
+            ? 'Нет заказов с адресом на уточнении'
+            : overdueOnly
+              ? 'Нет просроченных неоплаченных заказов'
+              : unviewedOnly
+                ? 'Нет непросмотренных оплаченных заказов'
+                : 'Заказов пока нет'
         }
         isEmpty={!loading && items.length === 0}
         isFetching={fetching}
@@ -217,7 +237,10 @@ export function OrdersListClient() {
                 disabled={fetching}
                 onClick={() => {
                   setOverdueOnly((v) => !v);
-                  if (!overdueOnly) setUnviewedOnly(false);
+                  if (!overdueOnly) {
+                    setUnviewedOnly(false);
+                    setClarificationOnly(false);
+                  }
                   setPage(1);
                 }}
               >
@@ -228,6 +251,32 @@ export function OrdersListClient() {
                   }`}
                 >
                   {overdueCount > 99 ? '99+' : overdueCount}
+                </span>
+              </button>
+              <button
+                type="button"
+                className={`${styles.orderUnviewedChip} ${
+                  clarificationOnly ? styles.orderUnviewedChipActive : ''
+                }`}
+                aria-pressed={clarificationOnly}
+                title="Клиент не нашёл адрес на чекауте — нужно уточнить доставку и выставить оплату"
+                disabled={fetching}
+                onClick={() => {
+                  setClarificationOnly((v) => !v);
+                  if (!clarificationOnly) {
+                    setOverdueOnly(false);
+                    setUnviewedOnly(false);
+                  }
+                  setPage(1);
+                }}
+              >
+                Нужен адрес
+                <span
+                  className={`${styles.orderUnviewedChipCount} ${
+                    clarificationCount < 1 ? styles.orderUnviewedChipCountZero : ''
+                  }`}
+                >
+                  {clarificationCount > 99 ? '99+' : clarificationCount}
                 </span>
               </button>
               {unviewedSidebarCount > 0 || unviewedOnly ? (
@@ -241,7 +290,10 @@ export function OrdersListClient() {
                   disabled={fetching}
                   onClick={() => {
                     setUnviewedOnly((v) => !v);
-                    if (!unviewedOnly) setOverdueOnly(false);
+                    if (!unviewedOnly) {
+                      setOverdueOnly(false);
+                      setClarificationOnly(false);
+                    }
                     setPage(1);
                   }}
                 >
@@ -305,6 +357,20 @@ export function OrdersListClient() {
                         title="Новый оплаченный заказ — откройте карточку, чтобы снять уведомление"
                         aria-hidden
                       />
+                    ) : null}
+                    {o.needsAddressClarification ? (
+                      <span
+                        className={styles.addressClarificationIcon}
+                        title="Нужно уточнить адрес доставки"
+                        aria-label="Нужно уточнить адрес доставки"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                          <path
+                            d="M12 2.5c-3.6 0-6.5 2.85-6.5 6.35 0 4.55 5.4 10.7 6.1 11.45a.55.55 0 0 0 .8 0c.7-.75 6.1-6.9 6.1-11.45C18.5 5.35 15.6 2.5 12 2.5Zm0 8.75a2.4 2.4 0 1 1 0-4.8 2.4 2.4 0 0 1 0 4.8Z"
+                            fill="currentColor"
+                          />
+                        </svg>
+                      </span>
                     ) : null}
                     <span>{o.number}</span>
                   </Link>

@@ -168,12 +168,27 @@ export function OrderDetailClient({
       previousTotal?: number;
       newTotal?: number;
       pendingPaymentsCanceled?: boolean;
+      addressClarificationCleared?: boolean;
+      needsAddressClarification?: boolean;
     },
     baseMsg: string,
   ) {
     if (row.pendingPaymentsCanceled) {
       // CTA «новая ссылка» откроет offerSettleDelta — короткий flash.
       showFlash(`${baseMsg} Старые ссылки ЮKassa отменены.`, 4000);
+      return;
+    }
+    if (row.addressClarificationCleared) {
+      showFlash(`${baseMsg} Можно выставить ссылку на оплату.`, 4000);
+      return;
+    }
+    // Cost-only / правка без method+marker: flag намеренно остаётся —
+    // без этого ops думает, что «доставка готова», а оплата всё ещё заблокирована.
+    if (row.needsAddressClarification) {
+      showFlash(
+        `${baseMsg} Адрес ещё не уточнён — выберите перевозчика в «Адрес», иначе оплату не выставить.`,
+        5600,
+      );
       return;
     }
     showFlash(baseMsg);
@@ -348,6 +363,8 @@ export function OrderDetailClient({
     balanceDue?: number;
     refundSuggested?: number;
     pendingPaymentsCanceled?: boolean;
+    /** Админ уточнил адрес — флаг needsAddressClarification снят. */
+    addressClarificationCleared?: boolean;
     surcharge?: { amount: number; confirmationUrl: string; paymentId: string };
     checkout?: { amount: number; confirmationUrl: string; paymentId: string };
   };
@@ -359,11 +376,19 @@ export function OrderDetailClient({
       row.status === 'AWAITING_PAYMENT' || row.status === 'NEW';
     const checkoutAmount = row.newTotal ?? row.total;
 
-    // После cancel PENDING неоплаченного — CTA новой ссылки (surcharge только для PAID).
-    if (unpaid && row.pendingPaymentsCanceled && checkoutAmount > 0) {
+    // Unpaid: после cancel PENDING или после снятия clarification — всегда CTA ссылки.
+    // (У clarification-заказов pending обычно нет — иначе CTA не всплывал.)
+    if (
+      unpaid &&
+      checkoutAmount > 0 &&
+      (row.pendingPaymentsCanceled || row.addressClarificationCleared)
+    ) {
+      const message = row.pendingPaymentsCanceled
+        ? `Старые ссылки ЮKassa отменены. Выставить клиенту новую ссылку на оплату ${formatAdminMoney(checkoutAmount)}? Письмо уйдёт автоматически.`
+        : `Адрес уточнён. Выставить клиенту ссылку на оплату ${formatAdminMoney(checkoutAmount)}? Письмо уйдёт автоматически.`;
       askConfirm({
-        title: 'Новая ссылка на оплату',
-        message: `Старые ссылки ЮKassa отменены. Выставить клиенту новую ссылку на оплату ${formatAdminMoney(checkoutAmount)}? Письмо уйдёт автоматически.`,
+        title: 'Ссылка на оплату',
+        message,
         confirmLabel: 'Выставить оплату',
         run: async () => {
           setBusy(true);
@@ -730,6 +755,20 @@ export function OrderDetailClient({
         <div>
           <h1 className={styles.title}>
             Заказ {order.number}
+            {order.needsAddressClarification ? (
+              <span
+                className={styles.addressClarificationIcon}
+                title="Нужно уточнить адрес доставки"
+                aria-label="Нужно уточнить адрес доставки"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M12 2.5c-3.6 0-6.5 2.85-6.5 6.35 0 4.55 5.4 10.7 6.1 11.45a.55.55 0 0 0 .8 0c.7-.75 6.1-6.9 6.1-11.45C18.5 5.35 15.6 2.5 12 2.5Zm0 8.75a2.4 2.4 0 1 1 0-4.8 2.4 2.4 0 0 1 0 4.8Z"
+                    fill="currentColor"
+                  />
+                </svg>
+              </span>
+            ) : null}
             {order.giftPurchaseDenominationId ? (
               <span className={styles.badgeCert} title="Покупка подарочного сертификата">
                 Сертификат
@@ -788,6 +827,13 @@ export function OrderDetailClient({
           <strong>Деньги списаны, заказ отменён</strong>
           Автовозврат через ЮKassa не удался. Проверьте платёж в ЛК ЮKassa и
           оформите возврат вручную.
+        </div>
+      ) : null}
+      {order?.needsAddressClarification ? (
+        <div className={styles.orderAlertDanger} role="alert">
+          <strong>Уточните адрес доставки</strong>
+          Клиент не нашёл адрес на чекауте. Добавьте доставку и отправьте ссылку на
+          оплату.
         </div>
       ) : null}
       {error ? (

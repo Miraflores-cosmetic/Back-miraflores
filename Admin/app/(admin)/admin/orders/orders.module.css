@@ -654,6 +654,15 @@
   box-shadow: 0 0 0 2px rgba(41, 114, 48, 0.18);
 }
 
+.addressClarificationIcon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #c62828;
+  line-height: 0;
+}
+
 .orderUnviewedChip {
   display: inline-flex;
   align-items: center;

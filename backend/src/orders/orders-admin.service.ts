@@ -20,6 +20,7 @@ import { scheduleAfterRlsCommitWithBypass } from '../rls/rls-after-commit';
 import { restoreStockOnPaidCancel } from './order-stock';
 import { adjustStockForItemEdit } from './order-item-stock-edit';
 import { lockOrderForUpdate } from './order-lock';
+import { isClarificationComment } from './address-clarification';
 import { applyPaidInTx } from './mark-order-paid';
 import { cancelUnpaidOrderInTx } from './cancel-unpaid-order';
 import { CarrierShipmentService } from './carrier-shipment.service';
@@ -184,6 +185,8 @@ export class OrdersAdminService {
       unviewedOnly?: boolean;
       /** AWAITING/NEW старше ORDER_AWAITING_TTL — SLA, hold stock/gift до ручной отмены. */
       overdueOnly?: boolean;
+      /** Ops backlog: клиент не нашёл адрес — нужно уточнить доставку. */
+      clarificationOnly?: boolean;
     } = {},
   ) {
     const page = Math.max(1, opts.page ?? 1);
@@ -201,6 +204,9 @@ export class OrdersAdminService {
     }
     if (opts.overdueOnly) {
       where = { AND: [where, this.awaitingPaymentOverdueWhere()] };
+    }
+    if (opts.clarificationOnly) {
+      where = { AND: [where, this.addressClarificationWhere()] };
     }
 
     const [total, rows] = await this.prisma.$transaction([
@@ -223,6 +229,7 @@ export class OrdersAdminService {
           createdAt: true,
           awaitingPaymentRemindStage: true,
           shippingMethod: true,
+          needsAddressClarification: true,
           adminViewedAt: true,
           shipments: { select: { provider: true, tracking: true, carrierCostRub: true } },
         },
@@ -302,6 +309,14 @@ export class OrdersAdminService {
     return { count };
   }
 
+  /** Unpaid с needsAddressClarification — backlog «нужен адрес». */
+  async addressClarificationCount() {
+    const count = await this.prisma.order.count({
+      where: this.addressClarificationWhere(),
+    });
+    return { count };
+  }
+
   private awaitingPaymentOverdueWhere(): Prisma.OrderWhereInput {
     const schedule = resolveAwaitingRemindSchedule({
       get: (k) => this.config.get<string>(k),
@@ -310,6 +325,13 @@ export class OrdersAdminService {
     return {
       status: { in: [OrderStatus.AWAITING_PAYMENT, OrderStatus.NEW] },
       createdAt: { lte: cutoff },
+    };
+  }
+
+  private addressClarificationWhere(): Prisma.OrderWhereInput {
+    return {
+      needsAddressClarification: true,
+      status: { in: [OrderStatus.AWAITING_PAYMENT, OrderStatus.NEW] },
     };
   }
 
@@ -358,6 +380,7 @@ export class OrdersAdminService {
         shippingAddress: true,
         shippingMethod: true,
         shippingCost: true,
+        needsAddressClarification: true,
         subtotal: true,
         discountTotal: true,
         giftCertificateAmount: true,
@@ -564,6 +587,7 @@ export class OrdersAdminService {
         : null,
       shippingMethod: order.shippingMethod,
       shippingCost: order.shippingCost,
+      needsAddressClarification: Boolean(order.needsAddressClarification),
       subtotal: order.subtotal,
       discountTotal: order.discountTotal,
       giftCertificateAmount: order.giftCertificateAmount,
@@ -675,7 +699,8 @@ export class OrdersAdminService {
       }),
       actions: {
         canCancel: canCancel(order.status),
-        canMarkPaid: canMarkPaid(order.status),
+        canMarkPaid:
+          canMarkPaid(order.status) && !order.needsAddressClarification,
         canStartPacking: canStartPacking(order.status),
         canShip: canShip(order.status),
         canSendTracking: canSendTracking(order.status),
@@ -695,7 +720,8 @@ export class OrdersAdminService {
           canEditCore &&
           isUnpaidEditableStatus(order.status) &&
           !order.giftPurchaseDenominationId &&
-          order.total > 0,
+          order.total > 0 &&
+          !order.needsAddressClarification,
         canRemovePromo:
           canEditCore &&
           !order.giftPurchaseDenominationId &&
@@ -749,6 +775,16 @@ export class OrdersAdminService {
     opts: { notifyCustomer?: boolean } = {},
   ) {
     const notifyCustomer = opts.notifyCustomer !== false;
+    const existing = await this.prisma.order.findUnique({
+      where: { id },
+      select: { needsAddressClarification: true, status: true },
+    });
+    if (!existing) throw new NotFoundException('Заказ не найден');
+    if (existing.needsAddressClarification) {
+      throw new BadRequestException(
+        'Сначала уточните адрес доставки, затем отметьте заказ оплаченным',
+      );
+    }
     const result = await this.prisma.$transaction(async (tx) => {
       return applyPaidInTx(tx, this.lifecycle, id, {
         kind: 'admin',
@@ -1852,6 +1888,7 @@ export class OrdersAdminService {
     let pendingExternalIds: string[] = [];
     let previousTotal = 0;
     let newTotal = 0;
+    let addressClarificationCleared = false;
 
     await this.prisma.$transaction(async (tx) => {
       await lockOrderForUpdate(tx, id);
@@ -1966,6 +2003,20 @@ export class OrdersAdminService {
         shippingCost,
       });
 
+      /**
+       * Снимаем flag только при реальном перевозчике + без marker.
+       * Cost-only / адрес без shippingMethod (и без JCOS meta → method) —
+       * намеренно не трогаем: иначе «поправили сумму» обойдёт ops-alert.
+       * Admin UI адреса всегда шлёт method+JCOS; API/cost-only — легко промахнуться.
+       */
+      const clearClarification =
+        order.needsAddressClarification &&
+        Boolean(shippingMethod) &&
+        !isClarificationComment(after.comment);
+      if (clearClarification) {
+        addressClarificationCleared = true;
+      }
+
       await tx.order.update({
         where: { id },
         data: {
@@ -1973,6 +2024,7 @@ export class OrdersAdminService {
           shippingMethod,
           shippingCost,
           total: newTotal,
+          ...(clearClarification ? { needsAddressClarification: false } : {}),
           ...(after.phone ? { phone: after.phone } : {}),
         },
       });
@@ -2043,6 +2095,7 @@ export class OrdersAdminService {
       balanceDue: detail.balanceDue,
       refundSuggested: detail.refundSuggested,
       pendingPaymentsCanceled: pendingExternalIds.length > 0,
+      addressClarificationCleared,
     };
   }
 
@@ -2446,6 +2499,11 @@ export class OrdersAdminService {
     if (order.giftPurchaseDenominationId) {
       throw new BadRequestException(
         'Для заказа сертификата оплата через эту кнопку недоступна',
+      );
+    }
+    if (order.needsAddressClarification) {
+      throw new BadRequestException(
+        'Сначала уточните адрес доставки, затем выставьте ссылку на оплату',
       );
     }
     assertOrderEditable(order.status);

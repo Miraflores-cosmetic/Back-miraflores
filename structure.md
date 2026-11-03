@@ -144,6 +144,7 @@ Miraflores 3.0/
 - Checkout `abandon` — без email; pay_url ≠ profile; **admin / ЛК** — `order_cancelled` (не авто-TTL).
 - **ЛК оплата:** `canPay` = статус AWAITING/NEW; `payExpiresAt` = null (без hard cutoff). `buyerOrderCanPayNow` не смотрит TTL. HMAC `payToken` — 30 суток (`OrderPayTokenService`), не `ORDER_AWAITING_TTL`.
 - **Stock + gift CAPTURE:** держатся до `cancelUnpaidOrderInTx` (admin / ЛК / checkout abandon). Soft-release по TTL нет. Админ: фильтр `?overdue=1` + счётчик `GET orders/admin/awaiting-overdue-count` (SLA = `ORDER_AWAITING_TTL`). Копирайт hold: `Admin/lib/giftHoldCopy.ts`.
+- **Address clarification (Front `/order` only):** кнопка «Не удалось найти адрес» → заказ `needsAddressClarification` без quote/оплаты; admin: chip «Нужен адрес», red pin, CTA ссылки после clear. **Guest** — guest draft (localStorage); **logged-in** — ephemeral `sessionStorage` (`checkoutClarificationDraft`), **не** Saleor account addresses (cross-device не синкаем осознанно). **Admin `(site)/checkout` — без паритета** (не портируем; ops оформляет через Front или правит адрес в карточке заказа).
 - **Дубли админу:** `ORDER_ADMIN_NOTIFY_EMAIL` (default `mira-robot@…`) — создан / оплачен / отменён / возврат; тот же env — inbound chat (см. ниже).
 
 Шаблоны писем: Админка → Настройки → Email. Подробно: [docs/emails.md](./docs/emails.md).

@@ -818,6 +818,8 @@ model Order {
   pricingContext   String?
   /// Сколько писем «ожидает оплаты» уже ушло: 0 → 5м → 24ч → 48ч (финал 72ч = отмена)
   awaitingPaymentRemindStage Int @default(0)
+  /// Checkout: клиент не нашёл адрес — оператор уточнит; без quote/оплаты на витрине
+  needsAddressClarification Boolean @default(false)
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
   chatConversation ChatConversation?

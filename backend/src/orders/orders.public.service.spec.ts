@@ -599,6 +599,28 @@ describe('OrdersPublicService', () => {
         service.createPayment('ord1', { buyerUserId: 'other' }),
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
+
+    it('needsAddressClarification → отказ оплаты', async () => {
+      const token = payTokens.issue('ord1', 'guest-1');
+      order.findUnique.mockResolvedValue({
+        id: 'ord1',
+        number: 'JCOS-1',
+        guestId: 'guest-1',
+        userId: null,
+        email: 'a@b.co',
+        status: OrderStatus.AWAITING_PAYMENT,
+        total: 500,
+        needsAddressClarification: true,
+        giftPurchaseDenominationId: null,
+        items: [{ title: 'Item', qty: 1, unitPrice: 500 }],
+        payments: [],
+      });
+
+      await expect(
+        service.createPayment('ord1', { payToken: token }),
+      ).rejects.toThrow(/Оператор уточняет адрес/);
+      expect(yookassa.createEmbeddedPayment).not.toHaveBeenCalled();
+    });
   });
 
   describe('abandon', () => {

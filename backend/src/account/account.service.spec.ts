@@ -258,6 +258,7 @@ describe('AccountService', () => {
       giftCertificateCode: null,
       giftCertificateAmount: 0,
       guestId: 'guest-1',
+      needsAddressClarification: false,
       createdAt: new Date(Date.now() - 10 * 24 * 60 * 60_000),
       items: [],
     });
@@ -266,6 +267,37 @@ describe('AccountService', () => {
     expect(res.canPay).toBe(true);
     expect(res.payExpiresAt).toBeNull();
     expect(res.payToken).toBe('tok');
+  });
+
+  it('getOrder: needsAddressClarification → canPay=false, без payToken', async () => {
+    prisma.order.findFirst.mockResolvedValue({
+      id: 'o-clar',
+      number: 'J-clar',
+      status: 'AWAITING_PAYMENT',
+      email: 'a@b.c',
+      phone: '+79001112233',
+      customerName: 'Ann',
+      shippingAddress: { city: '—', address: 'Адрес уточнит оператор' },
+      shippingCost: 0,
+      subtotal: 1000,
+      discountTotal: 0,
+      total: 1000,
+      refundedAmount: 0,
+      promoCode: null,
+      giftCertificateCode: null,
+      giftCertificateAmount: 0,
+      guestId: 'guest-1',
+      needsAddressClarification: true,
+      createdAt: new Date(),
+      items: [],
+    });
+
+    const res = await svc.getOrder('u1', 'o-clar');
+    expect(res.needsAddressClarification).toBe(true);
+    expect(res.canPay).toBe(false);
+    expect(res.payToken).toBeNull();
+    expect(res.canCancel).toBe(true);
+    expect(payTokens.issue).not.toHaveBeenCalled();
   });
 
   it('getOrder → NotFound если заказ не найден', async () => {

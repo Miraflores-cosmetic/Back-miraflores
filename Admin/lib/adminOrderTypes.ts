@@ -36,6 +36,8 @@ export type AdminOrderListItem = {
   chatMessageCount?: number;
   /** null — не Ozon; иначе операционные флаги для бейджей. */
   ozon?: { noTrack: boolean; noCost: boolean } | null;
+  /** Клиент не нашёл адрес — нужно уточнить доставку. */
+  needsAddressClarification?: boolean;
   /** Интервалы напоминаний / 72ч для AWAITING_PAYMENT. */
   awaitingPayment?: AdminAwaitingPaymentTimeline | null;
 };
@@ -140,6 +142,8 @@ export type AdminOrderDetail = {
   shippingAddress: AdminOrderShippingAddress | null;
   shippingMethod?: string | null;
   shippingCost: number;
+  /** Клиент не нашёл адрес на чекауте — оператор уточняет доставку. */
+  needsAddressClarification?: boolean;
   subtotal: number;
   discountTotal: number;
   giftCertificateAmount?: number;

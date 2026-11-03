@@ -69,6 +69,7 @@ export async function claimAwaitingPaymentRemindCandidates(
     FROM "Order"
     WHERE status IN ('AWAITING_PAYMENT'::"OrderStatus", 'NEW'::"OrderStatus")
       AND total > 0
+      AND "needsAddressClarification" = false
       AND "awaitingPaymentRemindStage" < 3
       AND BTRIM(email) <> ''
       AND (
@@ -96,6 +97,7 @@ export async function countDueAwaitingPaymentReminders(
     FROM "Order"
     WHERE status IN ('AWAITING_PAYMENT'::"OrderStatus", 'NEW'::"OrderStatus")
       AND total > 0
+      AND "needsAddressClarification" = false
       AND "awaitingPaymentRemindStage" < 3
       AND BTRIM(email) <> ''
       AND (

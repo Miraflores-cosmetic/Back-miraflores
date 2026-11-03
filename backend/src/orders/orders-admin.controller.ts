@@ -59,11 +59,14 @@ export class OrdersAdminController {
     @Query('flag') flag?: string,
     @Query('unviewed') unviewed?: string,
     @Query('overdue') overdue?: string,
+    @Query('clarification') clarification?: string,
   ) {
     const unviewedOnly =
       unviewed === '1' || unviewed?.trim().toLowerCase() === 'true';
     const overdueOnly =
       overdue === '1' || overdue?.trim().toLowerCase() === 'true';
+    const clarificationOnly =
+      clarification === '1' || clarification?.trim().toLowerCase() === 'true';
     return this.orders.list({
       q,
       status,
@@ -73,6 +76,7 @@ export class OrdersAdminController {
       flag,
       unviewedOnly,
       overdueOnly,
+      clarificationOnly,
     });
   }
 
@@ -84,6 +88,11 @@ export class OrdersAdminController {
   @Get('awaiting-overdue-count')
   awaitingPaymentOverdueCount() {
     return this.orders.awaitingPaymentOverdueCount();
+  }
+
+  @Get('address-clarification-count')
+  addressClarificationCount() {
+    return this.orders.addressClarificationCount();
   }
 
   @Get('ozon-flags')
