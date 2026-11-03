@@ -38,7 +38,6 @@ describe('AccountService', () => {
   let prisma: ReturnType<typeof makePrisma>;
   let payTokens: {
     issue: ReturnType<typeof vi.fn>;
-    awaitingTtlMinutes: ReturnType<typeof vi.fn>;
   };
   let svc: AccountService;
 
@@ -47,7 +46,6 @@ describe('AccountService', () => {
     prisma = makePrisma(tx);
     payTokens = {
       issue: vi.fn().mockReturnValue('tok'),
-      awaitingTtlMinutes: vi.fn().mockReturnValue(60),
     };
     svc = new AccountService(prisma as never, payTokens as never, {
       cancelPaymentsBestEffort: vi.fn(async () => undefined),
@@ -206,7 +204,7 @@ describe('AccountService', () => {
     expect(res.payToken).toBe('tok');
     expect(res.canCancel).toBe(true);
     expect(res.canPay).toBe(true);
-    expect(res.payExpiresAt).toBeTruthy();
+    expect(res.payExpiresAt).toBeNull();
     expect(payTokens.issue).toHaveBeenCalledWith('o1', 'guest-1');
     expect(res.shippingAddress).toEqual(
       expect.objectContaining({ city: 'Москва', address: 'Тверская 1' }),
@@ -238,8 +236,36 @@ describe('AccountService', () => {
     expect(res).toHaveLength(1);
     expect(res[0].canPay).toBe(true);
     expect(res[0].payToken).toBe('tok');
-    expect(res[0].payExpiresAt).toBeTruthy();
+    expect(res[0].payExpiresAt).toBeNull();
     expect(payTokens.issue).toHaveBeenCalled();
+  });
+
+  it('getOrder canPay после «TTL» (старший заказ) — без payExpiresAt cutoff', async () => {
+    prisma.order.findFirst.mockResolvedValue({
+      id: 'o-old',
+      number: 'J-old',
+      status: 'AWAITING_PAYMENT',
+      email: 'a@b.c',
+      phone: '+79001112233',
+      customerName: 'Ann',
+      shippingAddress: { city: 'Москва', address: 'Тверская 1' },
+      shippingCost: 0,
+      subtotal: 1000,
+      discountTotal: 0,
+      total: 1000,
+      refundedAmount: 0,
+      promoCode: null,
+      giftCertificateCode: null,
+      giftCertificateAmount: 0,
+      guestId: 'guest-1',
+      createdAt: new Date(Date.now() - 10 * 24 * 60 * 60_000),
+      items: [],
+    });
+
+    const res = await svc.getOrder('u1', 'o-old');
+    expect(res.canPay).toBe(true);
+    expect(res.payExpiresAt).toBeNull();
+    expect(res.payToken).toBe('tok');
   });
 
   it('getOrder → NotFound если заказ не найден', async () => {

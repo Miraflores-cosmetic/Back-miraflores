@@ -171,9 +171,6 @@ export function AccountOrderDetailClient({ orderId }: Props) {
 
   const canPay = !paid && buyerOrderCanPayNow(order);
   const showWidget = payment.showWidget;
-  const payExpiresLabel = order.payExpiresAt
-    ? formatOrderDate(order.payExpiresAt)
-    : null;
 
   const shipment = order.shipments?.[0];
   const tracking = shipment?.tracking?.trim() || '';
@@ -233,12 +230,6 @@ export function AccountOrderDetailClient({ orderId }: Props) {
             </p>
           ) : null}
         </div>
-      ) : null}
-
-      {canPay && payExpiresLabel ? (
-        <p className={styles.orderMetaComment}>
-          Оплатите до {payExpiresLabel}, иначе заказ будет отменён автоматически.
-        </p>
       ) : null}
 
       {canPay && (order.giftCertificateAmount ?? 0) > 0 ? (

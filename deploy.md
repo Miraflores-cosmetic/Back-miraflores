@@ -127,20 +127,22 @@ git push origin main
 
 | Env | Рекомендация prod | Смысл |
 |-----|-------------------|--------|
-| `ORDER_AWAITING_TTL_MINUTES` | `4320` (72 ч) | авто-отмена неоплаченных |
+| `ORDER_AWAITING_TTL_MINUTES` | `4320` (72 ч) | порог «просрочено» в админке; **авто-отмена отключена** |
 | `ORDER_PAY_REMIND_1_MINUTES` | `5` (или оставить default) | 1-е напоминание |
 | `ORDER_PAY_REMIND_2_MINUTES` | `1440` | 24 ч |
-| `ORDER_PAY_REMIND_3_MINUTES` | `2880` | 48 ч + дата отмены в письме |
+| `ORDER_PAY_REMIND_3_MINUTES` | `2880` | 48 ч |
 
-Воркер в API: tick **1 мин** (`OrdersExpiryWorker`) → remind, затем expire. Catch-up после даунтайма: одно письмо — высший overdue stage (см. docs/emails.md).
+Воркер в API: tick **1 мин** (`OrdersExpiryWorker`) → только remind (expire scaffolding удалён). Catch-up после даунтайма: одно письмо — высший overdue stage (см. [docs/emails.md](docs/emails.md)).
+
+После 72 ч без оплаты: красные чипы + фильтр «Просрочена оплата» (`?overdue=1`); stock/gift hold до ручной отмены.
 
 Backlog remind: due > `ORDER_PAY_REMIND_BACKLOG_ALERT` (default 100) → `OPS_ALERT awaiting_remind_backlog`.  
-Backlog expire: due > `ORDER_AWAITING_EXPIRE_BACKLOG_ALERT` (default 50) → `OPS_ALERT awaiting_expire_backlog`.
+`ORDER_AWAITING_EXPIRE_BACKLOG_ALERT` — dead (не задавать).
 
 ```bash
-grep -E '^(ORDER_AWAITING_TTL|ORDER_PAY_REMIND|ORDER_AWAITING_EXPIRE)' /opt/miraflores/backend/.env
+grep -E '^(ORDER_AWAITING_TTL|ORDER_PAY_REMIND)' /opt/miraflores/backend/.env
 journalctl -u miraflores-api --since "1 hour ago" --no-pager \
-  | grep -iE "awaiting-payment reminder|awaiting_remind_backlog|awaiting_expire_backlog|Expired .* awaiting"
+  | grep -iE "awaiting-payment reminder|awaiting_remind_backlog"
 ```
 
 Проверка приглашений сотрудников:

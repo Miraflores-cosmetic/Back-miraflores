@@ -26,7 +26,6 @@ export const EMAIL_IF_ALLOWED_KEYS = [
   'order.changes_summary',
   'order.refund_intro',
   'order.refund_label',
-  'order.cancel_at_label',
   'order.cancel_reason',
   'gift.items_text',
   'gift.items_html',

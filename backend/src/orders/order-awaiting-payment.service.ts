@@ -1,28 +1,20 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { OrderStatus, Prisma } from '@prisma/client';
-import { OrderChatService } from '../order-chat/order-chat.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { scheduleAfterRlsCommitWithBypass } from '../rls/rls-after-commit';
-import { YourichSyncService } from '../yourich/yourich-sync.service';
-import { cancelUnpaidOrderInTx } from './cancel-unpaid-order';
 import {
-  formatCancelAtLabel,
   nextAwaitingRemindStage,
   paymentRemindEventMessage,
   resolveAwaitingRemindSchedule,
   skippedAwaitingRemindStages,
 } from './order-awaiting-payment-schedule';
 import {
-  AWAITING_PAYMENT_EXPIRE_BATCH,
   AWAITING_PAYMENT_REMIND_BATCH,
   claimAwaitingPaymentRemindCandidates,
   countDueAwaitingPaymentReminders,
-  lockOrderForUpdate,
 } from './order-lock';
 import { OrderLifecycleService } from './order-lifecycle.service';
 import { OrderPayTokenService } from './order-pay-token.service';
-import { YooKassaService } from './yookassa.service';
 
 /** Throttle OPS email при backlog (мс). */
 const BACKLOG_ALERT_THROTTLE_MS = 60 * 60 * 1000;
@@ -38,7 +30,8 @@ type RemindOutboxMeta = {
 };
 
 /**
- * Напоминания об оплате + авто-отмена AWAITING_PAYMENT по TTL.
+ * Напоминания об оплате (5м / 24ч / 48ч). Авто-отмена по TTL отключена —
+ * только ручная отмена админом; 72ч — порог «просрочено» в UI.
  * Outbox: bump + PAYMENT_REMIND(mailStatus=pending) в tx → SMTP → mark sent;
  * при fail SMTP stage уже bumped, retry по pending events (без дубля stage).
  */
@@ -46,16 +39,12 @@ type RemindOutboxMeta = {
 export class OrderAwaitingPaymentService {
   private readonly logger = new Logger(OrderAwaitingPaymentService.name);
   private lastRemindBacklogAlertAt = 0;
-  private lastExpireBacklogAlertAt = 0;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly lifecycle: OrderLifecycleService,
     private readonly payTokens: OrderPayTokenService,
-    private readonly yookassa: YooKassaService,
-    private readonly orderChat: OrderChatService,
-    @Optional() private readonly yourichSync?: YourichSyncService,
   ) {}
 
   /** Сколько заказов due на remind (метрика backlog). */
@@ -63,27 +52,11 @@ export class OrderAwaitingPaymentService {
     const schedule = resolveAwaitingRemindSchedule({
       get: (k) => this.config.get<string>(k),
     });
-    const ttlCutoff = new Date(now.getTime() - schedule.ttlMinutes * 60_000);
     return countDueAwaitingPaymentReminders(this.prisma, {
       now,
-      ttlCutoff,
       remind1Minutes: schedule.remind1Minutes,
       remind2Minutes: schedule.remind2Minutes,
       remind3Minutes: schedule.remind3Minutes,
-    });
-  }
-
-  /** Сколько заказов старше TTL (очередь expire). */
-  async countExpireBacklog(now = new Date()): Promise<number> {
-    const schedule = resolveAwaitingRemindSchedule({
-      get: (k) => this.config.get<string>(k),
-    });
-    const cutoff = new Date(now.getTime() - schedule.ttlMinutes * 60_000);
-    return this.prisma.order.count({
-      where: {
-        status: { in: [OrderStatus.AWAITING_PAYMENT, OrderStatus.NEW] },
-        createdAt: { lt: cutoff },
-      },
     });
   }
 
@@ -96,28 +69,25 @@ export class OrderAwaitingPaymentService {
     return Math.max(0, Number.parseInt(raw, 10) || 0);
   }
 
-  private async sendBacklogOpsAlert(input: {
-    kind: 'remind' | 'expire';
+  private async sendRemindBacklogOpsAlert(input: {
     dueCount: number;
     batch: number;
     envKey: string;
     threshold: number;
-    lastAlertAt: number;
-    setLastAlertAt: (t: number) => void;
   }): Promise<void> {
-    const { kind, dueCount, batch, envKey, threshold } = input;
+    const { dueCount, batch, envKey, threshold } = input;
     if (threshold <= 0 || dueCount <= threshold) return;
 
     const lagTicks = Math.ceil((dueCount - batch) / batch);
-    const msg = `awaiting_${kind}_backlog due=${dueCount} batch=${batch} lag_ticks≈${Math.max(0, lagTicks)}`;
+    const msg = `awaiting_remind_backlog due=${dueCount} batch=${batch} lag_ticks≈${Math.max(0, lagTicks)}`;
     this.logger.error(`OPS_ALERT ${msg}`);
 
     const now = Date.now();
-    if (now - input.lastAlertAt < BACKLOG_ALERT_THROTTLE_MS) {
+    if (now - this.lastRemindBacklogAlertAt < BACKLOG_ALERT_THROTTLE_MS) {
       this.logger.warn(`OPS_ALERT ${msg} (email throttled)`);
       return;
     }
-    input.setLastAlertAt(now);
+    this.lastRemindBacklogAlertAt = now;
 
     const opsTo = (
       this.config.get<string>('OPS_ALERT_EMAIL') ||
@@ -126,26 +96,20 @@ export class OrderAwaitingPaymentService {
     ).trim();
     if (!opsTo) {
       this.logger.warn(
-        `OPS_ALERT awaiting_${kind}_backlog: set OPS_ALERT_EMAIL or SUPPORT_EMAIL`,
+        `OPS_ALERT awaiting_remind_backlog: set OPS_ALERT_EMAIL or SUPPORT_EMAIL`,
       );
       return;
     }
-    const title =
-      kind === 'remind'
-        ? 'Payment remind backlog'
-        : 'Awaiting payment TTL expire backlog';
     await this.lifecycle.notifyCustomer({
       to: opsTo,
-      subject: `[OPS] ${title} — ${dueCount} due`,
+      subject: `[OPS] Payment remind backlog — ${dueCount} due`,
       text: [
-        kind === 'remind'
-          ? `Очередь напоминаний об оплате отстаёт.`
-          : `Очередь TTL-отмены неоплаченных заказов отстаёт.`,
+        `Очередь напоминаний об оплате отстаёт.`,
         `due: ${dueCount} (batch ${batch}/мин)`,
         `≈${Math.max(1, lagTicks)} мин отставания при текущем tick.`,
         `Env: ${envKey}=${threshold}`,
       ].join('\n'),
-      html: `<p><strong>OPS: awaiting_${kind}_backlog</strong></p>
+      html: `<p><strong>OPS: awaiting_remind_backlog</strong></p>
 <p>Due: <strong>${dueCount}</strong> (batch ${batch}/мин).</p>`,
     });
   }
@@ -159,125 +123,16 @@ export class OrderAwaitingPaymentService {
       'ORDER_PAY_REMIND_BACKLOG_ALERT',
       AWAITING_PAYMENT_REMIND_BATCH,
     );
-    await this.sendBacklogOpsAlert({
-      kind: 'remind',
+    await this.sendRemindBacklogOpsAlert({
       dueCount,
       batch: AWAITING_PAYMENT_REMIND_BATCH,
       envKey: 'ORDER_PAY_REMIND_BACKLOG_ALERT',
       threshold,
-      lastAlertAt: this.lastRemindBacklogAlertAt,
-      setLastAlertAt: (t) => {
-        this.lastRemindBacklogAlertAt = t;
-      },
     });
   }
 
   /**
-   * OPS_ALERT если expire due > порога (default = batch 50).
-   * Env: ORDER_AWAITING_EXPIRE_BACKLOG_ALERT (0 = выкл). Throttle 1 ч.
-   */
-  async alertExpireBacklogIfNeeded(dueCount: number): Promise<void> {
-    const threshold = this.resolveBacklogThreshold(
-      'ORDER_AWAITING_EXPIRE_BACKLOG_ALERT',
-      AWAITING_PAYMENT_EXPIRE_BATCH,
-    );
-    await this.sendBacklogOpsAlert({
-      kind: 'expire',
-      dueCount,
-      batch: AWAITING_PAYMENT_EXPIRE_BATCH,
-      envKey: 'ORDER_AWAITING_EXPIRE_BACKLOG_ALERT',
-      threshold,
-      lastAlertAt: this.lastExpireBacklogAlertAt,
-      setLastAlertAt: (t) => {
-        this.lastExpireBacklogAlertAt = t;
-      },
-    });
-  }
-
-  /**
-   * Авто-отмена неоплаченных AWAITING_PAYMENT/NEW старше TTL (мин).
-   * Env: ORDER_AWAITING_TTL_MINUTES (default 4320 = 72 ч).
-   * Batch: AWAITING_PAYMENT_EXPIRE_BATCH (50); backlog → OPS_ALERT.
-   */
-  async expireStaleAwaitingOrders(now = new Date()): Promise<number> {
-    const schedule = resolveAwaitingRemindSchedule({
-      get: (k) => this.config.get<string>(k),
-    });
-    const cutoff = new Date(now.getTime() - schedule.ttlMinutes * 60_000);
-
-    const dueBefore = await this.countExpireBacklog(now);
-    if (dueBefore > AWAITING_PAYMENT_EXPIRE_BATCH) {
-      this.logger.warn(
-        `awaiting_expire_backlog due=${dueBefore} batch=${AWAITING_PAYMENT_EXPIRE_BATCH}`,
-      );
-      await this.alertExpireBacklogIfNeeded(dueBefore);
-    }
-
-    const stale = await this.prisma.order.findMany({
-      where: {
-        status: { in: [OrderStatus.AWAITING_PAYMENT, OrderStatus.NEW] },
-        createdAt: { lt: cutoff },
-      },
-      include: { items: true },
-      take: AWAITING_PAYMENT_EXPIRE_BATCH,
-      orderBy: { createdAt: 'asc' },
-    });
-
-    let cancelled = 0;
-    for (const order of stale) {
-      const txResult = await this.prisma.$transaction(async (tx) => {
-        await lockOrderForUpdate(tx, order.id);
-        const fresh = await tx.order.findUnique({
-          where: { id: order.id },
-          include: { items: true },
-        });
-        if (
-          !fresh ||
-          (fresh.status !== OrderStatus.AWAITING_PAYMENT &&
-            fresh.status !== OrderStatus.NEW)
-        ) {
-          return null;
-        }
-        const result = await cancelUnpaidOrderInTx(tx, {
-          orderId: fresh.id,
-          fromStatus: fresh.status,
-          items: fresh.items,
-          message: 'Заказ отменён (истёк срок оплаты)',
-          reason: 'ttl',
-          giftNote: 'Возврат при истечении срока оплаты',
-        });
-        return {
-          pendingExternalIds: result.pendingExternalIds,
-          email: fresh.email?.trim() || '',
-          number: fresh.number,
-        };
-      });
-      if (txResult == null) continue;
-      if (txResult.pendingExternalIds.length) {
-        await this.yookassa.cancelPaymentsBestEffort(txResult.pendingExternalIds);
-      }
-      scheduleAfterRlsCommitWithBypass(this.prisma, () =>
-        this.orderChat.applyRetentionForOrder(order.id, OrderStatus.CANCELLED),
-      );
-      if (this.yourichSync) {
-        scheduleAfterRlsCommitWithBypass(this.prisma, () =>
-          this.yourichSync!.touch(order.id),
-        );
-      }
-      if (txResult.email) {
-        void this.lifecycle.notifyOrderCancelled(
-          txResult.email,
-          txResult.number,
-          'Заказ автоматически отменён: оплата не поступила в срок.',
-        );
-      }
-      cancelled += 1;
-    }
-    return cancelled;
-  }
-
-  /**
-   * Напоминания: stage 1 (5м), 2 (24ч), 3 (48ч + дата отмены).
+   * Напоминания: stage 1 (5м), 2 (24ч), 3 (48ч).
    * Catch-up (осознанно): один tick → высший overdue stage; 5м/24ч тексты
    * пропускаются, OrderEvent meta.skipped фиксирует это.
    * Outbox: bump + event(pending) → SMTP → mailStatus=sent; fail → retry next tick.
@@ -286,10 +141,8 @@ export class OrderAwaitingPaymentService {
     const schedule = resolveAwaitingRemindSchedule({
       get: (k) => this.config.get<string>(k),
     });
-    const ttlCutoff = new Date(now.getTime() - schedule.ttlMinutes * 60_000);
     const dueOpts = {
       now,
-      ttlCutoff,
       remind1Minutes: schedule.remind1Minutes,
       remind2Minutes: schedule.remind2Minutes,
       remind3Minutes: schedule.remind3Minutes,
@@ -316,7 +169,6 @@ export class OrderAwaitingPaymentService {
       total: number;
       guestId: string | null;
       next: 1 | 2 | 3;
-      cancelAtLabel?: string;
       meta: RemindOutboxMeta;
     };
 
@@ -342,15 +194,6 @@ export class OrderAwaitingPaymentService {
           order.awaitingPaymentRemindStage,
           next,
         );
-        const cancelAtLabel =
-          next === 3
-            ? formatCancelAtLabel(
-                new Date(
-                  new Date(order.createdAt).getTime() +
-                    schedule.ttlMinutes * 60_000,
-                ),
-              )
-            : undefined;
 
         const meta: RemindOutboxMeta = {
           stage: next,
@@ -366,7 +209,7 @@ export class OrderAwaitingPaymentService {
         const event = await this.lifecycle.addEvent(tx, {
           orderId: order.id,
           type: 'PAYMENT_REMIND',
-          message: paymentRemindEventMessage(next, cancelAtLabel, skipped),
+          message: paymentRemindEventMessage(next, skipped),
           meta: meta as Prisma.InputJsonValue,
         });
 
@@ -378,7 +221,6 @@ export class OrderAwaitingPaymentService {
           total: order.total,
           guestId: order.guestId,
           next,
-          cancelAtLabel,
           meta,
         });
       }
@@ -427,9 +269,6 @@ export class OrderAwaitingPaymentService {
     });
 
     let sent = 0;
-    const schedule = resolveAwaitingRemindSchedule({
-      get: (k) => this.config.get<string>(k),
-    });
 
     for (const ev of pending) {
       const order = ev.order;
@@ -453,15 +292,6 @@ export class OrderAwaitingPaymentService {
       const stage = meta?.stage ?? (order.awaitingPaymentRemindStage as 1 | 2 | 3);
       if (stage !== 1 && stage !== 2 && stage !== 3) continue;
 
-      const cancelAtLabel =
-        stage === 3
-          ? formatCancelAtLabel(
-              new Date(
-                new Date(order.createdAt).getTime() + schedule.ttlMinutes * 60_000,
-              ),
-            )
-          : undefined;
-
       const ok = await this.deliverRemindMail({
         eventId: ev.id,
         id: order.id,
@@ -470,7 +300,6 @@ export class OrderAwaitingPaymentService {
         total: order.total,
         guestId: order.guestId,
         next: stage,
-        cancelAtLabel,
         meta: meta ?? { stage, mailStatus: 'pending' },
       });
       if (ok) sent += 1;
@@ -486,7 +315,6 @@ export class OrderAwaitingPaymentService {
     total: number;
     guestId: string | null;
     next: 1 | 2 | 3;
-    cancelAtLabel?: string;
     meta: RemindOutboxMeta;
   }): Promise<boolean> {
     const guestIdForPay = order.guestId?.trim() || '';
@@ -499,7 +327,6 @@ export class OrderAwaitingPaymentService {
       total: order.total,
       orderId: order.id,
       payToken,
-      cancelAtLabel: order.cancelAtLabel,
       stage: order.next,
     });
     if (result === 'sent') {

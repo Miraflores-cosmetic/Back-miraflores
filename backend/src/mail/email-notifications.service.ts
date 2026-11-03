@@ -557,10 +557,6 @@ function sampleVarsForEvent(
         'order.pay_url': payUrl,
         'order.total_label': moneyFull ? rubLabel(4500) : '',
         'order.reserve_hours': sparse ? '' : '72',
-        'order.cancel_at_label':
-          sparse || eventKey !== 'order_awaiting_payment_48h'
-            ? ''
-            : '23.10.2026, 15:00',
         'order.items_text': '',
         'order.items_html': '',
         'order.totals_block': '',
@@ -603,7 +599,7 @@ function sampleVarsForEvent(
         ...base,
         'order.cancel_reason': sparse
           ? ''
-          : 'Заказ автоматически отменён: оплата не поступила в срок.',
+          : 'Заказ отменён сотрудником. Если нужна помощь — напишите нам.',
         'order.items_text': '',
         'order.items_html': '',
         'order.totals_block': '',

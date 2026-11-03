@@ -311,8 +311,6 @@ export class MailService {
     orderNumber: string;
     total: number;
     reserveHours?: number;
-    /** Дата/время авто-отмены (МСК), для 3-го напоминания. */
-    cancelAtLabel?: string;
     /** Deep-link `/order/pay` (не confirmation URL ЮKassa). */
     payUrl?: string;
     /** Для сборки guest deep-link `/order/pay?...`. */
@@ -348,7 +346,6 @@ export class MailService {
       total: params.total,
       payUrl: payUrl || undefined,
       reserveHours,
-      cancelAtLabel: stage === 3 ? params.cancelAtLabel : undefined,
     });
     const def = getEmailNotificationEventDef(eventKey);
     await this.sendNotification(

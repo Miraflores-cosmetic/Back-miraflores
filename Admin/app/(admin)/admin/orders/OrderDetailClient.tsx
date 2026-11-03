@@ -35,6 +35,7 @@ import { OzonFulfillmentChecklist } from './OzonFulfillmentChecklist';
 import { OzonCarrierCostForm, OzonShipmentPanel } from './OzonShipmentPanel';
 import { OrderItemsEditModal } from './OrderItemsEditModal';
 import { OrderShippingCostEditModal } from './OrderShippingCostEditModal';
+import { AwaitingPaymentChips } from './AwaitingPaymentChips';
 import catalogStyles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
 import orderStyles from './orders.module.css';
 
@@ -1097,7 +1098,7 @@ export function OrderDetailClient({
                         order.status === 'NEW' ? (
                           <p className={styles.lead} style={{ marginTop: 8 }}>
                             CAPTURE при создании заказа: баланс уже уменьшен, код
-                            заморожен до оплаты или TTL (~60 мин).
+                            заморожен до оплаты или ручной отмены (авто-отмены нет).
                           </p>
                         ) : (
                           <p className={styles.lead} style={{ marginTop: 8 }}>
@@ -1380,6 +1381,20 @@ export function OrderDetailClient({
                   {orderStatusLabel(order.status)}
                 </span>
               </div>
+              {order.awaitingPayment ? (
+                <div style={{ marginTop: 8 }}>
+                  <AwaitingPaymentChips timeline={order.awaitingPayment} />
+                  {order.awaitingPayment.overdue ? (
+                    <p className={styles.lead} style={{ marginTop: 8 }}>
+                      Прошло больше{' '}
+                      {order.awaitingPayment.chips.find((c) => c.key === 'ttl')?.label ??
+                        '72 ч'}{' '}
+                      без оплаты — SLA. Авто-отмены нет: stock и резерв сертификата
+                      держатся, пока не отмените заказ вручную.
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
             <button
               type="button"

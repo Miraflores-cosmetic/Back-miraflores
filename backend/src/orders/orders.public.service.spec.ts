@@ -128,10 +128,6 @@ function makeService() {
     notifyGiftBuyerCopy: vi.fn(async () => undefined),
     notifyOrderRefund: vi.fn(async () => undefined),
   };
-  const awaitingPayment = {
-    expireStaleAwaitingOrders: vi.fn(async () => 0),
-    processAwaitingPaymentReminders: vi.fn(async () => 0),
-  };
   return {
     service: new OrdersPublicService(
       prisma as never,
@@ -149,11 +145,9 @@ function makeService() {
         seedCustomerNoteFromOrder: vi.fn(),
         applyRetentionForOrder: vi.fn(async () => undefined),
       } as never,
-      awaitingPayment as never,
     ),
     lifecycle,
     payTokens,
-    awaitingPayment,
   };
 }
 

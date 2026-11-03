@@ -1,3 +1,22 @@
+export type AdminAwaitingPaymentChip = {
+  key: 'remind1' | 'remind2' | 'remind3' | 'ttl';
+  label: string;
+  minutes: number;
+  at: string;
+  reached: boolean;
+  /** true только при SMTP sent (✓ в UI). */
+  mailed: boolean;
+  tone: 'upcoming' | 'due' | 'done' | 'failed' | 'overdue';
+};
+
+export type AdminAwaitingPaymentTimeline = {
+  overdue: boolean;
+  ageMinutes: number;
+  remindStage: number;
+  ttlMinutes: number;
+  chips: AdminAwaitingPaymentChip[];
+};
+
 export type AdminOrderListItem = {
   id: string;
   number: string;
@@ -17,6 +36,8 @@ export type AdminOrderListItem = {
   chatMessageCount?: number;
   /** null — не Ozon; иначе операционные флаги для бейджей. */
   ozon?: { noTrack: boolean; noCost: boolean } | null;
+  /** Интервалы напоминаний / 72ч для AWAITING_PAYMENT. */
+  awaitingPayment?: AdminAwaitingPaymentTimeline | null;
 };
 
 export type AdminOrderOzonFlag = 'ozon_no_track' | 'ozon_no_cost';
@@ -173,6 +194,8 @@ export type AdminOrderDetail = {
   } | null;
   createdAt: string;
   updatedAt: string;
+  /** Интервалы напоминаний / 72ч для AWAITING_PAYMENT. */
+  awaitingPayment?: AdminAwaitingPaymentTimeline | null;
   hasPromoRedemption: boolean;
   items: AdminOrderItem[];
   payments: Array<{
@@ -202,7 +225,7 @@ export type AdminOrderDetail = {
   /** Ручные отметки чеклистов склада: { ozon: { packed: { doneAt, doneBy } } } */
   checklist?: Record<string, Record<string, AdminChecklistMark>>;
   events: AdminOrderEvent[];
-  /** Деньги списаны после cancel/TTL, автовозврат не удался */
+  /** Деньги списаны после отмены заказа, автовозврат не удался */
   latePaymentFailed?: boolean;
   actions: AdminOrderActions;
   canCancel: boolean;

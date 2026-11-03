@@ -23,12 +23,11 @@ export type AwaitingRemindCandidateRow = {
 
 /** Размер batch воркера: remind за tick. */
 export const AWAITING_PAYMENT_REMIND_BATCH = 100;
-/** Размер batch воркера: TTL-expire за tick. */
-export const AWAITING_PAYMENT_EXPIRE_BATCH = 50;
 
 export type AwaitingRemindDueOpts = {
   now: Date;
-  ttlCutoff: Date;
+  /** @deprecated unused (remind claim не режет по TTL). */
+  ttlCutoff?: Date;
   remind1Minutes: number;
   remind2Minutes: number;
   remind3Minutes: number;
@@ -71,7 +70,6 @@ export async function claimAwaitingPaymentRemindCandidates(
     WHERE status IN ('AWAITING_PAYMENT'::"OrderStatus", 'NEW'::"OrderStatus")
       AND total > 0
       AND "awaitingPaymentRemindStage" < 3
-      AND "createdAt" > ${opts.ttlCutoff}
       AND BTRIM(email) <> ''
       AND (
         ("awaitingPaymentRemindStage" < 1 AND "createdAt" <= ${due1})
@@ -99,7 +97,6 @@ export async function countDueAwaitingPaymentReminders(
     WHERE status IN ('AWAITING_PAYMENT'::"OrderStatus", 'NEW'::"OrderStatus")
       AND total > 0
       AND "awaitingPaymentRemindStage" < 3
-      AND "createdAt" > ${opts.ttlCutoff}
       AND BTRIM(email) <> ''
       AND (
         ("awaitingPaymentRemindStage" < 1 AND "createdAt" <= ${due1})

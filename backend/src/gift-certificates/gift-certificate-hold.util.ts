@@ -94,8 +94,9 @@ export async function findUsableGiftCertificate(
 
 /**
  * Резерв (CAPTURE) баланса под заказ при create (FOR UPDATE).
- * Баланс уменьшается сразу — до оплаты или отмены/TTL (~60 мин).
- * RELEASE — при abandon/cancel/TTL/full refund.
+ * Баланс уменьшается сразу — до оплаты или ручной отмены (admin/ЛК/abandon).
+ * Авто-отмены / soft-release по TTL нет; SLA overdue — только UI админки.
+ * RELEASE — при abandon / cancel / full refund.
  */
 export async function holdGiftCertificateForOrder(
   tx: Prisma.TransactionClient,

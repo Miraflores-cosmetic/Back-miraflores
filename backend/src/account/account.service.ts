@@ -579,11 +579,8 @@ export class AccountService {
         trackingProvider: o.shipments[0]?.provider ?? null,
         canPay,
         payToken: canPay && guestId ? this.payTokens.issue(o.id, guestId) : null,
-        payExpiresAt: canPay
-          ? new Date(
-              o.createdAt.getTime() + this.payTokens.awaitingTtlMinutes() * 60_000,
-            ).toISOString()
-          : null,
+        // Авто-отмена отключена: оплата пока AWAITING/NEW — без hard cutoff в ЛК.
+        payExpiresAt: null,
       };
     });
   }
@@ -676,12 +673,8 @@ export class AccountService {
         data: { guestId },
       });
     }
-    const payExpiresAt = canPay
-      ? new Date(
-          order.createdAt.getTime() +
-            this.payTokens.awaitingTtlMinutes() * 60_000,
-        ).toISOString()
-      : null;
+    // Авто-отмена отключена: не отдаём дедлайн оплаты (UI раньше гейтил по нему).
+    const payExpiresAt: string | null = null;
 
     return {
       id: order.id,

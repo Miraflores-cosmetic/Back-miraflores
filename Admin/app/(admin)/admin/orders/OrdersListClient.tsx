@@ -19,6 +19,7 @@ import {
 import { orderStatusLabel, orderStatusBadgeClass } from '@/lib/orderStatusLabels';
 import { usePathname } from 'next/navigation';
 import catalogStyles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
+import { AwaitingPaymentChips } from './AwaitingPaymentChips';
 import orderStyles from './orders.module.css';
 
 const styles = { ...catalogStyles, ...orderStyles };
@@ -51,6 +52,8 @@ export function OrdersListClient() {
   const [qDebounced, setQDebounced] = useState('');
   const [status, setStatus] = useState('');
   const [unviewedOnly, setUnviewedOnly] = useState(false);
+  const [overdueOnly, setOverdueOnly] = useState(false);
+  const [overdueCount, setOverdueCount] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [fetching, setFetching] = useState(false);
@@ -77,6 +80,7 @@ export function OrdersListClient() {
       if (qDebounced.trim()) sp.set('q', qDebounced.trim());
       if (status) sp.set('status', status);
       if (unviewedOnly) sp.set('unviewed', '1');
+      if (overdueOnly) sp.set('overdue', '1');
       const res = await adminBackendJson<AdminOrderListResponse>(
         `orders/admin?${sp}`,
       );
@@ -92,29 +96,47 @@ export function OrdersListClient() {
       setLoading(false);
       if (!soft) setFetching(false);
     }
-  }, [page, qDebounced, status, unviewedOnly]);
+  }, [page, qDebounced, status, unviewedOnly, overdueOnly]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
+  const refreshOverdueCount = useCallback(async () => {
+    try {
+      const res = await adminBackendJson<{ count: number }>(
+        'orders/admin/awaiting-overdue-count',
+      );
+      setOverdueCount(Math.max(0, res.count ?? 0));
+    } catch {
+      /* leave previous count */
+    }
+  }, []);
+
   useEffect(() => {
-    const onRefresh = () => void load({ soft: true });
+    void refreshOverdueCount();
+  }, [refreshOverdueCount, data]);
+
+  useEffect(() => {
+    const onRefresh = () => {
+      void load({ soft: true });
+      void refreshOverdueCount();
+    };
     document.addEventListener(CHAT_UNREAD_REFRESH_EVENT, onRefresh);
     document.addEventListener(ADMIN_ORDERS_UNVIEWED_REFRESH_EVENT, onRefresh);
     return () => {
       document.removeEventListener(CHAT_UNREAD_REFRESH_EVENT, onRefresh);
       document.removeEventListener(ADMIN_ORDERS_UNVIEWED_REFRESH_EVENT, onRefresh);
     };
-  }, [load]);
+  }, [load, refreshOverdueCount]);
 
   const items = data?.items ?? [];
 
   const shouldSoftPoll = useMemo(() => {
-    if (status === 'AWAITING_PAYMENT') return true;
+    if (overdueOnly || status === 'AWAITING_PAYMENT') return true;
     if (status) return false;
     return items.some((o) => o.status === 'AWAITING_PAYMENT');
-  }, [items, status]);
+  }, [items, status, overdueOnly]);
 
   useEffect(() => {
     if (!shouldSoftPoll) return;
@@ -146,9 +168,11 @@ export function OrdersListClient() {
         onRetry={() => void load()}
         loadingLabel="Загрузка заказов…"
         empty={
-          unviewedOnly
-            ? 'Нет непросмотренных оплаченных заказов'
-            : 'Заказов пока нет'
+          overdueOnly
+            ? 'Нет просроченных неоплаченных заказов'
+            : unviewedOnly
+              ? 'Нет непросмотренных оплаченных заказов'
+              : 'Заказов пока нет'
         }
         isEmpty={!loading && items.length === 0}
         isFetching={fetching}
@@ -183,6 +207,29 @@ export function OrdersListClient() {
                   ))}
                 </select>
               </label>
+              <button
+                type="button"
+                className={`${styles.orderUnviewedChip} ${
+                  overdueOnly ? styles.orderUnviewedChipActive : ''
+                }`}
+                aria-pressed={overdueOnly}
+                title="Неоплаченные старше SLA (default 72 ч). Stock и gift hold до ручной отмены."
+                disabled={fetching}
+                onClick={() => {
+                  setOverdueOnly((v) => !v);
+                  if (!overdueOnly) setUnviewedOnly(false);
+                  setPage(1);
+                }}
+              >
+                Просрочено &gt;72ч
+                <span
+                  className={`${styles.orderUnviewedChipCount} ${
+                    overdueCount < 1 ? styles.orderUnviewedChipCountZero : ''
+                  }`}
+                >
+                  {overdueCount > 99 ? '99+' : overdueCount}
+                </span>
+              </button>
               {unviewedSidebarCount > 0 || unviewedOnly ? (
                 <button
                   type="button"
@@ -194,6 +241,7 @@ export function OrdersListClient() {
                   disabled={fetching}
                   onClick={() => {
                     setUnviewedOnly((v) => !v);
+                    if (!unviewedOnly) setOverdueOnly(false);
                     setPage(1);
                   }}
                 >
@@ -243,8 +291,12 @@ export function OrdersListClient() {
             {items.map((o) => {
               const messageCount = o.chatMessageCount ?? 0;
               const unreadCount = o.chatUnreadCount ?? 0;
+              const awaitingOverdue = Boolean(o.awaitingPayment?.overdue);
               return (
-              <tr key={o.id}>
+              <tr
+                key={o.id}
+                className={awaitingOverdue ? styles.orderRowAwaitingOverdue : undefined}
+              >
                 <td>
                   <Link href={`/admin/orders/${o.id}`} className={styles.orderNumberLink}>
                     {o.adminUnviewed ? (
@@ -269,6 +321,7 @@ export function OrdersListClient() {
                       · возврат {formatAdminMoney(o.refundedAmount ?? 0)}
                     </span>
                   ) : null}
+                  <AwaitingPaymentChips timeline={o.awaitingPayment} compact />
                 </td>
                 <td>
                   {o.userId ? (

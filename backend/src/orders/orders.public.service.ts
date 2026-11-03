@@ -27,7 +27,6 @@ import {
   reserveStockForLines,
 } from './order-stock';
 import { lockOrderForUpdate } from './order-lock';
-import { OrderAwaitingPaymentService } from './order-awaiting-payment.service';
 import {
   DELIVERY_SURCHARGE_DEFAULTS,
   normalizeDeliverySurchargeRow,
@@ -117,7 +116,6 @@ export class OrdersPublicService {
     private readonly shippingServerEstimate: ShippingServerEstimateService,
     private readonly lifecycle: OrderLifecycleService,
     private readonly orderChat: OrderChatService,
-    private readonly awaitingPayment: OrderAwaitingPaymentService,
     @Optional() private readonly ozonAuth?: OzonAuthService,
     @Optional() private readonly yourichSync?: YourichSyncService,
     @Optional() private readonly yourichClient?: YourichClient,
@@ -470,8 +468,6 @@ export class OrdersPublicService {
 
     const guestId = dto.guestId.trim();
     if (!guestId) throw new BadRequestException('guestId обязателен');
-
-    await this.awaitingPayment.expireStaleAwaitingOrders();
 
     const existing = await this.prisma.order.findUnique({
       where: { idempotencyKey },
@@ -920,7 +916,6 @@ export class OrdersPublicService {
       giftsPublic: this.giftsPublic,
       lifecycle: this.lifecycle,
       orderChat: this.orderChat,
-      awaitingPayment: this.awaitingPayment,
       yourichSync: this.yourichSync,
       yourichClient: this.yourichClient,
       resolveGratitudeGiftLines: (goodsAfterPromo: number) =>
@@ -940,11 +935,12 @@ export class OrdersPublicService {
 
   /**
    * Гость отменяет неоплаченный заказ (смена корзины / адреса на checkout).
-   * Снимает stockReserve.
+   * Снимает stockReserve + gift CAPTURE (cancelUnpaidOrderInTx).
    *
    * Письмо order_cancelled **не** шлём: пользователь ещё на checkout и сразу
    * создаёт новый заказ — письмо «заказ отменён» в этом UX шум.
-   * TTL-expire и отмена из админки / ЛК — шлют (см. docs/emails.md).
+   * Авто-отмены нет; письмо шлют только ручная отмена из админки / ЛК
+   * (см. docs/emails.md).
    */
   async abandon(orderId: string, payToken?: string | null) {
     const result = await this.prisma.$transaction(async (tx) => {
@@ -1007,8 +1003,6 @@ export class OrdersPublicService {
     orderId: string,
     opts: { payToken?: string | null; buyerUserId?: string | null } = {},
   ) {
-    await this.awaitingPayment.expireStaleAwaitingOrders();
-
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       include: { items: true, payments: { orderBy: { createdAt: 'desc' }, take: 5 } },
@@ -1017,7 +1011,7 @@ export class OrdersPublicService {
     this.assertOrderPayAccess(order, opts);
 
     if (order.status === OrderStatus.CANCELLED) {
-      throw new BadRequestException('Срок оплаты истёк, оформите заказ заново');
+      throw new BadRequestException('Заказ отменён, оформите заказ заново');
     }
 
     if (order.status === OrderStatus.PAID) {
@@ -1249,9 +1243,9 @@ export class OrdersPublicService {
       latePaymentRefunded: lateOutcome === 'late_refunded',
       message:
         lateOutcome === 'late_refunded'
-          ? 'Срок оплаты истёк: платёж принят провайдером, оформлен автовозврат.'
+          ? 'Заказ уже отменён: платёж принят провайдером, оформлен автовозврат.'
           : lateOutcome === 'late_failed'
-            ? 'Срок оплаты истёк: платёж прошёл, но автовозврат не удался. Свяжитесь с поддержкой.'
+            ? 'Заказ уже отменён: платёж прошёл, но автовозврат не удался. Свяжитесь с поддержкой.'
             : undefined,
       orderId: order?.id ?? row.orderId,
       number: order?.number ?? row.order.number,
@@ -1311,7 +1305,7 @@ export class OrdersPublicService {
         orderStatus: order.status,
         message:
           order.status === OrderStatus.CANCELLED
-            ? 'Срок оплаты истёк или заказ отменён.'
+            ? 'Заказ отменён.'
             : 'Заказ нельзя подтвердить как оплаченный.',
       };
     }
@@ -1366,9 +1360,9 @@ export class OrdersPublicService {
       message: paid
         ? undefined
         : lateOutcome === 'late_refunded'
-          ? 'Срок оплаты истёк: платёж принят провайдером, оформлен автовозврат.'
+          ? 'Заказ уже отменён: платёж принят провайдером, оформлен автовозврат.'
           : lateOutcome === 'late_failed'
-            ? 'Срок оплаты истёк: автовозврат не удался. Свяжитесь с поддержкой.'
+            ? 'Заказ уже отменён: автовозврат не удался. Свяжитесь с поддержкой.'
             : 'Оплата ещё не подтверждена. Обычно это занимает несколько секунд.',
     };
   }
@@ -1555,7 +1549,7 @@ export class OrdersPublicService {
 
   /**
    * Переводит заказ в PAID при AWAITING/NEW (общий applyPaidInTx).
-   * Если заказ уже CANCELLED (TTL/abandon) — late → автовозврат.
+   * Если заказ уже CANCELLED (abandon / ручная отмена) — late → автовозврат.
    */
   private async markOrderPaid(
     orderId: string,
@@ -1632,7 +1626,7 @@ export class OrdersPublicService {
     }
   }
 
-  /** Автовозврат, если деньги пришли после cancel/TTL. */
+  /** Автовозврат, если деньги пришли после ручной отмены / abandon. */
   private async refundLatePayment(
     order: {
       id: string;

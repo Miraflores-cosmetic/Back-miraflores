@@ -2,13 +2,13 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { PrismaService } from '../prisma/prisma.service';
 import { OrderAwaitingPaymentService } from './order-awaiting-payment.service';
 
-/** Advisory lock: один инстанс API гоняет remind+expire за раз. */
+/** Advisory lock: один инстанс API гоняет remind за раз. */
 const AWAITING_PAYMENT_ADVISORY_LOCK_KEY = 902_610_221;
 
 /**
  * Раз в минуту (только лидер по pg_try_advisory_lock):
- * — напоминания об оплате (5м / 24ч / 48ч, catch-up = высший overdue);
- * — авто-отмена AWAITING_PAYMENT старше TTL (default 72ч).
+ * напоминания об оплате (5м / 24ч / 48ч, catch-up = высший overdue).
+ * Авто-отмена / expire hold — нет.
  */
 @Injectable()
 export class OrdersExpiryWorker implements OnModuleInit, OnModuleDestroy {
@@ -54,10 +54,6 @@ export class OrdersExpiryWorker implements OnModuleInit, OnModuleDestroy {
           await this.awaitingPayment.processAwaitingPaymentReminders();
         if (reminded > 0) {
           this.logger.log(`Sent ${reminded} awaiting-payment reminder(s)`);
-        }
-        const expired = await this.awaitingPayment.expireStaleAwaitingOrders();
-        if (expired > 0) {
-          this.logger.log(`Expired ${expired} awaiting order(s)`);
         }
       });
     } catch (err) {

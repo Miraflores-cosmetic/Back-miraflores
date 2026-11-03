@@ -71,6 +71,12 @@ import { estimateOzonDelivery } from '../ozon/ozon-tariff';
 import { loadOzonTariffLines } from '../ozon/ozon-variant-dims';
 import { ozonFlagWhere, ozonRowFlags, parseOzonFlagFilter } from './order-ozon-flags';
 import { isManualChecklistStep, serializeChecklistMarks } from './order-checklist';
+import {
+  buildAwaitingPaymentTimeline,
+  remindMailByStageFromEvents,
+  resolveAwaitingRemindSchedule,
+  type RemindMailByStage,
+} from './order-awaiting-payment-schedule';
 import { YourichSyncService } from '../yourich/yourich-sync.service';
 import { OrdersPublicService } from './orders.public.service';
 
@@ -176,6 +182,8 @@ export class OrdersAdminService {
       staffUserId?: string;
       flag?: string;
       unviewedOnly?: boolean;
+      /** AWAITING/NEW старше ORDER_AWAITING_TTL — SLA, hold stock/gift до ручной отмены. */
+      overdueOnly?: boolean;
     } = {},
   ) {
     const page = Math.max(1, opts.page ?? 1);
@@ -190,6 +198,9 @@ export class OrdersAdminService {
           { adminViewedAt: null, status: OrderStatus.PAID },
         ],
       };
+    }
+    if (opts.overdueOnly) {
+      where = { AND: [where, this.awaitingPaymentOverdueWhere()] };
     }
 
     const [total, rows] = await this.prisma.$transaction([
@@ -210,6 +221,7 @@ export class OrdersAdminService {
           refundedAmount: true,
           userId: true,
           createdAt: true,
+          awaitingPaymentRemindStage: true,
           shippingMethod: true,
           adminViewedAt: true,
           shipments: { select: { provider: true, tracking: true, carrierCostRub: true } },
@@ -219,22 +231,43 @@ export class OrdersAdminService {
 
     const staffUserId = opts.staffUserId?.trim();
     const orderIds = rows.map((r) => r.id);
-    const [chatUnreadByOrderId, chatMessageCountByOrderId] = await Promise.all([
-      staffUserId && orderIds.length > 0
-        ? this.orderChat.unreadOrderChatCountsForStaff(staffUserId, orderIds)
-        : Promise.resolve({} as Record<string, number>),
-      orderIds.length > 0
-        ? this.orderChat.orderChatMessageCountsForOrders(orderIds)
-        : Promise.resolve({} as Record<string, number>),
-    ]);
+    const awaitingIds = rows
+      .filter(
+        (r) =>
+          r.status === OrderStatus.AWAITING_PAYMENT ||
+          r.status === OrderStatus.NEW,
+      )
+      .map((r) => r.id);
+    const [chatUnreadByOrderId, chatMessageCountByOrderId, remindMailByOrder] =
+      await Promise.all([
+        staffUserId && orderIds.length > 0
+          ? this.orderChat.unreadOrderChatCountsForStaff(staffUserId, orderIds)
+          : Promise.resolve({} as Record<string, number>),
+        orderIds.length > 0
+          ? this.orderChat.orderChatMessageCountsForOrders(orderIds)
+          : Promise.resolve({} as Record<string, number>),
+        this.loadRemindMailByOrderIds(awaitingIds),
+      ]);
+
+    const awaitingSchedule = resolveAwaitingRemindSchedule({
+      get: (k) => this.config.get<string>(k),
+    });
 
     return {
-      items: rows.map(({ shipments, adminViewedAt, ...r }) => ({
+      items: rows.map(({ shipments, adminViewedAt, awaitingPaymentRemindStage, ...r }) => ({
         ...r,
         adminUnviewed: r.status === OrderStatus.PAID && adminViewedAt == null,
         ozon: ozonRowFlags({ status: r.status, shippingMethod: r.shippingMethod, shipments }),
         chatUnreadCount: chatUnreadByOrderId[r.id] ?? 0,
         chatMessageCount: chatMessageCountByOrderId[r.id] ?? 0,
+        awaitingPayment: buildAwaitingPaymentTimeline(
+          r.createdAt,
+          r.status,
+          awaitingPaymentRemindStage,
+          awaitingSchedule,
+          new Date(),
+          remindMailByOrder.get(r.id) ?? null,
+        ),
       })),
       total,
       page,
@@ -259,6 +292,48 @@ export class OrdersAdminService {
       },
     });
     return { count };
+  }
+
+  /** Неоплаченные старше TTL — stock/gift hold до ручной отмены. */
+  async awaitingPaymentOverdueCount() {
+    const count = await this.prisma.order.count({
+      where: this.awaitingPaymentOverdueWhere(),
+    });
+    return { count };
+  }
+
+  private awaitingPaymentOverdueWhere(): Prisma.OrderWhereInput {
+    const schedule = resolveAwaitingRemindSchedule({
+      get: (k) => this.config.get<string>(k),
+    });
+    const cutoff = new Date(Date.now() - schedule.ttlMinutes * 60_000);
+    return {
+      status: { in: [OrderStatus.AWAITING_PAYMENT, OrderStatus.NEW] },
+      createdAt: { lte: cutoff },
+    };
+  }
+
+  /** PAYMENT_REMIND.meta → mailStatus по stage (для chips mailed/tone). */
+  private async loadRemindMailByOrderIds(
+    orderIds: string[],
+  ): Promise<Map<string, RemindMailByStage>> {
+    const out = new Map<string, RemindMailByStage>();
+    if (orderIds.length === 0) return out;
+    const events = await this.prisma.orderEvent.findMany({
+      where: { orderId: { in: orderIds }, type: 'PAYMENT_REMIND' },
+      select: { orderId: true, meta: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    const byOrder = new Map<string, Array<{ meta: unknown }>>();
+    for (const ev of events) {
+      const list = byOrder.get(ev.orderId) ?? [];
+      list.push({ meta: ev.meta });
+      byOrder.set(ev.orderId, list);
+    }
+    for (const [orderId, list] of byOrder) {
+      out.set(orderId, remindMailByStageFromEvents(list));
+    }
+    return out;
   }
 
   /** Первое открытие карточки сотрудником — снимает заказ с бейджа «новые оплаченные». */
@@ -299,6 +374,7 @@ export class OrdersAdminService {
         userId: true,
         createdAt: true,
         updatedAt: true,
+        awaitingPaymentRemindStage: true,
         user: {
           select: { id: true, email: true, displayName: true, isActive: true },
         },
@@ -455,6 +531,14 @@ export class OrdersAdminService {
       : { unused: true, spentCerts: [], spentTotal: 0 };
     const giftPurchaseRefundBlocked = !giftPurchaseSpend.unused;
 
+    const remindMail =
+      order.status === OrderStatus.AWAITING_PAYMENT ||
+      order.status === OrderStatus.NEW
+        ? (
+            await this.loadRemindMailByOrderIds([order.id])
+          ).get(order.id) ?? null
+        : null;
+
     return {
       id: order.id,
       number: order.number,
@@ -511,6 +595,16 @@ export class OrdersAdminService {
         : null,
       createdAt: order.createdAt,
       updatedAt: order.updatedAt,
+      awaitingPayment: buildAwaitingPaymentTimeline(
+        order.createdAt,
+        order.status,
+        order.awaitingPaymentRemindStage,
+        resolveAwaitingRemindSchedule({
+          get: (k) => this.config.get<string>(k),
+        }),
+        new Date(),
+        remindMail,
+      ),
       hasPromoRedemption: Boolean(order.promoRedemption),
       affiliate: order.affiliateLead
         ? {

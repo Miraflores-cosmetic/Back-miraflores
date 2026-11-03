@@ -207,17 +207,6 @@ export function AccountOrdersClient() {
                       >
                         Оплатить {formatRub(order.total)}
                       </Link>
-                      {order.payExpiresAt ? (
-                        <p className={styles.orderMetaComment}>
-                          до{' '}
-                          {new Date(order.payExpiresAt).toLocaleString('ru-RU', {
-                            day: 'numeric',
-                            month: 'short',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                        </p>
-                      ) : null}
                     </div>
                   ) : null}
                 </article>

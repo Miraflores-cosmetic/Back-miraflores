@@ -20,7 +20,6 @@ import type { YourichClient } from '../yourich/yourich.client';
 import type { YourichSyncService } from '../yourich/yourich-sync.service';
 import type { OrderLifecycleService } from './order-lifecycle.service';
 import type { OrderChatService } from '../order-chat/order-chat.service';
-import type { OrderAwaitingPaymentService } from './order-awaiting-payment.service';
 import type { AdminCreateOrderDto } from './dto/admin-create-order.dto';
 import {
   computeAdminCreateQuote,
@@ -38,7 +37,6 @@ type LockedPromo = {
 export type CreateAdminOrderDeps = AdminCreateQuoteDeps & {
   lifecycle: OrderLifecycleService;
   orderChat: OrderChatService;
-  awaitingPayment: OrderAwaitingPaymentService;
   yourichSync?: YourichSyncService;
   yourichClient?: YourichClient;
   logger: Logger;
@@ -100,8 +98,6 @@ export async function createAdminOrder(
 ) {
   const idempotencyKey = resolveIdempotencyKey(dto);
   const guestId = `admin-${idempotencyKey}`;
-
-  await deps.awaitingPayment.expireStaleAwaitingOrders();
 
   const existing = await deps.prisma.order.findUnique({
     where: { idempotencyKey },

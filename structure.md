@@ -58,7 +58,9 @@ Miraflores 3.0/
 ├── deploy.md                 ← деплой
 ├── structure.md              ← структура
 ├── docs/
-│   ├── emails.md             ← контракт transactional email + TTL/remind
+│   ├── emails.md             ← transactional email + remind (без авто-TTL)
+│   ├── search.md             ← публичный поиск (состав/статьи, S1, trgm)
+│   ├── settings-home.md      ← GET /settings/home + hero/promo/gratitude
 │   ├── ozon-delivery.md
 │   └── order-chat.md
 ├── package.json              ← workspaces (без Front)
@@ -122,25 +124,39 @@ Miraflores 3.0/
 - Uploads: `LOCAL_UPLOADS_*`  
 - Почта: SMTP (заказы, staff welcome/reset) — полный контракт: [docs/emails.md](./docs/emails.md)
 
-### Неоплата: напоминания и TTL
+### Неоплата: напоминания (без авто-отмены)
 
 | Env | Default | Смысл |
 |-----|---------|--------|
-| `ORDER_AWAITING_TTL_MINUTES` | `4320` (72 ч) | авто-отмена `AWAITING_PAYMENT` |
+| `ORDER_AWAITING_TTL_MINUTES` | `4320` (72 ч) | порог «просрочено» в админке; **авто-отмена отключена** |
 | `ORDER_PAY_REMIND_1_MINUTES` | `5` | письмо `order_awaiting_payment` |
 | `ORDER_PAY_REMIND_2_MINUTES` | `1440` (24 ч) | `order_awaiting_payment_24h` |
-| `ORDER_PAY_REMIND_3_MINUTES` | `2880` (48 ч) | `order_awaiting_payment_48h` + дата отмены |
+| `ORDER_PAY_REMIND_3_MINUTES` | `2880` (48 ч) | `order_awaiting_payment_48h` |
 
-- Воркер `OrdersExpiryWorker`: **раз в 1 мин**, один лидер (`pg_try_advisory_lock`).
-- Логика: `OrderAwaitingPaymentService` + `order-awaiting-payment-schedule.ts` (то же расписание, что `reserve_hours` в mail).
+- Воркер `OrdersExpiryWorker`: **раз в 1 мин**, один лидер (`pg_try_advisory_lock`) → только `processAwaitingPaymentReminders` (expire scaffolding удалён).
+- Логика: `OrderAwaitingPaymentService` (без yookassa/chat DI) + `order-awaiting-payment-schedule.ts`.
+- Chips: `done`+✓ только `mailStatus=sent`; reached без sent → `due`; SMTP fail → `failed`; TTL → `overdue`.
 - **Catch-up (осознанно):** высший overdue stage; 5м/24ч тексты skip → `meta.skipped`.
 - **Outbox (не send-before-bump):** bump + `PAYMENT_REMIND(pending)` → SMTP → `sent`; fail → retry.
-- **Claim SQL:** только due. **Expire batch 50** + `ORDER_AWAITING_EXPIRE_BACKLOG_ALERT`.
+- **Claim SQL:** только due (без отсечения по TTL — catch-up после 72 ч всё ещё может дослать stage 3).
 - **Remind backlog:** `ORDER_PAY_REMIND_BACKLOG_ALERT` (default 100).
-- Checkout `abandon` — без email; pay_url ≠ profile; TTL/admin — `order_cancelled`.
+- **Admin UI:** список + карточка заказа — чипы `5 мин / 24 ч / 48 ч / 72 ч` (`AwaitingPaymentChips`); после TTL — красный чип + подсветка строки; поле API `awaitingPayment`.
+- Checkout `abandon` — без email; pay_url ≠ profile; **admin / ЛК** — `order_cancelled` (не авто-TTL).
+- **ЛК оплата:** `canPay` = статус AWAITING/NEW; `payExpiresAt` = null (без hard cutoff). `buyerOrderCanPayNow` не смотрит TTL. HMAC `payToken` — 30 суток (`OrderPayTokenService`), не `ORDER_AWAITING_TTL`.
+- **Stock + gift CAPTURE:** держатся до `cancelUnpaidOrderInTx` (admin / ЛК / checkout abandon). Soft-release по TTL нет. Админ: фильтр `?overdue=1` + счётчик `GET orders/admin/awaiting-overdue-count` (SLA = `ORDER_AWAITING_TTL`). Копирайт hold: `Admin/lib/giftHoldCopy.ts`.
 - **Дубли админу:** `ORDER_ADMIN_NOTIFY_EMAIL` (default `mira-robot@…`) — создан / оплачен / отменён / возврат; тот же env — inbound chat (см. ниже).
 
 Шаблоны писем: Админка → Настройки → Email. Подробно: [docs/emails.md](./docs/emails.md).
+
+### Публичный поиск
+
+Полный контракт: [docs/search.md](./docs/search.md).
+
+- `GET /search?q=` → `SearchPublicService` (optional buyer JWT → visibility + group price на subtitle).
+- Товары: name/sku/… + plain `compositionSearchText` (состав + description + actionEffect); статьи: title/excerpt + `bodySearchText`.
+- Two-phase ranking (title-хиты не вытесняются composition-only); HTML-noise q (`div`/`href`/…) не ищут rich-text.
+- PLP `?q`: guest SSR → client slug hydrate с BFF JWT (`CatalogClient`); group key API = `product` (не `products`).
+- Hero CTA «Программа благодарности» → `/articles/programma-blagodarnosti-2` (`SITE_GRATITUDE_HREF`); home CMS: [docs/settings-home.md](./docs/settings-home.md).
 
 ### Order chat: inbound mail + sticky unread
 
@@ -408,7 +424,7 @@ On-demand: `POST /api/admin/revalidate-catalog`.
 
 Первый paint для залогиненного на home — гостевые цены/видимость в «все товары», **FeaturedCollections** и остальных коллекциях; после client refetch (где есть) — актуальный контекст.
 
-**Search:** `GET /search` → `SearchPublicService` + optional buyer JWT (`CommerceContext` → visibility + group price на subtitle). Plain cols `compositionSearchText` / `bodySearchText` + pg_trgm. PLP `?q`: guest SSR shell → client slug hydrate с BFF JWT.
+**Search:** см. раздел «Публичный поиск» и [docs/search.md](./docs/search.md). S1 (commerce ctx) — закрыт.
 
 ### Известные пробелы (groups / storefront)
 
@@ -416,14 +432,12 @@ On-demand: `POST /api/admin/revalidate-catalog`.
 |----|----------|----------------|---------------|
 | **N1** | `cart/sync` → `pricing.allowPromoCodes` | ✅ `CartContext` + checkout/drawer | ❌ нет в `CartSyncResponse` / `checkoutSlice` |
 | **H1** | Home: featured collections + product strip — guest ISR | ❌ `page.tsx` только `fetchPublicCollections` / `fetchPublicProducts`; **`fetchPublicCollectionsClient` не wired** | ❌ аналогично |
-| **S1** | Search без commerce ctx | ✅ JWT → group price/visibility; PLP `?q` slug hydrate | ✅ `/search` JWT + `fetchProductList` |
+| **S1** | Search без commerce ctx | ✅ закрыт | ✅ закрыт |
 | **ISR** | Guest shell (общее) | PLP/PDP/set-siblings ✅ | client refetch коллекций с buyer JWT |
 
 **N1 fix (Front):** parity `Admin/lib/cart/CartContext.tsx` — gating промо по `pricing.allowPromoCodes`.
 
 **H1 fix:** client wrapper на `Admin/app/(site)/page.tsx` → `fetchPublicCollectionsClient()` + refetch «все товары» (`fetchPublicProductsPageClient`) при login.
-
-**S1:** ✅ `SearchPublicService` + buyer JWT; PLP `?q` → `CatalogClient` slug hydrate через BFF.
 
 ### Улучшения (backlog)
 
@@ -465,10 +479,13 @@ backend/src/user-groups/
   user-groups-admin.controller.ts
 
 backend/src/catalog/catalog.public.service.ts   ← finalizeProductCards, listProducts visibility pool
-backend/src/search/search.public.service.ts     ← search (пока без commerce ctx)
+backend/src/search/search.public.service.ts     ← search + commerce ctx + two-phase + plain cols
 Admin/app/(site)/page.tsx                       ← home ISR guest
-Admin/app/(site)/catalog/catalogLoad.ts         ← hydrateSearchPage (guest)
-Admin/app/(site)/catalog/CatalogClient.tsx      ← skip hydrate when q
+Admin/app/(site)/catalog/catalogLoad.ts         ← hydrateSearchPage (key=product)
+Admin/app/(site)/catalog/CatalogClient.tsx      ← PLP hydrate; при q — slug hydrate с JWT
+backend/src/orders/order-awaiting-payment*.ts   ← remind only; timeline chips (sent/due/failed)
+Admin/app/(admin)/admin/orders/AwaitingPaymentChips.tsx
+Admin/app/(admin)/admin/orders/OrdersListClient.tsx ← фильтр «Просрочено >72ч» + overdue count
 backend/src/promo/promo.public.controller.ts    ← validate + allowPromoCodes
 backend/src/account/favorites.service.ts        ← commerce pipeline
 backend/src/orders/orders.public.service.ts     ← pricing snapshot on create

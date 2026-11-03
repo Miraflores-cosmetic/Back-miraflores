@@ -143,7 +143,7 @@ export function refundIntroText(opts: {
   const number = opts.orderNumber.trim();
   const amountLabel = rubLabel(opts.amount);
   if (opts.kind === 'late') {
-    return `Срок оплаты заказа ${number} истёк. Платёж отменён, средства вернутся автоматически.`;
+    return `Заказ ${number} уже был отменён. Поздний платёж отменён, средства вернутся автоматически.`;
   }
   if (opts.full) {
     return `По заказу ${number} оформлен полный возврат на ${amountLabel}.`;
@@ -168,9 +168,7 @@ export function baseOrderVars(opts: {
   tracking?: string | null;
   changesSummary?: string;
   reserveHours?: number;
-  /** Дата/время авто-отмены (для напоминания за 24 ч до TTL). */
-  cancelAtLabel?: string;
-  /** Причина отмены (например «автоматически из‑за неоплаты»). */
+  /** Причина отмены (ручная: админ / ЛК). */
   cancelReason?: string;
   items?: OrderEmailItem[];
   itemsText?: string;
@@ -234,7 +232,6 @@ export function baseOrderVars(opts: {
     'order.changes_summary': (opts.changesSummary || '').trim(),
     'order.reserve_hours':
       opts.reserveHours != null ? String(opts.reserveHours) : '',
-    'order.cancel_at_label': (opts.cancelAtLabel || '').trim(),
     'order.cancel_reason': (opts.cancelReason || '').trim(),
     'order.items_text': itemsText,
     'order.items_html': itemsHtml,

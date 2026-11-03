@@ -54,10 +54,6 @@ const config = {
     return undefined;
   }),
 };
-const yookassa = {
-  cancelPaymentsBestEffort: vi.fn(async () => undefined),
-};
-
 function makeService() {
   const payTokens = new OrderPayTokenService(config as never);
   const lifecycle = {
@@ -74,8 +70,6 @@ function makeService() {
       config as never,
       lifecycle as never,
       payTokens,
-      yookassa as never,
-      { applyRetentionForOrder: vi.fn(async () => undefined) } as never,
     ),
     lifecycle,
   };
@@ -102,78 +96,6 @@ describe('OrderAwaitingPaymentService', () => {
     const built = makeService();
     service = built.service;
     lifecycle = built.lifecycle;
-  });
-
-  describe('expireStaleAwaitingOrders', () => {
-    it('отменяет просроченные и снимает резерв + письмо', async () => {
-      order.findMany.mockResolvedValue([
-        {
-          id: 'old1',
-          status: OrderStatus.AWAITING_PAYMENT,
-          items: [{ variantId: 'v1', qty: 2 }],
-        },
-      ]);
-      order.findUnique.mockResolvedValue({
-        id: 'old1',
-        number: 'MF-1',
-        email: 'a@b.c',
-        status: OrderStatus.AWAITING_PAYMENT,
-        items: [{ variantId: 'v1', qty: 2 }],
-      });
-      order.update.mockResolvedValue({
-        id: 'old1',
-        status: OrderStatus.CANCELLED,
-      });
-      payment.findMany.mockResolvedValue([]);
-      payment.updateMany.mockResolvedValue({ count: 1 });
-      orderEvent.create.mockResolvedValue({});
-
-      const n = await service.expireStaleAwaitingOrders(
-        new Date('2026-08-03T12:00:00Z'),
-      );
-
-      expect(n).toBe(1);
-      expect(releaseStockReserve).toHaveBeenCalled();
-      expect(order.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: 'old1' },
-          data: { status: OrderStatus.CANCELLED },
-        }),
-      );
-      expect(payment.updateMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: { status: PaymentStatus.CANCELED },
-        }),
-      );
-      expect(lifecycle.notifyOrderCancelled).toHaveBeenCalledWith(
-        'a@b.c',
-        'MF-1',
-        expect.stringContaining('автоматически отменён'),
-      );
-    });
-
-    it('expire backlog > 50 → OPS_ALERT (throttle-aware)', async () => {
-      order.count.mockResolvedValue(120);
-      order.findMany.mockResolvedValue([]);
-      config.get.mockImplementation((key: string) => {
-        if (key === 'ORDER_AWAITING_TTL_MINUTES') return '60';
-        if (key === 'ORDER_PAY_SECRET') return 'test-pay-secret';
-        if (key === 'OPS_ALERT_EMAIL') return 'ops@test';
-        return undefined;
-      });
-
-      await service.expireStaleAwaitingOrders(new Date('2026-08-03T12:00:00Z'));
-
-      expect(lifecycle.notifyCustomer).toHaveBeenCalledWith(
-        expect.objectContaining({
-          to: 'ops@test',
-          subject: expect.stringContaining('TTL expire backlog'),
-        }),
-      );
-      expect(order.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ take: 50, orderBy: { createdAt: 'asc' } }),
-      );
-    });
   });
 
   describe('processAwaitingPaymentReminders', () => {

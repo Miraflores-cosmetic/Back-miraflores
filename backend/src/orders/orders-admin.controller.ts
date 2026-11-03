@@ -58,9 +58,12 @@ export class OrdersAdminController {
     @Query('limit') limit?: string,
     @Query('flag') flag?: string,
     @Query('unviewed') unviewed?: string,
+    @Query('overdue') overdue?: string,
   ) {
     const unviewedOnly =
       unviewed === '1' || unviewed?.trim().toLowerCase() === 'true';
+    const overdueOnly =
+      overdue === '1' || overdue?.trim().toLowerCase() === 'true';
     return this.orders.list({
       q,
       status,
@@ -69,12 +72,18 @@ export class OrdersAdminController {
       staffUserId,
       flag,
       unviewedOnly,
+      overdueOnly,
     });
   }
 
   @Get('unviewed-count')
   unviewedCount() {
     return this.orders.unviewedCount();
+  }
+
+  @Get('awaiting-overdue-count')
+  awaitingPaymentOverdueCount() {
+    return this.orders.awaitingPaymentOverdueCount();
   }
 
   @Get('ozon-flags')

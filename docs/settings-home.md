@@ -28,3 +28,11 @@ Public BFF for the storefront Home page: one HTTP round-trip for CMS-driven bloc
 ## Front usage
 
 `HomeCmsProvider` on `/` loads the bundle once; sections read from context and skip duplicate fetches when data is present.
+
+## Hero CTA «Программа благодарности»
+
+Не из CMS-bundle. Hardcoded в Front `HomeHero` CTAs → `SITE_GRATITUDE_HREF` = `/articles/programma-blagodarnosti-2` (`Front/src/config/siteNavLinks.ts`). Не якорный `#gratitude-program`.
+
+Admin promo picker option: `Admin/lib/homePromoPageOptions.ts` — тот же article slug.
+
+Пороги/подарки программы — `gratitude` в bundle + `/admin/settings/gratitude`.

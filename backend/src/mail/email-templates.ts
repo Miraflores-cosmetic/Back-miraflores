@@ -499,7 +499,7 @@ export function buildOrderRefundEmail(params: {
   const text =
     kind === 'late'
       ? [
-          `Срок оплаты заказа ${number} истёк. Платёж отменён, средства вернутся автоматически.`,
+          `Заказ ${number} уже был отменён. Поздний платёж отменён, средства вернутся автоматически.`,
           '',
           site,
         ].join('\n')
@@ -514,7 +514,7 @@ export function buildOrderRefundEmail(params: {
 
   const lead =
     kind === 'late'
-      ? `<p style="margin:0 0 16px;">Срок оплаты заказа <strong>${escapeHtml(number)}</strong> истёк. Платёж отменён — средства вернутся автоматически (срок зависит от банка).</p>`
+      ? `<p style="margin:0 0 16px;">Заказ <strong>${escapeHtml(number)}</strong> уже был отменён. Поздний платёж отменён — средства вернутся автоматически (срок зависит от банка).</p>`
       : params.full
         ? `<p style="margin:0 0 16px;">По заказу <strong>${escapeHtml(number)}</strong> оформлен полный возврат на <strong>${escapeHtml(amountLabel)}</strong>.</p>`
         : `<p style="margin:0 0 16px;">По заказу <strong>${escapeHtml(number)}</strong> оформлен возврат на <strong>${escapeHtml(amountLabel)}</strong>.</p>`;

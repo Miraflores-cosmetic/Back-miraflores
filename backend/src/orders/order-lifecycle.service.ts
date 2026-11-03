@@ -98,7 +98,6 @@ export class OrderLifecycleService {
     orderId?: string;
     payToken?: string | null;
     payUrl?: string;
-    cancelAtLabel?: string;
     /** 1 = 5м, 2 = 24ч, 3 = 48ч */
     stage?: 1 | 2 | 3;
   }): Promise<'sent' | 'skipped' | 'failed'> {
@@ -115,7 +114,6 @@ export class OrderLifecycleService {
         orderId: input.orderId,
         payToken: input.payToken,
         payUrl: input.payUrl,
-        cancelAtLabel: input.cancelAtLabel,
         stage: input.stage,
       });
       return 'sent';

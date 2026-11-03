@@ -198,13 +198,16 @@ describe('MailService templated customer mail', () => {
       orderNumber: 'MF-9',
       total: 500,
       stage: 3,
-      cancelAtLabel: '23.10.2026, 15:00',
     });
     expect(emailNotifications.buildForEvent).toHaveBeenCalledWith(
       'order_awaiting_payment_48h',
       expect.objectContaining({
-        'order.cancel_at_label': '23.10.2026, 15:00',
+        'order.number': 'MF-9',
+        'order.reserve_hours': expect.any(String),
       }),
+    );
+    expect(emailNotifications.buildForEvent.mock.calls[0]?.[1]).not.toHaveProperty(
+      'order.cancel_at_label',
     );
   });
 

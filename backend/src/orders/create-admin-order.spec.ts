@@ -45,7 +45,6 @@ describe('createAdminOrder', () => {
   const addEvent = vi.fn();
   const notifyAdminOrderCreated = vi.fn();
   const seedCustomerNoteFromOrder = vi.fn();
-  const expireStaleAwaitingOrders = vi.fn();
   const resolveGratitudeGiftLines = vi.fn(async () => []);
 
   let orderCreate: ReturnType<typeof vi.fn>;
@@ -124,7 +123,6 @@ describe('createAdminOrder', () => {
       giftsPublic: { applyForCheckout: applyForCheckoutGift } as never,
       lifecycle: { addEvent, notifyAdminOrderCreated } as never,
       orderChat: { seedCustomerNoteFromOrder } as never,
-      awaitingPayment: { expireStaleAwaitingOrders } as never,
       resolveGratitudeGiftLines,
       yourichSync: { touch: yourichTouch } as never,
       yourichClient: { fallbackOfferId: () => 'offer-1' } as never,

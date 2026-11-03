@@ -12,7 +12,7 @@ export type CancelUnpaidOrderOpts = {
   message?: string;
   actorUserId?: string | null;
   giftNote?: string;
-  /** Доп. meta события (reason: abandon | ttl | account | admin) */
+  /** Доп. meta события (reason: abandon | account | admin). ttl — legacy, не используется. */
   reason?: string;
 };
 

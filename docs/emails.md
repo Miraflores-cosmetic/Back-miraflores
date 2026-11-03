@@ -20,27 +20,28 @@
 
 ---
 
-## Неоплата: TTL, remind_*, воркер
+## Неоплата: remind_* (без авто-отмены)
 
 | Env | Default | Смысл |
 |-----|---------|--------|
-| `ORDER_AWAITING_TTL_MINUTES` | `4320` (72 ч) | авто-отмена `AWAITING_PAYMENT` / `NEW` |
+| `ORDER_AWAITING_TTL_MINUTES` | `4320` (72 ч) | порог «просрочено» в админке; **авто-отмена отключена** |
 | `ORDER_PAY_REMIND_1_MINUTES` | `5` | 1-е письмо |
 | `ORDER_PAY_REMIND_2_MINUTES` | `1440` (24 ч) | 2-е |
-| `ORDER_PAY_REMIND_3_MINUTES` | `2880` (48 ч) | 3-е + дата авто-отмены (МСК) |
+| `ORDER_PAY_REMIND_3_MINUTES` | `2880` (48 ч) | 3-е напоминание |
 
-Ограничение: `remind1 < remind2 < remind3 < TTL` (код поджимает значения).
+Ограничение: `remind1 < remind2 < remind3 < TTL` (код поджимает: `remind3 ≥ TTL` → `TTL−1`, remind2 не ближе чем `TTL−2`). TTL — только UI overdue, не cancel.
 
-**Воркер** `OrdersExpiryWorker`: раз в **1 минуту**, лидер по `pg_try_advisory_lock`. За tick:
-
-1. `processAwaitingPaymentReminders` — до 100 заказов (`FOR UPDATE SKIP LOCKED`)
-2. `expireStaleAwaitingOrders` — до 50 просроченных
+**Воркер** `OrdersExpiryWorker`: раз в **1 минуту**, лидер по `pg_try_advisory_lock`. За tick только `processAwaitingPaymentReminders` (до 100, `FOR UPDATE SKIP LOCKED`). Expire scaffolding удалён.
 
 Сервис: `OrderAwaitingPaymentService` (не `OrdersPublicService`).
 
 **Backlog remind:** перед batch считаем due; если `due > ORDER_PAY_REMIND_BACKLOG_ALERT` (default 100) — `OPS_ALERT awaiting_remind_backlog` (+ email), throttle 1 ч.
 
-**Backlog expire:** batch TTL-отмены = **50**/мин. Если due > `ORDER_AWAITING_EXPIRE_BACKLOG_ALERT` (default 50) — `OPS_ALERT awaiting_expire_backlog` (+ email), throttle 1 ч. Массовый TTL иначе отстаёт часами.
+Отмена неоплаченных — только вручную (админка / ЛК). После 72 ч: красные чипы `5 мин / 24 ч / 48 ч / 72 ч` на списке и карточке заказа (`AwaitingPaymentChips`).
+
+ЛК / guest pay: оплата доступна, пока заказ `AWAITING_PAYMENT` (или `NEW`). `payExpiresAt` в account API не отдаётся; HMAC `payToken` живёт 30 суток (не cutoff по `ORDER_AWAITING_TTL`).
+
+Stock + gift CAPTURE: до ручной отмены / abandon (не soft-release). Админ: фильтр «Просрочено >72ч» (`overdue=1` + count). Chips: `done`/✓ только `mailStatus=sent`; reached без sent → `due`. Expire scaffolding удалён; `ORDER_AWAITING_EXPIRE_BACKLOG_ALERT` — **dead**.
 
 ### Catch-up после простоя API (осознанный trade-off)
 
@@ -68,13 +69,13 @@ Default: `mira-robot@miraflores-shop.ru`. Пустая строка в env = в�
 |---------|--------|------|
 | Новый заказ | сразу после create | номер, ФИО, email, тел, сумма, **состав** |
 | Заказ оплачен | вместе с `order_paid` покупателю | номер, ФИО, email, тел, сумма |
-| Заказ отменён | вместе с `order_cancelled` (TTL/admin/ЛК; **не** abandon) | номер, ФИО, email, тел, сумма |
+| Заказ отменён | вместе с `order_cancelled` (admin/ЛК; **не** abandon, **не** авто-TTL) | номер, ФИО, email, тел, сумма |
 | Возврат | вместе с `order_refund` | номер, ФИО, email, тел, сумма (+ сумма возврата) |
 | Сообщение в чате | клиент написал в чат заказа / поддержки | текст, клиент, ссылка в админку (throttle `ORDER_CHAT_EMAIL_MIN_INTERVAL_MS`) |
 
 ### Abandon checkout — без письма (осознанно, не регрессить)
 
-`POST …/orders/:id/abandon` отменяет заказ **без** `order_cancelled`. TTL / admin / ЛК — шлют письмо.
+`POST …/orders/:id/abandon` отменяет заказ **без** `order_cancelled`. Admin / ЛК — шлют письмо.
 
 ### CTA «Оплатить» (не регрессить)
 
@@ -94,11 +95,11 @@ Default: `mira-robot@miraflores-shop.ru`. Пустая строка в env = в�
 |------|--------|------|
 | `order_awaiting_payment` | ~5 мин, stage 1 | покупатель |
 | `order_awaiting_payment_24h` | ~24 ч, stage 2 | покупатель |
-| `order_awaiting_payment_48h` | ~48 ч, stage 3; есть `order.cancel_at_label` | покупатель |
+| `order_awaiting_payment_48h` | ~48 ч, stage 3; авто-отмена отключена | покупатель |
 | `order_paid` | успешная оплата обычного заказа | покупатель |
 | `order_shipped` | отправка / трек | покупатель |
 | `order_delivered` | статус доставлен | покупатель |
-| `order_cancelled` | TTL 72 ч, админ, ЛК — **не** checkout `abandon` | покупатель |
+| `order_cancelled` | админ / ЛК — **не** checkout `abandon` | покупатель |
 | `order_updated` | админ изменил адрес/состав (если включено) | покупатель |
 | `order_surcharge` | доплата после увеличения суммы | покупатель |
 | `order_refund` | возврат (admin / late / full) | покупатель |
@@ -127,8 +128,7 @@ Preview в админке: variants `full` / `sparse` (sparse прячет `#if`
 | `order.number` | номер заказа |
 | `order.url` | ЛК / заказ |
 | `order.pay_url` | deep-link оплаты (guest: `/order/pay?…`) |
-| `order.reserve_hours` | ceil(TTL/60) |
-| `order.cancel_at_label` | дата авто-отмены МСК (только 48 ч) |
+| `order.reserve_hours` | ceil(TTL/60) — SLA overdue в тексте (не авто-отмена) |
 | `order.total_label` / `*_label` | суммы с ₽ |
 | `order.tracking` / `tracking_block` | трек |
 | `order.cancel_reason` | текст отмены |
@@ -170,7 +170,7 @@ grep -E '^(ORDER_AWAITING_TTL|ORDER_PAY_REMIND|SMTP_|MAIL_|FRONTEND_PUBLIC)' \
   /opt/miraflores/backend/.env
 ```
 
-В карточке заказа Admin: события `PAYMENT_REMIND` (stage / catch-up) и `CANCELLED` по TTL.
+В карточке заказа Admin: события `PAYMENT_REMIND` (stage / catch-up); `CANCELLED` — только при ручной отмене. Чипы awaiting-payment — см. [structure.md](../structure.md).
 
 ---
 
@@ -181,9 +181,10 @@ grep -E '^(ORDER_AWAITING_TTL|ORDER_PAY_REMIND|SMTP_|MAIL_|FRONTEND_PUBLIC)' \
 | `backend/src/mail/email-notification-events.ts` | реестр ключей и дефолтов |
 | `backend/src/mail/email-notifications.service.ts` | CRUD шаблонов, preview, render |
 | `backend/src/mail/mail.service.ts` | SMTP + send* |
-| `backend/src/orders/order-awaiting-payment.service.ts` | remind + expire |
-| `backend/src/orders/order-awaiting-payment-schedule.ts` | TTL / remind_* / catch-up |
+| `backend/src/orders/order-awaiting-payment.service.ts` | remind only |
+| `backend/src/orders/order-awaiting-payment-schedule.ts` | remind_* / catch-up / timeline chips |
 | `backend/src/orders/orders-expiry.worker.ts` | тик 1 мин + advisory lock |
+| `Admin/…/orders/AwaitingPaymentChips.tsx` | чипы 5м/24ч/48ч/72ч |
 | `docs/order-chat.md` | чат (письма reply — здесь) |
 
-Ops-обзор TTL/воркера также в [structure.md](../structure.md) и [deploy.md](../deploy.md).
+Ops-обзор remind/воркера: [structure.md](../structure.md), [deploy.md](../deploy.md).

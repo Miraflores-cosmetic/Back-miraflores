@@ -51,19 +51,16 @@ export type BuyerOrder = {
   /** Неоплаченный заказ: можно открыть виджет ЮKassa */
   canPay?: boolean;
   payToken?: string | null;
-  /** ISO: до какого момента ждать оплату (TTL). */
+  /**
+   * Legacy: раньше дедлайн оплаты (= TTL авто-отмены).
+   * Авто-отмена отключена — API отдаёт null; поле не гейтит оплату.
+   */
   payExpiresAt?: string | null;
 };
 
-/** UI: canPay с бэка + не истёк TTL (если есть payExpiresAt). */
-export function buyerOrderCanPayNow(order: {
-  canPay?: boolean;
-  payExpiresAt?: string | null;
-}): boolean {
-  if (!order.canPay) return false;
-  if (!order.payExpiresAt) return true;
-  const ts = Date.parse(order.payExpiresAt);
-  return Number.isFinite(ts) ? ts > Date.now() : true;
+/** UI: оплата пока бэкенд canPay (AWAITING_PAYMENT / NEW). Без TTL cutoff. */
+export function buyerOrderCanPayNow(order: { canPay?: boolean }): boolean {
+  return Boolean(order.canPay);
 }
 
 export type BuyerOrderDetail = BuyerOrder & {
@@ -89,7 +86,7 @@ export type BuyerOrderDetail = BuyerOrder & {
   giftCertificateCode?: string | null;
   giftCertificateAmount?: number;
   payToken: string | null;
-  /** ISO: до какого момента ждать оплату (TTL). */
+  /** Legacy; не гейтит оплату (см. BuyerOrder). */
   payExpiresAt?: string | null;
   canPay?: boolean;
   canCancel?: boolean;
