@@ -83,13 +83,17 @@ apply_prod_yandex_pay_env() {
   yp_env="${yp_env:-production}"
 
   log "sync YANDEX_PAY_* → $DEPLOY_HOST backend/.env"
-  "${SSH[@]}" "$DEPLOY_HOST" "python3 -" "$DEPLOY_PATH/backend/.env" <<PY
+  "${SSH[@]}" "$DEPLOY_HOST" \
+    YP_MID="$mid" YP_KEY="$api_key" YP_ENV="$yp_env" \
+    python3 - "$DEPLOY_PATH/backend/.env" <<'PY'
+import os
 import sys
+
 path = sys.argv[1]
 updates = {
-    "YANDEX_PAY_MERCHANT_ID": ${mid@Q},
-    "YANDEX_PAY_API_KEY": ${api_key@Q},
-    "YANDEX_PAY_ENV": ${yp_env@Q},
+    "YANDEX_PAY_MERCHANT_ID": os.environ["YP_MID"],
+    "YANDEX_PAY_API_KEY": os.environ["YP_KEY"],
+    "YANDEX_PAY_ENV": os.environ["YP_ENV"],
 }
 try:
     with open(path, "r", encoding="utf-8") as f:
