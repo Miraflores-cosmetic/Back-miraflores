@@ -51,6 +51,7 @@ export type AdminVariant = {
   stock: number;
   stockReserve: number;
   active: boolean;
+  isSample: boolean;
   productImageIds: string[];
   gallery: { id: string; url: string; sortOrder: number; mediaType?: 'image' | 'video' }[];
   shades: AdminVariantShade[];
