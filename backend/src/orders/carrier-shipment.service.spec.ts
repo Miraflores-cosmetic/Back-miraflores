@@ -19,8 +19,9 @@ describe('buildCdekPackagesFromOrderItems', () => {
         isGratitudeGift: true,
       },
     ]);
-    expect(pkgs).toHaveLength(2);
-    expect(pkgs[1].items[0]).toMatchObject({
+    expect(pkgs).toHaveLength(1);
+    expect(pkgs[0].items).toHaveLength(2);
+    expect(pkgs[0].items[1]).toMatchObject({
       name: 'Подарок',
       ware_key: '4694872410287',
       cost: 0,

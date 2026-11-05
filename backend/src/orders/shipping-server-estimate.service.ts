@@ -10,8 +10,8 @@ import {
 } from '../ozon/ozon-tariff';
 import { loadOzonTariffLines } from '../ozon/ozon-variant-dims';
 import {
-  packageDimsForQuantity,
-  resolveCdekVariantDims,
+  aggregateCdekPackageMetrics,
+  type CdekOrderLineInput,
 } from './cdek-package.util';
 
 type EstimateLine = { variantId: string; qty: number };
@@ -237,22 +237,14 @@ export class ShippingServerEstimateService {
     });
     const byId = new Map(variants.map((v) => [v.id, v]));
 
-    const packages: Array<{
-      weight: number;
-      length: number;
-      width: number;
-      height: number;
-    }> = [];
-    for (const line of lines) {
-      const row = byId.get(line.variantId);
-      const q = Math.max(1, Math.floor(line.qty || 1));
-      const { weightG, lengthCm, widthCm, heightCm } = resolveCdekVariantDims(row);
-      packages.push({
-        weight: Math.max(1, Math.round(weightG * q)),
-        ...packageDimsForQuantity(lengthCm, widthCm, heightCm, q),
-      });
-    }
-    if (!packages.length) return null;
+    const cdekLines: CdekOrderLineInput[] = lines.map((line) => ({
+      title: '',
+      sku: '',
+      qty: Math.max(1, Math.floor(line.qty || 1)),
+      unitPrice: 0,
+      variantId: line.variantId,
+    }));
+    const packages = [aggregateCdekPackageMetrics(cdekLines, byId)];
 
     const fromCode = Number.parseInt(
       this.config.get<string>('CDEK_FROM_CITY_CODE') ||

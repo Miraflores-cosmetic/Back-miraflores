@@ -70,30 +70,80 @@ export type CdekPackagePayload = {
   }>;
 };
 
-/** По одной упаковке на линию заказа — вес/габариты из ProductVariant. */
+/** Габариты одного места: суммарный объём линий, форма — по крупнейшей позиции. */
+export function aggregateCdekPackageMetrics(
+  lines: CdekOrderLineInput[],
+  variantById: Map<string, CdekVariantDims> = new Map(),
+): { weight: number; length: number; width: number; height: number } {
+  let totalWeight = 0;
+  let totalVolume = 0;
+  let shapeLength = DEFAULT_L_MM / 10;
+  let shapeWidth = DEFAULT_W_MM / 10;
+  let shapeHeight = DEFAULT_H_MM / 10;
+  let maxUnitVolume = 0;
+
+  for (const l of lines) {
+    const row = l.variantId ? variantById.get(l.variantId) : undefined;
+    const { weightG, lengthCm, widthCm, heightCm } = resolveCdekVariantDims(row);
+    const amount = Math.max(1, l.qty);
+    totalWeight += weightG * amount;
+    const unitVol = lengthCm * widthCm * heightCm;
+    totalVolume += unitVol * amount;
+    if (unitVol >= maxUnitVolume) {
+      maxUnitVolume = unitVol;
+      shapeLength = lengthCm;
+      shapeWidth = widthCm;
+      shapeHeight = heightCm;
+    }
+  }
+
+  const templateVol = shapeLength * shapeWidth * shapeHeight;
+  const dims =
+    totalVolume > 0 && templateVol > 0
+      ? (() => {
+          const scale = Math.cbrt(totalVolume / templateVol);
+          return {
+            length: Math.max(1, Math.round(shapeLength * scale)),
+            width: Math.max(1, Math.round(shapeWidth * scale)),
+            height: Math.max(1, Math.round(shapeHeight * scale)),
+          };
+        })()
+      : { length: shapeLength, width: shapeWidth, height: shapeHeight };
+
+  return {
+    weight: Math.max(1, totalWeight),
+    ...dims,
+  };
+}
+
+/** Одно место (package) на заказ; позиции — в items[], веса из ProductVariant. */
 export function buildCdekPackagesFromOrderItems(
   lines: CdekOrderLineInput[],
   variantById: Map<string, CdekVariantDims> = new Map(),
 ): CdekPackagePayload[] {
-  return lines.map((l, idx) => {
+  if (!lines.length) return [];
+
+  const items = lines.map((l, idx) => {
     const row = l.variantId ? variantById.get(l.variantId) : undefined;
-    const { weightG, lengthCm, widthCm, heightCm } = resolveCdekVariantDims(row);
+    const { weightG } = resolveCdekVariantDims(row);
     const amount = Math.max(1, l.qty);
-    const pkgDims = packageDimsForQuantity(lengthCm, widthCm, heightCm, amount);
     return {
-      number: String(idx + 1),
-      weight: Math.max(1, weightG * amount),
-      ...pkgDims,
-      items: [
-        {
-          name: (l.title || 'Товар').slice(0, 255),
-          ware_key: (l.sku || `sku-${idx + 1}`).slice(0, 50),
-          payment: { value: 0 },
-          cost: Math.max(0, l.unitPrice),
-          amount,
-          weight: weightG,
-        },
-      ],
+      name: (l.title || 'Товар').slice(0, 255),
+      ware_key: (l.sku || `sku-${idx + 1}`).slice(0, 50),
+      payment: { value: 0 as const },
+      cost: Math.max(0, l.unitPrice),
+      amount,
+      weight: weightG,
     };
   });
+
+  const metrics = aggregateCdekPackageMetrics(lines, variantById);
+
+  return [
+    {
+      number: '1',
+      ...metrics,
+      items,
+    },
+  ];
 }

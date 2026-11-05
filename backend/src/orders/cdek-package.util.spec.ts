@@ -32,10 +32,13 @@ describe('buildCdekPackagesFromOrderItems', () => {
       ],
       variantById,
     );
-    expect(pkgs).toHaveLength(2);
+    expect(pkgs).toHaveLength(1);
+    expect(pkgs[0].number).toBe('1');
+    expect(pkgs[0].items).toHaveLength(2);
     expect(pkgs[0].items[0].weight).toBe(60);
-    expect(pkgs[0].weight).toBe(120);
-    expect(pkgs[1].items[0].weight).toBe(80);
+    expect(pkgs[0].items[0].amount).toBe(2);
+    expect(pkgs[0].items[1].weight).toBe(80);
+    expect(pkgs[0].weight).toBe(200);
     expect(pkgs[0].length).toBeGreaterThan(0);
     expect(pkgs[0].width).toBeGreaterThan(0);
     expect(pkgs[0].height).toBeGreaterThan(0);
