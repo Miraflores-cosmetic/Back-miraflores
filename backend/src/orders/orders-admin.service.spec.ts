@@ -167,6 +167,11 @@ describe('OrdersAdminService.cancel', () => {
         seedCustomerNoteFromOrder: vi.fn(),
       } as never,
       { createAdmin: vi.fn() } as never,
+      {
+        isConfigured: () => false,
+        cancelOrdersBestEffort: async () => undefined,
+        createRefund: vi.fn(),
+      } as never,
     );
   });
 
@@ -304,6 +309,11 @@ describe('OrdersAdminService.refund + gift RELEASE', () => {
         seedCustomerNoteFromOrder: vi.fn(),
       } as never,
       { createAdmin: vi.fn() } as never,
+      {
+        isConfigured: () => false,
+        cancelOrdersBestEffort: async () => undefined,
+        createRefund: vi.fn(),
+      } as never,
     );
   });
 
@@ -527,6 +537,11 @@ describe('OrdersAdminService.updateShippingAddress', () => {
         seedCustomerNoteFromOrder: vi.fn(),
       } as never,
       { createAdmin: vi.fn() } as never,
+      {
+        isConfigured: () => false,
+        cancelOrdersBestEffort: async () => undefined,
+        createRefund: vi.fn(),
+      } as never,
     );
   });
 
@@ -704,6 +719,11 @@ describe('OrdersAdminService.updateItems', () => {
         seedCustomerNoteFromOrder: vi.fn(),
       } as never,
       { createAdmin: vi.fn() } as never,
+      {
+        isConfigured: () => false,
+        cancelOrdersBestEffort: async () => undefined,
+        createRefund: vi.fn(),
+      } as never,
     );
   });
 
@@ -1002,6 +1022,11 @@ describe('OrdersAdminService.removePromo', () => {
         seedCustomerNoteFromOrder: vi.fn(),
       } as never,
       { createAdmin: vi.fn() } as never,
+      {
+        isConfigured: () => false,
+        cancelOrdersBestEffort: async () => undefined,
+        createRefund: vi.fn(),
+      } as never,
     );
   });
 
@@ -1275,6 +1300,11 @@ describe('OrdersAdminService.create pay modes', () => {
         seedCustomerNoteFromOrder: vi.fn(),
       } as never,
       { createAdmin } as never,
+      {
+        isConfigured: () => false,
+        cancelOrdersBestEffort: async () => undefined,
+        createRefund: vi.fn(),
+      } as never,
     );
 
     markPaidSpy.mockReset();
@@ -1399,6 +1429,11 @@ describe('OrdersAdminService.createCheckoutPayment reuseExisting', () => {
         seedCustomerNoteFromOrder: vi.fn(),
       } as never,
       { createAdmin: vi.fn() } as never,
+      {
+        isConfigured: () => false,
+        cancelOrdersBestEffort: async () => undefined,
+        createRefund: vi.fn(),
+      } as never,
     );
 
     vi.spyOn(service, 'getById').mockResolvedValue({

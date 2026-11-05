@@ -24,6 +24,11 @@ async function bootstrap() {
     '/api/v1/1c/exchange',
     raw({ type: '*/*', limit: '50mb' }),
   );
+  // Яндекс Пэй webhook: JWT в application/octet-stream / text
+  app.use(
+    '/api/v1/orders/yandexpay/webhook',
+    raw({ type: '*/*', limit: '1mb' }),
+  );
   app.use(json({ limit: '2mb' }));
   app.use(urlencoded({ extended: true, limit: '2mb' }));
 

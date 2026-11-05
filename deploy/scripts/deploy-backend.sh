@@ -148,6 +148,10 @@ else
   log "deploy mono $SHA → $DEPLOY_HOST"
 fi
 
+if [[ "$DO_API" -eq 1 ]]; then
+  apply_prod_yandex_pay_env
+fi
+
 log "remote build & restart"
 "${SSH[@]}" "$DEPLOY_HOST" bash -s <<REMOTE
 set -euo pipefail

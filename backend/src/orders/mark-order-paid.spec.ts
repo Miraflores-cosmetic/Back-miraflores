@@ -148,6 +148,60 @@ describe('applyPaidInTx', () => {
     );
   });
 
+  it('yandexpay: PAID + upsert payment', async () => {
+    const res = await applyPaidInTx(tx as never, lifecycle, 'o1', {
+      kind: 'yandexpay',
+      remote: { id: 'o1:1', amountRub: 1000, status: 'CAPTURED' },
+    });
+    expect(res.kind).toBe('paid');
+    expect(tx.payment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          provider: 'yandexpay',
+          externalId: 'o1:1',
+          status: PaymentStatus.SUCCEEDED,
+        }),
+      }),
+    );
+    expect(lifecycle.addEvent).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({ type: 'PAID' }),
+    );
+  });
+
+  it('yandexpay: amount mismatch → late, без PAID', async () => {
+    const res = await applyPaidInTx(tx as never, lifecycle, 'o1', {
+      kind: 'yandexpay',
+      remote: { id: 'o1:1', amountRub: 50, status: 'CAPTURED' },
+    });
+    expect(res.kind).toBe('late');
+    expect(commitStockOnPaid).not.toHaveBeenCalled();
+    expect(tx.order.update).not.toHaveBeenCalled();
+    expect(lifecycle.addEvent).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        type: 'NOTE',
+        meta: expect.objectContaining({
+          paymentProvider: 'yandexpay',
+          remoteAmount: 50,
+        }),
+      }),
+    );
+  });
+
+  it('yandexpay: CANCELLED → late', async () => {
+    tx.order.findUnique.mockResolvedValue({
+      ...orderRow,
+      status: OrderStatus.CANCELLED,
+    });
+    const res = await applyPaidInTx(tx as never, lifecycle, 'o1', {
+      kind: 'yandexpay',
+      remote: { id: 'o1:1', amountRub: 1000, status: 'CAPTURED' },
+    });
+    expect(res.kind).toBe('late');
+    expect(commitStockOnPaid).not.toHaveBeenCalled();
+  });
+
   it('yookassa: CANCELLED → late', async () => {
     tx.order.findUnique.mockResolvedValue({
       ...orderRow,
@@ -159,6 +213,53 @@ describe('applyPaidInTx', () => {
     });
     expect(res.kind).toBe('late');
     expect(commitStockOnPaid).not.toHaveBeenCalled();
+  });
+
+  it('FULFILLED + тот же externalId SUCCEEDED → already (идемпотентно)', async () => {
+    tx.order.findUnique.mockResolvedValue({
+      ...orderRow,
+      status: OrderStatus.PAID,
+    });
+    tx.payment.findFirst.mockResolvedValue({
+      status: PaymentStatus.SUCCEEDED,
+    });
+    const res = await applyPaidInTx(tx as never, lifecycle, 'o1', {
+      kind: 'yandexpay',
+      remote: { id: 'o1:1', amountRub: 1000, status: 'CAPTURED' },
+    });
+    expect(res.kind).toBe('already');
+    expect(commitStockOnPaid).not.toHaveBeenCalled();
+    expect(tx.payment.create).not.toHaveBeenCalled();
+  });
+
+  it('FULFILLED + другое списание (exclusive race) → late', async () => {
+    tx.order.findUnique.mockResolvedValue({
+      ...orderRow,
+      status: OrderStatus.PAID,
+    });
+    tx.payment.findFirst.mockResolvedValue(null);
+    const res = await applyPaidInTx(tx as never, lifecycle, 'o1', {
+      kind: 'yandexpay',
+      remote: { id: 'o1:2', amountRub: 1000, status: 'CAPTURED' },
+    });
+    expect(res.kind).toBe('late');
+    expect(commitStockOnPaid).not.toHaveBeenCalled();
+    expect(tx.payment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          externalId: 'o1:2',
+          status: PaymentStatus.SUCCEEDED,
+          provider: 'yandexpay',
+        }),
+      }),
+    );
+    expect(lifecycle.addEvent).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        type: 'NOTE',
+        meta: expect.objectContaining({ duplicateAfterPaid: true }),
+      }),
+    );
   });
 
   it('admin: не-оплачиваемый статус → BadRequest', async () => {

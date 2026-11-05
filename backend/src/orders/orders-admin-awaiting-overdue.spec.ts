@@ -51,6 +51,11 @@ describe('OrdersAdminService awaiting overdue list/count', () => {
         orderChatMessageCountsForOrders,
       } as never,
       { createAdmin: vi.fn() } as never,
+      {
+        isConfigured: () => false,
+        cancelOrdersBestEffort: async () => undefined,
+        createRefund: vi.fn(),
+      } as never,
     );
   });
 

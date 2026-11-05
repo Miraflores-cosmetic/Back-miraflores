@@ -56,6 +56,13 @@ done
 
 [[ -d "$FRONT_DIR/.git" ]] || { echo "error: нет git в $FRONT_DIR" >&2; exit 1; }
 
+YANDEX_PAY_MERCHANT_ID="${DEPLOY_YANDEX_PAY_MERCHANT_ID:-}"
+if [[ -z "$YANDEX_PAY_MERCHANT_ID" && -f "$MONO_ROOT/backend/.env" ]]; then
+  YANDEX_PAY_MERCHANT_ID="$(
+    grep -E '^YANDEX_PAY_MERCHANT_ID=' "$MONO_ROOT/backend/.env" | head -1 | cut -d= -f2- || true
+  )"
+fi
+
 if [[ -n "$COMMIT_MSG" ]]; then
   if git -C "$FRONT_DIR" diff --quiet && git -C "$FRONT_DIR" diff --cached --quiet \
     && [[ -z "$(git -C "$FRONT_DIR" status --porcelain)" ]]; then
@@ -120,6 +127,7 @@ VITE_API_URL=/api/v1
 VITE_UPLOADS_ORIGIN=
 VITE_PUBLIC_YANDEX_MAP_API_KEY=\${YANDEX_MAP_KEY}
 VITE_YANDEX_MAP_API_KEY=\${YANDEX_MAP_KEY}
+VITE_YANDEX_PAY_MERCHANT_ID=${YANDEX_PAY_MERCHANT_ID}
 EOF
 
 echo "==> npm ci (devDependencies — vite, types)"
@@ -183,6 +191,7 @@ VITE_API_URL=/api/v1
 VITE_UPLOADS_ORIGIN=
 VITE_PUBLIC_YANDEX_MAP_API_KEY=\${YANDEX_MAP_KEY}
 VITE_YANDEX_MAP_API_KEY=\${YANDEX_MAP_KEY}
+VITE_YANDEX_PAY_MERCHANT_ID=${YANDEX_PAY_MERCHANT_ID}
 EOF
 
 echo "==> npm ci (devDependencies — vite, types)"

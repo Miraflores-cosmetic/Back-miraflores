@@ -19,6 +19,8 @@ import {
 import { lockOrderForUpdate } from '../orders/order-lock';
 import { OrderPayTokenService } from '../orders/order-pay-token.service';
 import { cancelUnpaidOrderInTx } from '../orders/cancel-unpaid-order';
+import { cancelPendingAtProviders } from '../orders/cancel-pending-at-providers';
+import { YandexPayService } from '../orders/yandex-pay.service';
 import { YooKassaService } from '../orders/yookassa.service';
 import type {
   ChangeBuyerPasswordDto,
@@ -91,6 +93,7 @@ export class AccountService {
     private readonly prisma: PrismaService,
     private readonly payTokens: OrderPayTokenService,
     private readonly yookassa: YooKassaService,
+    private readonly yandexPay: YandexPayService,
     private readonly commerceContext: CommerceContextService,
     private readonly orderChat: OrderChatService,
   ) {}
@@ -759,8 +762,11 @@ export class AccountService {
       });
     });
 
-    if (result.pendingExternalIds.length) {
-      await this.yookassa.cancelPaymentsBestEffort(result.pendingExternalIds);
+    if (result.pendingPayments.length) {
+      await cancelPendingAtProviders(result.pendingPayments, {
+        yookassa: this.yookassa,
+        yandexPay: this.yandexPay,
+      });
     }
 
     scheduleAfterRlsCommitWithBypass(this.prisma, () =>

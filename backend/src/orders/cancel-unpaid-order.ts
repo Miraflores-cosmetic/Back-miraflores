@@ -16,11 +16,20 @@ export type CancelUnpaidOrderOpts = {
   reason?: string;
 };
 
+export type PendingProviderPayment = {
+  provider: string;
+  externalId: string;
+};
+
 export type CancelUnpaidOrderResult = {
   id: string;
   status: OrderStatus;
-  /** externalId PENDING-платежей — для cancel в ЮKassa после tx */
+  /**
+   * PENDING с externalId — cancel/rollback у провайдера после tx.
+   * @deprecated предпочитайте pendingPayments (provider-aware).
+   */
   pendingExternalIds: string[];
+  pendingPayments: PendingProviderPayment[];
 };
 
 /**
@@ -38,11 +47,15 @@ export async function cancelUnpaidOrderInTx(
       status: PaymentStatus.PENDING,
       externalId: { not: null },
     },
-    select: { externalId: true },
+    select: { externalId: true, provider: true },
   });
-  const pendingExternalIds = pending
-    .map((p) => p.externalId?.trim() || '')
-    .filter(Boolean);
+  const pendingPayments: PendingProviderPayment[] = pending
+    .map((p) => ({
+      provider: (p.provider || 'yookassa').trim() || 'yookassa',
+      externalId: p.externalId?.trim() || '',
+    }))
+    .filter((p) => Boolean(p.externalId));
+  const pendingExternalIds = pendingPayments.map((p) => p.externalId);
 
   await releaseStockReserve(
     tx,
@@ -77,5 +90,6 @@ export async function cancelUnpaidOrderInTx(
     id: updated.id,
     status: updated.status,
     pendingExternalIds,
+    pendingPayments,
   };
 }

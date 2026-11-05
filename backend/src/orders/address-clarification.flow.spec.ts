@@ -133,6 +133,11 @@ function makePublicService() {
       giftsPublic as never,
       settingsPublic as never,
       yookassa as never,
+      {
+        isConfigured: () => false,
+        isSandbox: () => false,
+        merchantId: () => '',
+      } as never,
       config as never,
       payTokens,
       shippingQuotes,
@@ -391,6 +396,11 @@ describe('OrdersAdminService clarification clear + list filter', () => {
         orderChatMessageCountsForOrders: vi.fn(async () => ({})),
       } as never,
       { createAdmin: vi.fn() } as never,
+      {
+        isConfigured: () => false,
+        cancelOrdersBestEffort: async () => undefined,
+        createRefund: vi.fn(),
+      } as never,
     );
     // getById after update — minimal stub via findUnique on prisma.order
     orderFindUnique.mockResolvedValue({

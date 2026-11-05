@@ -23,6 +23,8 @@ import { lockOrderForUpdate } from './order-lock';
 import { isClarificationComment } from './address-clarification';
 import { applyPaidInTx } from './mark-order-paid';
 import { cancelUnpaidOrderInTx } from './cancel-unpaid-order';
+import { cancelPendingAtProviders } from './cancel-pending-at-providers';
+import { YandexPayService } from './yandex-pay.service';
 import { CarrierShipmentService } from './carrier-shipment.service';
 import { OrderLifecycleService } from './order-lifecycle.service';
 import { releaseGiftCertificateForOrder, holdGiftCertificateForOrder } from '../gift-certificates/gift-certificate-hold.util';
@@ -121,6 +123,7 @@ export class OrdersAdminService {
     private readonly config: ConfigService,
     private readonly orderChat: OrderChatService,
     private readonly ordersPublic: OrdersPublicService,
+    private readonly yandexPay: YandexPayService,
     @Optional() private readonly yourichSync?: YourichSyncService,
   ) {}
 
@@ -1577,6 +1580,7 @@ export class OrdersAdminService {
           promoReleased: false,
           email: null as string | null,
           pendingExternalIds: [] as string[],
+          pendingPayments: [] as { provider: string; externalId: string }[],
         };
       }
 
@@ -1606,10 +1610,16 @@ export class OrdersAdminService {
         email: order.email,
         number: order.number,
         pendingExternalIds: cancelled.pendingExternalIds,
+        pendingPayments: cancelled.pendingPayments,
       };
     });
 
-    if (result.pendingExternalIds?.length) {
+    if (result.pendingPayments?.length) {
+      await cancelPendingAtProviders(result.pendingPayments, {
+        yookassa: this.yookassa,
+        yandexPay: this.yandexPay,
+      });
+    } else if (result.pendingExternalIds?.length) {
       await this.yookassa.cancelPaymentsBestEffort(result.pendingExternalIds);
     }
 
@@ -1729,42 +1739,66 @@ export class OrdersAdminService {
         }
 
         const wantProvider = opts.providerRefund === true;
-        let yookassaRefundId: string | null = null;
-        let yookassaRefundStatus: string | null = null;
+        let providerRefundId: string | null = null;
+        let providerRefundStatus: string | null = null;
         let providerPaymentId: string | null = null;
+        let providerName: string | null = null;
 
         if (wantProvider) {
           if (amount < 1) {
             throw new BadRequestException(
-              'Возврат через ЮKassa требует сумму ≥ 1 ₽ (для gift-only снимите providerRefund)',
+              'Возврат через провайдера требует сумму ≥ 1 ₽ (для gift-only снимите providerRefund)',
             );
           }
-          if (!this.yookassa.isConfigured()) {
-            throw new BadRequestException(
-              'ЮKassa не настроена. Снимите providerRefund или задайте ключи.',
-            );
-          }
-          const pay = order.payments.find(
-            (p) => p.externalId && p.provider === 'yookassa',
-          );
+          const pay =
+            order.payments.find(
+              (p) => p.externalId && p.provider === 'yandexpay',
+            ) ||
+            order.payments.find(
+              (p) => p.externalId && p.provider === 'yookassa',
+            ) ||
+            order.payments.find((p) => p.externalId);
           if (!pay?.externalId) {
             throw new BadRequestException(
-              'Нет успешного платежа ЮKassa для возврата через провайдера',
+              'Нет успешного платежа провайдера для возврата',
             );
           }
           providerPaymentId = pay.externalId;
+          providerName = pay.provider || 'yookassa';
           try {
-            const refund = await this.yookassa.createRefund({
-              paymentId: pay.externalId,
-              amountRub: amount,
-              description: opts.reason ?? `Возврат заказа ${order.number}`,
-            });
-            yookassaRefundId = refund.id;
-            yookassaRefundStatus = refund.status;
+            if (providerName === 'yandexpay') {
+              if (!this.yandexPay.isConfigured()) {
+                throw new BadRequestException(
+                  'Яндекс Пэй не настроен. Снимите providerRefund или задайте ключи.',
+                );
+              }
+              const refund = await this.yandexPay.createRefund({
+                merchantOrderId: pay.externalId,
+                amountRub: amount,
+                reason: opts.reason ?? `Возврат заказа ${order.number}`,
+                externalOperationId: `admin-${id}-${Date.now()}`,
+              });
+              providerRefundId = refund.id;
+              providerRefundStatus = refund.status;
+            } else {
+              if (!this.yookassa.isConfigured()) {
+                throw new BadRequestException(
+                  'ЮKassa не настроена. Снимите providerRefund или задайте ключи.',
+                );
+              }
+              const refund = await this.yookassa.createRefund({
+                paymentId: pay.externalId,
+                amountRub: amount,
+                description: opts.reason ?? `Возврат заказа ${order.number}`,
+              });
+              providerRefundId = refund.id;
+              providerRefundStatus = refund.status;
+            }
           } catch (e) {
+            if (e instanceof BadRequestException) throw e;
             const msg = e instanceof Error ? e.message : String(e);
             throw new BadRequestException(
-              `ЮKassa отклонила возврат: ${msg}. Учёт в системе не изменён.`,
+              `${providerName === 'yandexpay' ? 'Яндекс Пэй' : 'ЮKassa'} отклонил(а) возврат: ${msg}. Учёт в системе не изменён.`,
             );
           }
         }
@@ -1821,16 +1855,22 @@ export class OrdersAdminService {
           });
         }
 
+        const viaLabel =
+          wantProvider && providerName === 'yandexpay'
+            ? 'Яндекс Пэй'
+            : wantProvider && providerName === 'yookassa'
+              ? 'ЮKassa'
+              : null;
         await this.lifecycle.addEvent(tx, {
           orderId: id,
           type: 'REFUND',
           message: full
             ? amount > 0
-              ? `Полный возврат ${amount} ₽`
+              ? `Полный возврат ${amount} ₽${viaLabel ? ` (${viaLabel})` : ''}`
               : isGiftPurchase
                 ? 'Полный возврат (отзыв кодов покупки)'
                 : 'Полный возврат (сертификат)'
-            : `Частичный возврат ${amount} ₽`,
+            : `Частичный возврат ${amount} ₽${viaLabel ? ` (${viaLabel})` : ''}`,
           actorUserId,
           meta: {
             amount,
@@ -1839,9 +1879,10 @@ export class OrdersAdminService {
             giftReleased,
             purchaseCodesRevoked,
             providerRequested: wantProvider,
-            yookassaPaymentId: providerPaymentId,
-            refundId: yookassaRefundId,
-            providerStatus: yookassaRefundStatus,
+            paymentProvider: providerName,
+            providerPaymentId,
+            refundId: providerRefundId,
+            providerStatus: providerRefundStatus,
           },
         });
 

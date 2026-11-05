@@ -47,9 +47,19 @@ describe('AccountService', () => {
     payTokens = {
       issue: vi.fn().mockReturnValue('tok'),
     };
-    svc = new AccountService(prisma as never, payTokens as never, {
-      cancelPaymentsBestEffort: vi.fn(async () => undefined),
-    } as never);
+    svc = new AccountService(
+      prisma as never,
+      payTokens as never,
+      {
+        cancelPaymentsBestEffort: vi.fn(async () => undefined),
+      } as never,
+      {
+        isConfigured: () => false,
+        cancelOrdersBestEffort: vi.fn(async () => undefined),
+      } as never,
+      {} as never,
+      { applyRetentionForOrder: vi.fn() } as never,
+    );
   });
 
   it('updateProfile нормализует phone в E.164', async () => {

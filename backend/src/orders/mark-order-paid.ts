@@ -24,8 +24,15 @@ export type YooKassaPaymentLike = {
   status?: string;
 };
 
+export type YandexPayPaymentLike = {
+  id: string;
+  amountRub?: number | null;
+  status?: string;
+};
+
 export type MarkPaidSource =
   | { kind: 'yookassa'; remote: YooKassaPaymentLike | null }
+  | { kind: 'yandexpay'; remote: YandexPayPaymentLike | null }
   | { kind: 'admin'; actorUserId: string };
 
 export type MarkPaidLateOrder = {
@@ -119,29 +126,32 @@ async function recordSucceededPayment(
   tx: Prisma.TransactionClient,
   orderId: string,
   amount: number,
-  remote: YooKassaPaymentLike,
+  remote: { id?: string },
+  provider: 'yookassa' | 'yandexpay',
+  raw?: unknown,
 ): Promise<void> {
   if (!remote.id) return;
   const existing = await tx.payment.findFirst({
     where: { externalId: remote.id },
   });
+  const rawValue = (raw ?? remote) as unknown as Prisma.InputJsonValue;
   if (existing) {
     await tx.payment.update({
       where: { id: existing.id },
       data: {
         status: PaymentStatus.SUCCEEDED,
-        raw: remote as unknown as Prisma.InputJsonValue,
+        raw: rawValue,
       },
     });
   } else {
     await tx.payment.create({
       data: {
         orderId,
-        provider: 'yookassa',
+        provider,
         status: PaymentStatus.SUCCEEDED,
         amount,
         externalId: remote.id,
-        raw: remote as unknown as Prisma.InputJsonValue,
+        raw: rawValue,
       },
     });
   }
@@ -170,32 +180,115 @@ export async function applyPaidInTx(
   });
   if (!order) throw new NotFoundException('Заказ не найден');
 
-  if (FULFILLED.includes(order.status)) {
-    return { kind: 'already' };
-  }
-
-  const remote = source.kind === 'yookassa' ? source.remote : null;
-  const remoteAmount = remote ? parseYooKassaAmountRub(remote.amount) : null;
+  const yooRemote = source.kind === 'yookassa' ? source.remote : null;
+  const ypRemote = source.kind === 'yandexpay' ? source.remote : null;
+  const remoteAmount =
+    source.kind === 'yookassa' && yooRemote
+      ? parseYooKassaAmountRub(yooRemote.amount)
+      : source.kind === 'yandexpay' && ypRemote?.amountRub != null
+        ? Math.round(ypRemote.amountRub)
+        : null;
   const amountMismatch =
-    source.kind === 'yookassa' &&
-    remote != null &&
+    (source.kind === 'yookassa' || source.kind === 'yandexpay') &&
     remoteAmount != null &&
     order.total > 0 &&
     remoteAmount !== order.total;
+  const providerRemoteId =
+    yooRemote?.id || ypRemote?.id || undefined;
+
+  /**
+   * Уже PAID/PACKING/…:
+   * - тот же externalId SUCCEEDED/REFUNDED → already (идемпотентный webhook);
+   * - другое списание (exclusive cancel не успел) → late + автовозврат снаружи.
+   */
+  if (FULFILLED.includes(order.status)) {
+    if (source.kind === 'admin') {
+      return { kind: 'already' };
+    }
+    if (providerRemoteId) {
+      const existing = await tx.payment.findFirst({
+        where: { externalId: providerRemoteId },
+        select: { status: true },
+      });
+      if (
+        existing?.status === PaymentStatus.SUCCEEDED ||
+        existing?.status === PaymentStatus.REFUNDED
+      ) {
+        return { kind: 'already' };
+      }
+    }
+    if (source.kind === 'yookassa' && yooRemote) {
+      await recordSucceededPayment(
+        tx,
+        orderId,
+        remoteAmount ?? order.total,
+        yooRemote,
+        'yookassa',
+      );
+    } else if (source.kind === 'yandexpay' && ypRemote) {
+      await recordSucceededPayment(
+        tx,
+        orderId,
+        remoteAmount ?? order.total,
+        ypRemote,
+        'yandexpay',
+      );
+    }
+    await lifecycle.addEvent(tx, {
+      orderId,
+      type: 'NOTE',
+      message: `Повторная оплата при уже ${order.status}: заказ не меняем, нужен возврат`,
+      meta: {
+        paymentProvider: source.kind,
+        paymentId: providerRemoteId ?? null,
+        orderStatus: order.status,
+        duplicateAfterPaid: true,
+        remoteAmount: remoteAmount ?? null,
+      },
+    });
+    return {
+      kind: 'late',
+      order: {
+        id: order.id,
+        number: order.number,
+        email: order.email,
+        total: order.total,
+        status: order.status,
+      },
+    };
+  }
 
   if (!canMarkPaid(order.status)) {
     if (source.kind === 'admin') {
       throw new BadRequestException('Заказ нельзя отметить оплаченным');
     }
-    if (remote) {
-      await recordSucceededPayment(tx, orderId, order.total, remote);
+    if (source.kind === 'yookassa' && yooRemote) {
+      await recordSucceededPayment(
+        tx,
+        orderId,
+        order.total,
+        yooRemote,
+        'yookassa',
+      );
+    } else if (source.kind === 'yandexpay' && ypRemote) {
+      await recordSucceededPayment(
+        tx,
+        orderId,
+        order.total,
+        ypRemote,
+        'yandexpay',
+      );
     }
     await lifecycle.addEvent(tx, {
       orderId,
       type: 'NOTE',
       message: `Оплата после ${order.status}: заказ не активирован, нужен возврат`,
-      meta: remote?.id
-        ? { yookassaPaymentId: remote.id, orderStatus: order.status }
+      meta: providerRemoteId
+        ? {
+            paymentProvider: source.kind,
+            paymentId: providerRemoteId,
+            orderStatus: order.status,
+          }
         : { orderStatus: order.status },
     });
     return {
@@ -210,19 +303,31 @@ export async function applyPaidInTx(
     };
   }
 
-  if (amountMismatch && remote) {
-    await recordSucceededPayment(
-      tx,
-      orderId,
-      remoteAmount ?? order.total,
-      remote,
-    );
+  if (amountMismatch) {
+    if (source.kind === 'yookassa' && yooRemote) {
+      await recordSucceededPayment(
+        tx,
+        orderId,
+        remoteAmount ?? order.total,
+        yooRemote,
+        'yookassa',
+      );
+    } else if (source.kind === 'yandexpay' && ypRemote) {
+      await recordSucceededPayment(
+        tx,
+        orderId,
+        remoteAmount ?? order.total,
+        ypRemote,
+        'yandexpay',
+      );
+    }
     await lifecycle.addEvent(tx, {
       orderId,
       type: 'NOTE',
       message: `Сумма платежа ${remoteAmount} ₽ ≠ заказу ${order.total} ₽ — заказ не активирован`,
       meta: {
-        yookassaPaymentId: remote.id ?? null,
+        paymentProvider: source.kind,
+        paymentId: providerRemoteId ?? null,
         remoteAmount,
         orderTotal: order.total,
       },
@@ -262,9 +367,23 @@ export async function applyPaidInTx(
     items: order.items.map((i) => ({ sku: i.sku, qty: i.qty })),
   });
 
-  if (source.kind === 'yookassa') {
-    if (remote?.id) {
-      await recordSucceededPayment(tx, orderId, order.total, remote);
+  if (source.kind === 'yookassa' || source.kind === 'yandexpay') {
+    if (source.kind === 'yookassa' && yooRemote?.id) {
+      await recordSucceededPayment(
+        tx,
+        orderId,
+        order.total,
+        yooRemote,
+        'yookassa',
+      );
+    } else if (source.kind === 'yandexpay' && ypRemote?.id) {
+      await recordSucceededPayment(
+        tx,
+        orderId,
+        order.total,
+        ypRemote,
+        'yandexpay',
+      );
     } else {
       await tx.payment.updateMany({
         where: { orderId, status: PaymentStatus.PENDING },
@@ -274,8 +393,16 @@ export async function applyPaidInTx(
     await lifecycle.addEvent(tx, {
       orderId,
       type: 'PAID',
-      message: 'Оплата получена',
-      meta: remote?.id ? { yookassaPaymentId: remote.id } : undefined,
+      message:
+        source.kind === 'yandexpay'
+          ? 'Оплата получена (Яндекс Пэй)'
+          : 'Оплата получена',
+      meta: providerRemoteId
+        ? {
+            paymentProvider: source.kind,
+            paymentId: providerRemoteId,
+          }
+        : undefined,
     });
   } else {
     await tx.payment.updateMany({

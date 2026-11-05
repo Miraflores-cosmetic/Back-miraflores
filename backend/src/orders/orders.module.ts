@@ -16,6 +16,7 @@ import { OrderLifecycleService } from './order-lifecycle.service';
 import { OrdersPublicController } from './orders.public.controller';
 import { OrdersPublicService } from './orders.public.service';
 import { YooKassaService } from './yookassa.service';
+import { YandexPayService } from './yandex-pay.service';
 import { MailModule } from '../mail/mail.module';
 import { UserGroupsModule } from '../user-groups/user-groups.module';
 import { OrderChatModule } from '../order-chat/order-chat.module';
@@ -42,6 +43,7 @@ import { YourichModule } from '../yourich/yourich.module';
     OrderLifecycleService,
     OrderAwaitingPaymentService,
     YooKassaService,
+    YandexPayService,
     OrderPayTokenService,
     ShippingQuoteService,
     ShippingServerEstimateService,

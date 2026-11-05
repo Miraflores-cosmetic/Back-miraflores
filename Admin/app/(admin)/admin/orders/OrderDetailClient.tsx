@@ -21,6 +21,8 @@ import {
   orderEventTypeLabel,
   paymentStatusLabel,
   paymentStatusBadgeClass,
+  paymentProviderLabel,
+  refundProviderFromPayments,
 } from '@/lib/orderStatusLabels';
 import { parseJcosAddressMeta } from '@/lib/shipping/addressShippingMeta';
 import { GIFT_PARTIAL_REFUND_POLICY } from '@/lib/giftHoldCopy';
@@ -175,7 +177,10 @@ export function OrderDetailClient({
   ) {
     if (row.pendingPaymentsCanceled) {
       // CTA «новая ссылка» откроет offerSettleDelta — короткий flash.
-      showFlash(`${baseMsg} Старые ссылки ЮKassa отменены.`, 4000);
+      showFlash(
+        `${baseMsg} Старые ссылки ЮKassa / Яндекс Пэй отменены.`,
+        4000,
+      );
       return;
     }
     if (row.addressClarificationCleared) {
@@ -384,7 +389,7 @@ export function OrderDetailClient({
       (row.pendingPaymentsCanceled || row.addressClarificationCleared)
     ) {
       const message = row.pendingPaymentsCanceled
-        ? `Старые ссылки ЮKassa отменены. Выставить клиенту новую ссылку на оплату ${formatAdminMoney(checkoutAmount)}? Письмо уйдёт автоматически.`
+        ? `Старые ссылки ЮKassa / Яндекс Пэй отменены. Выставить клиенту новую ссылку на оплату ${formatAdminMoney(checkoutAmount)}? Письмо уйдёт автоматически.`
         : `Адрес уточнён. Выставить клиенту ссылку на оплату ${formatAdminMoney(checkoutAmount)}? Письмо уйдёт автоматически.`;
       askConfirm({
         title: 'Ссылка на оплату',
@@ -467,7 +472,7 @@ export function OrderDetailClient({
       }
       askConfirm({
         title: 'Возврат',
-        message: `Сумма заказа уменьшилась. Оформить возврат ${formatAdminMoney(refundSug)} через ЮKassa?`,
+        message: `Сумма заказа уменьшилась. Оформить возврат ${formatAdminMoney(refundSug)} через ${paymentProviderLabel(refundProviderFromPayments(row.payments))}?`,
         confirmLabel: 'Вернуть',
         danger: true,
         run: async () => {
@@ -825,8 +830,21 @@ export function OrderDetailClient({
       }) ? (
         <div className={styles.orderAlertDanger} role="alert">
           <strong>Деньги списаны, заказ отменён</strong>
-          Автовозврат через ЮKassa не удался. Проверьте платёж в ЛК ЮKassa и
-          оформите возврат вручную.
+          {(() => {
+            const lateMeta = order?.events?.find((e) => {
+              const m = e.meta as { lateFailed?: boolean } | null;
+              return Boolean(m && m.lateFailed);
+            })?.meta as
+              | { paymentProvider?: string }
+              | null
+              | undefined;
+            const via =
+              lateMeta?.paymentProvider === 'yandexpay' ||
+              refundProviderFromPayments(order?.payments) === 'yandexpay'
+                ? 'Яндекс Пэй'
+                : 'ЮKassa';
+            return `Автовозврат через ${via} не удался. Проверьте платёж в ЛК ${via} и оформите возврат вручную.`;
+          })()}
         </div>
       ) : null}
       {order?.needsAddressClarification ? (
@@ -1295,7 +1313,7 @@ export function OrderDetailClient({
                         </span>
                       </div>
                       <div className={styles.orderPaymentRowMeta}>
-                        <span>{p.provider}</span>
+                        <span>{paymentProviderLabel(p.provider)}</span>
                         <span aria-hidden>·</span>
                         <span>{formatAdminDateTime(p.createdAt)}</span>
                       </div>
@@ -1945,12 +1963,14 @@ export function OrderDetailClient({
                         onChange={(e) => setProviderRefund(e.target.checked)}
                         disabled={busy}
                       />
-                      <label htmlFor="order-provider-refund">Через ЮKassa</label>
+                      <label htmlFor="order-provider-refund">
+                        Через платёжного провайдера
+                      </label>
                     </div>
                     {!providerRefund ? (
                       <p className={styles.error} role="status">
-                        Без ЮKassa возврат только в учёте — деньги на карте не
-                        вернутся.
+                        Без провайдера возврат только в учёте — деньги на карте
+                        / в Яндекс Пэй не вернутся.
                       </p>
                     ) : null}
                     <AdminCompactBtn
@@ -1977,14 +1997,17 @@ export function OrderDetailClient({
                                 ? order.refundRemaining
                                 : Number(refundAmount);
                             if (providerRefund) {
-                              return `Вернуть ${amt} ₽ через ЮKassa по заказу ${order.number}?${
+                              const via = paymentProviderLabel(
+                                refundProviderFromPayments(order.payments),
+                              );
+                              return `Вернуть ${amt} ₽ через ${via} по заказу ${order.number}?${
                                 giftFullOnly
                                   ? ' Сертификат вернётся на баланс только при полном возврате.'
                                   : ''
                               }`;
                             }
                             return amt > 0
-                              ? `Учесть возврат ${amt} ₽ без ЮKassa (деньги на карте не вернутся)?`
+                              ? `Учесть возврат ${amt} ₽ без провайдера (деньги не вернутся)?`
                               : `Полный возврат без карты (открутка сертификата / отзыв кодов) по заказу ${order.number}?`;
                           })(),
                           confirmLabel: 'Вернуть',
@@ -2025,7 +2048,7 @@ export function OrderDetailClient({
                     onClick={() =>
                       askConfirm({
                         title: 'Отменить заказ',
-                        message: `Отменить заказ ${order.number}? Отмена до оплаты / без возврата через ЮKassa.`,
+                        message: `Отменить заказ ${order.number}? Отмена до оплаты / без возврата через провайдера.`,
                         confirmLabel: 'Отменить заказ',
                         danger: true,
                         run: () =>
@@ -2046,7 +2069,7 @@ export function OrderDetailClient({
                     </p>
                   ) : (
                     <p className={styles.orderHint}>
-                      Отмена до оплаты или без возврата денег через ЮKassa.
+                      Отмена до оплаты или без возврата денег через провайдера.
                     </p>
                   )}
                 </div>

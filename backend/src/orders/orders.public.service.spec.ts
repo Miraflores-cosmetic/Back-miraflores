@@ -102,6 +102,16 @@ const yookassa = {
   cancelPaymentsBestEffort: vi.fn(async () => undefined),
   cancelPayment: vi.fn(),
 };
+const yandexPay = {
+  isConfigured: vi.fn(() => true),
+  isSandbox: vi.fn(() => false),
+  merchantId: vi.fn(() => 'mid-test'),
+  cancelOrdersBestEffort: vi.fn(async () => undefined),
+  getOrder: vi.fn(),
+  createOrder: vi.fn(),
+  createRefund: vi.fn(),
+  verifyWebhookJwt: vi.fn(),
+};
 const config = {
   get: vi.fn((key: string) => {
     if (key === 'ORDER_AWAITING_TTL_MINUTES') return '60';
@@ -136,6 +146,7 @@ function makeService() {
       giftsPublic as never,
       settingsPublic as never,
       yookassa as never,
+      yandexPay as never,
       config as never,
       payTokens,
       shippingQuotes,
@@ -166,6 +177,8 @@ describe('OrdersPublicService', () => {
     prisma.$transaction.mockImplementation(async (fn: (t: typeof tx) => unknown) =>
       fn(tx),
     );
+    yandexPay.isConfigured.mockReturnValue(true);
+    yandexPay.cancelOrdersBestEffort.mockResolvedValue(undefined);
     config.get.mockImplementation((key: string) => {
       if (key === 'ORDER_AWAITING_TTL_MINUTES') return '60';
       if (key === 'ORDER_PAY_SECRET') return 'test-pay-secret';
@@ -620,6 +633,63 @@ describe('OrdersPublicService', () => {
         service.createPayment('ord1', { payToken: token }),
       ).rejects.toThrow(/Оператор уточняет адрес/);
       expect(yookassa.createEmbeddedPayment).not.toHaveBeenCalled();
+    });
+
+    it('exclusive: гасит PENDING Яндекс Пэй перед create ЮKassa', async () => {
+      const token = payTokens.issue('ord1', 'guest-1');
+      order.findUnique.mockResolvedValue({
+        id: 'ord1',
+        number: 'JCOS-1',
+        guestId: 'guest-1',
+        userId: null,
+        email: 'a@b.co',
+        status: OrderStatus.AWAITING_PAYMENT,
+        total: 500,
+        giftPurchaseDenominationId: null,
+        needsAddressClarification: false,
+        items: [{ title: 'Item', qty: 1, unitPrice: 500 }],
+        payments: [
+          {
+            id: 'yp1',
+            provider: 'yandexpay',
+            status: PaymentStatus.PENDING,
+            externalId: 'ord1:1',
+            amount: 500,
+            confirmationUrl: 'https://pay.yandex/l/1',
+            raw: null,
+          },
+        ],
+      });
+      payment.findMany.mockResolvedValue([
+        {
+          id: 'yp1',
+          provider: 'yandexpay',
+          externalId: 'ord1:1',
+        },
+      ]);
+      payment.updateMany.mockResolvedValue({ count: 1 });
+      payment.create.mockResolvedValue({});
+      yookassa.createEmbeddedPayment.mockResolvedValue({
+        payment: {
+          id: 'yk_pay_1',
+          confirmation: { confirmation_token: 'conf-tok', confirmation_url: null },
+        },
+        confirmationToken: 'conf-tok',
+      });
+
+      await service.createPayment('ord1', { payToken: token });
+
+      expect(yandexPay.cancelOrdersBestEffort).toHaveBeenCalledWith(['ord1:1']);
+      expect(payment.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            provider: { not: 'yookassa' },
+            status: PaymentStatus.PENDING,
+          }),
+          data: { status: PaymentStatus.CANCELED },
+        }),
+      );
+      expect(yookassa.createEmbeddedPayment).toHaveBeenCalled();
     });
   });
 

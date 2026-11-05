@@ -117,7 +117,7 @@ export function customerEmailGreeting(displayName: string | null | undefined): s
 
 /**
  * Deep-link оплаты из письма: Front `/order/pay` кладёт payToken в sessionStorage
- * и сразу стартует ЮKassa (осознанный exception к «payToken не в URL»).
+ * и открывает Яндекс Пэй + ЮKassa (осознанный exception к «payToken не в URL»).
  */
 export function guestOrderPayUrl(opts: {
   siteUrl: string;

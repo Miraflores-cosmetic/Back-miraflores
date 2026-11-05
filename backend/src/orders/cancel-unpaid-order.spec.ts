@@ -16,9 +16,9 @@ describe('cancelUnpaidOrderInTx', () => {
   const buildTx = () => ({
     payment: {
       findMany: vi.fn().mockResolvedValue([
-        { externalId: ' yk_ext_1 ' },
-        { externalId: null },
-        { externalId: 'yk_ext_2' },
+        { externalId: ' yk_ext_1 ', provider: 'yookassa' },
+        { externalId: null, provider: 'yookassa' },
+        { externalId: 'yk_ext_2', provider: 'yandexpay' },
       ]),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
@@ -83,6 +83,10 @@ describe('cancelUnpaidOrderInTx', () => {
       id: orderId,
       status: OrderStatus.CANCELLED,
       pendingExternalIds: ['yk_ext_1', 'yk_ext_2'],
+      pendingPayments: [
+        { provider: 'yookassa', externalId: 'yk_ext_1' },
+        { provider: 'yandexpay', externalId: 'yk_ext_2' },
+      ],
     });
   });
 

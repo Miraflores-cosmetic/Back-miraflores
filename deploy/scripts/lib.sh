@@ -59,6 +59,60 @@ verify_deploy_ssh() {
 
 log() { printf '==> %s\n' "$*"; }
 
+# YANDEX_PAY_* на VPS (backend/.env). Источник: deploy.env или локальный backend/.env.
+apply_prod_yandex_pay_env() {
+  local mid="${DEPLOY_YANDEX_PAY_MERCHANT_ID:-}"
+  local api_key="${DEPLOY_YANDEX_PAY_API_KEY:-}"
+  local yp_env="${DEPLOY_YANDEX_PAY_ENV:-}"
+  local local_env="$MONO_ROOT/backend/.env"
+
+  if [[ (-z "$mid" || -z "$api_key") && -f "$local_env" ]]; then
+    # shellcheck disable=SC1090
+    set -a
+    # только нужные ключи — не source весь .env в текущий shell deploy
+    mid="${mid:-$(grep -E '^YANDEX_PAY_MERCHANT_ID=' "$local_env" | head -1 | cut -d= -f2- || true)}"
+    api_key="${api_key:-$(grep -E '^YANDEX_PAY_API_KEY=' "$local_env" | head -1 | cut -d= -f2- || true)}"
+    yp_env="${yp_env:-$(grep -E '^YANDEX_PAY_ENV=' "$local_env" | head -1 | cut -d= -f2- || true)}"
+    set +a
+  fi
+
+  if [[ -z "$mid" || -z "$api_key" ]]; then
+    echo "warn: YANDEX_PAY_* пуст — задайте в deploy/deploy.env или backend/.env" >&2
+    return 0
+  fi
+  yp_env="${yp_env:-production}"
+
+  log "sync YANDEX_PAY_* → $DEPLOY_HOST backend/.env"
+  "${SSH[@]}" "$DEPLOY_HOST" "python3 -" "$DEPLOY_PATH/backend/.env" <<PY
+import sys
+path = sys.argv[1]
+updates = {
+    "YANDEX_PAY_MERCHANT_ID": ${mid@Q},
+    "YANDEX_PAY_API_KEY": ${api_key@Q},
+    "YANDEX_PAY_ENV": ${yp_env@Q},
+}
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+except FileNotFoundError:
+    lines = []
+out = []
+seen = set()
+for line in lines:
+    key = line.split("=", 1)[0] if "=" in line else ""
+    if key in updates:
+        out.append(f"{key}={updates[key]}\n")
+        seen.add(key)
+    else:
+        out.append(line)
+for key, val in updates.items():
+    if key not in seen:
+        out.append(f"{key}={val}\n")
+with open(path, "w", encoding="utf-8") as f:
+    f.writelines(out)
+PY
+}
+
 require_clean_git() {
   local dir="$1"
   if ! git -C "$dir" diff --quiet || ! git -C "$dir" diff --cached --quiet; then

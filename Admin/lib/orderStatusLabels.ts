@@ -47,6 +47,36 @@ export function paymentStatusLabel(status: string): string {
   return PAYMENT_STATUS_LABELS[status] ?? status;
 }
 
+/** Лейбл платёжного провайдера в админке (платежи / refund / events). */
+export function paymentProviderLabel(provider: string): string {
+  switch ((provider || '').trim().toLowerCase()) {
+    case 'yandexpay':
+      return 'Яндекс Пэй';
+    case 'yookassa':
+      return 'ЮKassa';
+    case 'manual':
+      return 'Вручную';
+    default:
+      return provider || '—';
+  }
+}
+
+/** Провайдер для card refund: SUCCEEDED yandexpay имеет приоритет. */
+export function refundProviderFromPayments(
+  payments: Array<{ status?: string | null; provider?: string | null }> | null | undefined,
+): 'yandexpay' | 'yookassa' {
+  if (
+    payments?.some(
+      (p) =>
+        p.status === 'SUCCEEDED' &&
+        (p.provider || '').toLowerCase() === 'yandexpay',
+    )
+  ) {
+    return 'yandexpay';
+  }
+  return 'yookassa';
+}
+
 export function orderEventTypeLabel(type: string): string {
   return ORDER_EVENT_TYPE_LABELS[type] ?? type;
 }

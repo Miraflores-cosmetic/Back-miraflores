@@ -4,6 +4,7 @@ import { UserGroupsModule } from '../user-groups/user-groups.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { OrderPayTokenService } from '../orders/order-pay-token.service';
 import { YooKassaService } from '../orders/yookassa.service';
+import { YandexPayService } from '../orders/yandex-pay.service';
 import { AccountController } from './account.controller';
 import { AccountService } from './account.service';
 import { FavoritesService } from './favorites.service';
@@ -19,6 +20,7 @@ import { OrderChatModule } from '../order-chat/order-chat.module';
     QuizResultService,
     OrderPayTokenService,
     YooKassaService,
+    YandexPayService,
   ],
 })
 export class AccountModule {}

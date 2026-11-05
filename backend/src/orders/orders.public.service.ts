@@ -5,6 +5,7 @@ import {
   Logger,
   NotFoundException,
   Optional,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { OZON_UNAVAILABLE_MESSAGE, OzonAuthService } from '../ozon/ozon-auth.service';
@@ -23,6 +24,9 @@ import type { CreateOrderDto } from './dto/create-order.dto';
 import type { AdminCreateOrderDto } from './dto/admin-create-order.dto';
 import { createAdminOrder, previewAdminOrder } from './create-admin-order';
 import { cancelUnpaidOrderInTx } from './cancel-unpaid-order';
+import { cancelPendingAtProviders } from './cancel-pending-at-providers';
+import { nextYandexPayMerchantOrderId } from './yandex-pay-order-id';
+import { buildYandexPayFiscalCart } from './yandex-pay-fiscal-cart';
 import {
   reserveStockForLines,
 } from './order-stock';
@@ -51,6 +55,7 @@ import { ShippingServerEstimateService } from './shipping-server-estimate.servic
 import type { ShippingQuoteRequestDto } from './dto/shipping-quote.dto';
 import { applyPaidInTx } from './mark-order-paid';
 import { YooKassaService } from './yookassa.service';
+import { YandexPayService } from './yandex-pay.service';
 import { OrderPayTokenService } from './order-pay-token.service';
 import { OrderLifecycleService } from './order-lifecycle.service';
 import { OrderChatService } from '../order-chat/order-chat.service';
@@ -114,6 +119,7 @@ export class OrdersPublicService {
     private readonly giftsPublic: GiftCertificatesPublicService,
     private readonly settingsPublic: SettingsPublicService,
     private readonly yookassa: YooKassaService,
+    private readonly yandexPay: YandexPayService,
     private readonly config: ConfigService,
     private readonly payTokens: OrderPayTokenService,
     private readonly shippingQuotes: ShippingQuoteService,
@@ -1008,7 +1014,7 @@ export class OrdersPublicService {
           id: order.id,
           status: order.status,
           abandoned: false as const,
-          pendingExternalIds: [] as string[],
+          pendingPayments: [] as Array<{ provider: string; externalId: string }>,
         };
       }
       this.assertPayTokenAccess(order, payToken);
@@ -1024,12 +1030,15 @@ export class OrdersPublicService {
         id: cancelled.id,
         status: cancelled.status,
         abandoned: true as const,
-        pendingExternalIds: cancelled.pendingExternalIds,
+        pendingPayments: cancelled.pendingPayments,
       };
     });
 
-    if (result.abandoned && result.pendingExternalIds.length) {
-      await this.yookassa.cancelPaymentsBestEffort(result.pendingExternalIds);
+    if (result.abandoned && result.pendingPayments.length) {
+      await cancelPendingAtProviders(result.pendingPayments, {
+        yookassa: this.yookassa,
+        yandexPay: this.yandexPay,
+      });
     }
     if (result.abandoned) {
       scheduleAfterRlsCommitWithBypass(this.prisma, () =>
@@ -1046,6 +1055,498 @@ export class OrdersPublicService {
       status: result.status,
       abandoned: result.abandoned,
     };
+  }
+
+  /** Публичные параметры Web SDK (Merchant ID не секрет). */
+  yandexPayPublicConfig() {
+    if (!this.yandexPay.isConfigured()) {
+      return { enabled: false as const };
+    }
+    return {
+      enabled: true as const,
+      merchantId: this.yandexPay.merchantId(),
+      env: this.yandexPay.isSandbox() ? 'SANDBOX' : 'PRODUCTION',
+    };
+  }
+
+  /**
+   * Exclusive pay channel: при старте одного провайдера гасим PENDING другого,
+   * чтобы оба webhook не довели до двойного списания.
+   */
+  private async cancelRivalPendingPayments(
+    orderId: string,
+    active: 'yookassa' | 'yandexpay',
+  ): Promise<void> {
+    const rivals = await this.prisma.payment.findMany({
+      where: {
+        orderId,
+        status: PaymentStatus.PENDING,
+        provider: { not: active },
+      },
+      select: { id: true, provider: true, externalId: true },
+    });
+    if (!rivals.length) return;
+
+    const yooIds = rivals
+      .filter((p) => p.provider === 'yookassa' && p.externalId)
+      .map((p) => p.externalId!);
+    const ypIds = rivals
+      .filter((p) => p.provider === 'yandexpay' && p.externalId)
+      .map((p) => p.externalId!);
+
+    if (yooIds.length) {
+      await this.yookassa.cancelPaymentsBestEffort(yooIds);
+    }
+    if (ypIds.length) {
+      await this.yandexPay.cancelOrdersBestEffort(ypIds);
+    }
+
+    await this.prisma.payment.updateMany({
+      where: {
+        orderId,
+        status: PaymentStatus.PENDING,
+        provider: { not: active },
+      },
+      data: { status: PaymentStatus.CANCELED },
+    });
+  }
+
+  /**
+   * Создаёт заказ в Яндекс Пэй (Merchant API) → paymentUrl для Web SDK.
+   * Merchant orderId = `{Order.id}:{attempt}` (см. yandex-pay-order-id.ts).
+   */
+  async createYandexPayPayment(
+    orderId: string,
+    opts: { payToken?: string | null; buyerUserId?: string | null } = {},
+  ) {
+    if (!this.yandexPay.isConfigured()) {
+      throw new BadRequestException('Яндекс Пэй не настроен');
+    }
+
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        items: true,
+        payments: { orderBy: { createdAt: 'desc' }, take: 8 },
+      },
+    });
+    if (!order) throw new NotFoundException('Заказ не найден');
+    this.assertOrderPayAccess(order, opts);
+
+    if (order.status === OrderStatus.CANCELLED) {
+      throw new BadRequestException('Заказ отменён, оформите заказ заново');
+    }
+    if (order.status === OrderStatus.PAID) {
+      return {
+        alreadyPaid: true as const,
+        orderId: order.id,
+        number: order.number,
+        total: order.total,
+      };
+    }
+    if (
+      order.status !== OrderStatus.AWAITING_PAYMENT &&
+      order.status !== OrderStatus.NEW
+    ) {
+      throw new BadRequestException('Заказ нельзя оплатить в текущем статусе');
+    }
+    if (order.needsAddressClarification) {
+      throw new BadRequestException('Оператор уточняет адрес');
+    }
+    if (order.total <= 0) {
+      await this.markOrderPaid(order.id, null);
+      return {
+        alreadyPaid: true as const,
+        orderId: order.id,
+        number: order.number,
+        total: 0,
+      };
+    }
+
+    // Exclusive: гасим PENDING ЮKassa до выдачи/reuse ссылки Яндекс Пэй.
+    await this.cancelRivalPendingPayments(order.id, 'yandexpay');
+
+    const pendingYp = order.payments.find(
+      (p) =>
+        p.provider === 'yandexpay' &&
+        p.status === PaymentStatus.PENDING &&
+        p.confirmationUrl?.trim() &&
+        Math.round(Number(p.amount) || 0) === Math.round(order.total),
+    );
+    if (pendingYp?.confirmationUrl) {
+      return {
+        alreadyPaid: false as const,
+        orderId: order.id,
+        number: order.number,
+        total: order.total,
+        paymentId: pendingYp.externalId || order.id,
+        paymentUrl: pendingYp.confirmationUrl,
+        payToken:
+          order.guestId?.trim()
+            ? this.payTokens.issue(order.id, order.guestId.trim())
+            : null,
+      };
+    }
+
+    // Старые PENDING Яндекс Пэй (другая сумма / без url) — cancel перед новым.
+    const staleYp = order.payments.filter(
+      (p) =>
+        p.provider === 'yandexpay' && p.status === PaymentStatus.PENDING,
+    );
+    if (staleYp.length) {
+      await this.yandexPay.cancelOrdersBestEffort(
+        staleYp.map((p) => p.externalId!).filter(Boolean),
+      );
+      await this.prisma.payment.updateMany({
+        where: {
+          orderId: order.id,
+          provider: 'yandexpay',
+          status: PaymentStatus.PENDING,
+        },
+        data: { status: PaymentStatus.CANCELED },
+      });
+    }
+
+    const site =
+      this.config.get<string>('FRONTEND_PUBLIC_URL')?.replace(/\/+$/, '') ||
+      'http://localhost:3000';
+    let guestId = order.guestId?.trim() || '';
+    if (!guestId) {
+      const buyerId = opts.buyerUserId?.trim() || '';
+      if (buyerId && order.userId === buyerId) {
+        const { randomUUID } = await import('node:crypto');
+        guestId = randomUUID();
+        await this.prisma.order.update({
+          where: { id: order.id },
+          data: { guestId },
+        });
+      } else {
+        throw new BadRequestException('Нет guestId для оплаты');
+      }
+    }
+
+    const returnQs = new URLSearchParams({
+      orderId: order.id,
+      number: order.number,
+    });
+    const successUrl = order.giftPurchaseDenominationId
+      ? `${site}/certificates/success?${returnQs.toString()}`
+      : `${site}/order/success?${returnQs.toString()}`;
+    const failUrl = `${site}/order?pay=failed&orderId=${encodeURIComponent(order.id)}`;
+
+    // 54-ФЗ: shipping-as-line / ratio shrink с учётом promo+gift (см. yandex-pay-fiscal-cart).
+    const items = buildYandexPayFiscalCart({
+      number: order.number,
+      total: order.total,
+      shippingCost: order.shippingCost,
+      giftPurchaseDenominationId: order.giftPurchaseDenominationId,
+      items: order.items,
+    });
+    if (!items.length) {
+      throw new BadRequestException('Пустая корзина для Яндекс Пэй');
+    }
+
+    // Versioned merchant orderId: `{Order.id}:{attempt}` — не Order.id навсегда
+    // (после смены total / rollback тот же id → reject / stuck URL).
+    const priorYp = await this.prisma.payment.findMany({
+      where: { orderId: order.id, provider: 'yandexpay' },
+      select: { externalId: true },
+    });
+    const yandexOrderId = nextYandexPayMerchantOrderId(
+      order.id,
+      priorYp.map((p) => p.externalId),
+    );
+
+    const { paymentUrl, raw } = await this.yandexPay.createOrder({
+      orderId: yandexOrderId,
+      orderNumber: order.number,
+      customerEmail: order.email,
+      amountRub: order.total,
+      items,
+      redirectUrls: {
+        onSuccess: successUrl,
+        onError: failUrl,
+        onAbort: failUrl,
+      },
+    });
+
+    await this.prisma.payment.create({
+      data: {
+        orderId: order.id,
+        provider: 'yandexpay',
+        status: PaymentStatus.PENDING,
+        amount: order.total,
+        externalId: yandexOrderId,
+        confirmationUrl: paymentUrl,
+        raw: { yandexPay: raw } as Prisma.InputJsonValue,
+      },
+    });
+
+    if (order.status === OrderStatus.NEW) {
+      await this.prisma.order.update({
+        where: { id: order.id },
+        data: { status: OrderStatus.AWAITING_PAYMENT },
+      });
+    }
+
+    return {
+      alreadyPaid: false as const,
+      orderId: order.id,
+      number: order.number,
+      total: order.total,
+      paymentId: yandexOrderId,
+      paymentUrl,
+      payToken: this.payTokens.issue(order.id, guestId),
+    };
+  }
+
+  /**
+   * Ответ по схеме Merchant API: 200 `{status:success}` или 4xx `{status:fail, reasonCode}`.
+   * Late (оплата на CANCELLED) после auto-refund → 200; если refund не удался → CONFLICT.
+   */
+  async handleYandexPayWebhook(jwtToken: string): Promise<{
+    httpStatus: number;
+    body: {
+      status: 'success' | 'fail';
+      reasonCode?: string;
+      reason?: string;
+    };
+  }> {
+    let payload: Awaited<
+      ReturnType<YandexPayService['verifyWebhookJwt']>
+    >;
+    try {
+      payload = await this.yandexPay.verifyWebhookJwt(jwtToken);
+    } catch (e) {
+      // Доки: 400 + reasonCode (UNAUTHORIZED | TOKEN_EXPIRED | …), не Nest 401 envelope.
+      if (e instanceof UnauthorizedException) {
+        const r = e.getResponse();
+        const obj =
+          typeof r === 'object' && r !== null
+            ? (r as Record<string, unknown>)
+            : {};
+        const reasonCode =
+          typeof obj.reasonCode === 'string' ? obj.reasonCode : 'UNAUTHORIZED';
+        return {
+          httpStatus: 400,
+          body: {
+            status: 'fail',
+            reasonCode,
+            reason:
+              typeof obj.reason === 'string'
+                ? obj.reason
+                : typeof r === 'string'
+                  ? r
+                  : undefined,
+          },
+        };
+      }
+      throw e;
+    }
+    if (payload.event !== 'ORDER_STATUS_UPDATED') {
+      // OPERATION_STATUS_UPDATED и пр. — ack, без смены заказа.
+      return { httpStatus: 200, body: { status: 'success' } };
+    }
+    const ypOrderId = payload.order?.orderId?.trim();
+    const status = payload.order?.paymentStatus;
+    if (!ypOrderId) {
+      return {
+        httpStatus: 400,
+        body: {
+          status: 'fail',
+          reasonCode: 'ORDER_NOT_FOUND',
+          reason: 'missing orderId',
+        },
+      };
+    }
+
+    if (status === 'FAILED') {
+      await this.prisma.payment.updateMany({
+        where: {
+          provider: 'yandexpay',
+          externalId: ypOrderId,
+          status: PaymentStatus.PENDING,
+        },
+        data: { status: PaymentStatus.CANCELED },
+      });
+      return { httpStatus: 200, body: { status: 'success' } };
+    }
+
+    if (status !== 'CAPTURED') {
+      return { httpStatus: 200, body: { status: 'success' } };
+    }
+
+    // Не доверяем только webhook — перечитываем заказ в API.
+    const remote = await this.yandexPay.getOrder(ypOrderId);
+    if (remote.paymentStatus !== 'CAPTURED') {
+      return { httpStatus: 200, body: { status: 'success' } };
+    }
+
+    const paymentRow = await this.prisma.payment.findFirst({
+      where: { provider: 'yandexpay', externalId: ypOrderId },
+      select: { orderId: true },
+    });
+    // Legacy: первые платежи писали externalId = Order.id
+    const orderId =
+      paymentRow?.orderId ||
+      (
+        await this.prisma.order.findUnique({
+          where: { id: ypOrderId },
+          select: { id: true },
+        })
+      )?.id;
+    if (!orderId) {
+      return {
+        httpStatus: 400,
+        body: {
+          status: 'fail',
+          reasonCode: 'ORDER_NOT_FOUND',
+          reason: 'order not found',
+        },
+      };
+    }
+
+    const outcome = await this.markOrderPaidYandex(orderId, {
+      id: ypOrderId,
+      amountRub: remote.amountRub,
+      status: remote.paymentStatus,
+      raw: remote.raw,
+    });
+
+    if (outcome === 'late_failed') {
+      // Осознанный CONFLICT: нотификация CAPTURED на отменённый заказ, auto-refund не прошёл.
+      return {
+        httpStatus: 400,
+        body: {
+          status: 'fail',
+          reasonCode: 'CONFLICT',
+          reason: 'late payment refund failed',
+        },
+      };
+    }
+    // paid | already | late_refunded — обработали, стоп ретраев.
+    return { httpStatus: 200, body: { status: 'success' } };
+  }
+
+  private async markOrderPaidYandex(
+    orderId: string,
+    remote: {
+      id: string;
+      amountRub: number | null;
+      status?: string;
+      raw?: unknown;
+    },
+  ): Promise<MarkPaidOutcome> {
+    const txResult = await this.prisma.$transaction(async (tx) => {
+      return applyPaidInTx(tx, this.lifecycle, orderId, {
+        kind: 'yandexpay',
+        remote: {
+          id: remote.id,
+          amountRub: remote.amountRub,
+          status: remote.status,
+        },
+      });
+    });
+
+    if (txResult.kind === 'already') return 'already';
+    if (txResult.kind === 'paid') {
+      if (this.yourichSync) {
+        scheduleAfterRlsCommitWithBypass(this.prisma, () =>
+          this.yourichSync!.touch(orderId),
+        );
+      }
+      if (txResult.isGiftPurchase) {
+        await this.notifyGiftPurchasePaid(txResult.orderId, txResult.number);
+      } else {
+        await this.lifecycle.notifyOrderPaid(txResult.email, txResult.number);
+      }
+      return 'paid';
+    }
+
+    // Late: как у ЮKassa — автовозврат через Merchant API.
+    return this.refundLateYandexPayment(txResult.order, remote);
+  }
+
+  private async refundLateYandexPayment(
+    order: {
+      id: string;
+      number: string;
+      email: string;
+      total: number;
+      status: OrderStatus;
+    },
+    remote: { id: string; amountRub: number | null },
+  ): Promise<'late_refunded' | 'late_failed'> {
+    const paymentId = remote.id?.trim();
+    if (!paymentId) {
+      await this.reportLatePaymentFailed({
+        order,
+        paymentId: null,
+        amount: order.total,
+        reason: 'missing_yandexpay_order_id',
+        provider: 'yandexpay',
+      });
+      return 'late_failed';
+    }
+    const amount =
+      remote.amountRub != null && remote.amountRub > 0
+        ? Math.round(remote.amountRub)
+        : order.total;
+
+    if (!this.yandexPay.isConfigured()) {
+      await this.reportLatePaymentFailed({
+        order,
+        paymentId,
+        amount,
+        reason: 'yandexpay_not_configured',
+        provider: 'yandexpay',
+      });
+      return 'late_failed';
+    }
+
+    try {
+      const refund = await this.yandexPay.createRefund({
+        merchantOrderId: paymentId,
+        amountRub: amount,
+        reason: `Автовозврат: заказ ${order.number} уже ${order.status}`,
+        externalOperationId: `late-${paymentId}-${Date.now()}`,
+      });
+      await this.prisma.payment.updateMany({
+        where: { externalId: paymentId },
+        data: { status: PaymentStatus.REFUNDED },
+      });
+      await this.lifecycle.addEvent(this.prisma, {
+        orderId: order.id,
+        type: 'REFUND',
+        message: `Автовозврат ${amount} ₽ (Яндекс Пэй, оплата после ${order.status})`,
+        meta: {
+          amount,
+          auto: true,
+          provider: 'yandexpay',
+          refundId: refund.id,
+          status: refund.status,
+          yandexPayOrderId: paymentId,
+        },
+      });
+      await this.lifecycle.notifyOrderRefund({
+        to: order.email,
+        orderNumber: order.number,
+        amount,
+        full: true,
+        kind: 'late',
+      });
+      return 'late_refunded';
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      await this.reportLatePaymentFailed({
+        order,
+        paymentId,
+        amount,
+        reason: msg,
+        provider: 'yandexpay',
+      });
+      return 'late_failed';
+    }
   }
 
   /** Создаёт платёж ЮKassa (embedded) для заказа AWAITING_PAYMENT. */
@@ -1094,8 +1595,12 @@ export class OrdersPublicService {
       };
     }
 
+    // Exclusive: гасим PENDING Яндекс Пэй до выдачи/reuse виджета ЮKassa.
+    await this.cancelRivalPendingPayments(order.id, 'yookassa');
+
     const pending = order.payments.find(
       (p) =>
+        p.provider === 'yookassa' &&
         p.status === PaymentStatus.PENDING &&
         p.externalId &&
         (p.raw as { confirmationToken?: string } | null)?.confirmationToken,
@@ -1246,34 +1751,62 @@ export class OrdersPublicService {
     if (!row) throw new NotFoundException('Платёж не найден');
     this.assertOrderPayAccess(row.order, opts);
 
-    const remote = await this.yookassa.getPayment(externalId);
-    const providerPaid = Boolean(remote.paid || remote.status === 'succeeded');
-
     let lateOutcome: MarkPaidOutcome | null = null;
-    if (providerPaid && row.status !== PaymentStatus.SUCCEEDED) {
-      const metaKind =
-        (remote.metadata?.kind as string | undefined) ||
-        (row.raw as { kind?: string } | null)?.kind;
-      if (metaKind === 'surcharge') {
-        lateOutcome = await this.applySurchargePaymentSucceeded(
-          row.orderId,
-          externalId,
-          remote,
-        );
-      } else {
-        lateOutcome = await this.markOrderPaid(row.orderId, remote);
+    let remoteStatus: string | undefined;
+    let providerPaid = false;
+
+    if (row.provider === 'yandexpay') {
+      const remote = await this.yandexPay.getOrder(externalId);
+      remoteStatus = remote.paymentStatus;
+      providerPaid = remote.paymentStatus === 'CAPTURED';
+      if (providerPaid && row.status !== PaymentStatus.SUCCEEDED) {
+        lateOutcome = await this.markOrderPaidYandex(row.orderId, {
+          id: externalId,
+          amountRub: remote.amountRub,
+          status: remote.paymentStatus,
+          raw: remote.raw,
+        });
+      } else if (
+        remote.paymentStatus === 'FAILED' &&
+        row.status === PaymentStatus.PENDING
+      ) {
+        await this.prisma.payment.update({
+          where: { id: row.id },
+          data: {
+            status: PaymentStatus.CANCELED,
+            raw: remote.raw as Prisma.InputJsonValue,
+          },
+        });
       }
-    } else if (
-      remote.status === 'canceled' &&
-      row.status === PaymentStatus.PENDING
-    ) {
-      await this.prisma.payment.update({
-        where: { id: row.id },
-        data: {
-          status: PaymentStatus.CANCELED,
-          raw: remote as unknown as Prisma.InputJsonValue,
-        },
-      });
+    } else {
+      const remote = await this.yookassa.getPayment(externalId);
+      remoteStatus = remote.status;
+      providerPaid = Boolean(remote.paid || remote.status === 'succeeded');
+      if (providerPaid && row.status !== PaymentStatus.SUCCEEDED) {
+        const metaKind =
+          (remote.metadata?.kind as string | undefined) ||
+          (row.raw as { kind?: string } | null)?.kind;
+        if (metaKind === 'surcharge') {
+          lateOutcome = await this.applySurchargePaymentSucceeded(
+            row.orderId,
+            externalId,
+            remote,
+          );
+        } else {
+          lateOutcome = await this.markOrderPaid(row.orderId, remote);
+        }
+      } else if (
+        remote.status === 'canceled' &&
+        row.status === PaymentStatus.PENDING
+      ) {
+        await this.prisma.payment.update({
+          where: { id: row.id },
+          data: {
+            status: PaymentStatus.CANCELED,
+            raw: remote as unknown as Prisma.InputJsonValue,
+          },
+        });
+      }
     }
 
     const order = await this.prisma.order.findUnique({
@@ -1289,7 +1822,7 @@ export class OrdersPublicService {
 
     return {
       paymentId: externalId,
-      status: remote.status,
+      status: remoteStatus,
       /** true только если заказ реально в оплаченном/исполняемом статусе */
       paid: orderPaid,
       providerPaid,
@@ -1309,7 +1842,8 @@ export class OrdersPublicService {
   }
 
   /**
-   * Success после 3DS: синхронизация с ЮKassa.
+   * Success / return URL: синхронизация с ЮKassa или Яндекс Пэй
+   * (иначе до webhook UI остаётся unpaid).
    * Auth: payToken (query) или JWT покупателя (владелец order.userId).
    */
   async checkoutSuccessStatus(
@@ -1322,6 +1856,7 @@ export class OrdersPublicService {
         id: true,
         number: true,
         status: true,
+        total: true,
         guestId: true,
         userId: true,
         payments: {
@@ -1332,6 +1867,7 @@ export class OrdersPublicService {
             id: true,
             externalId: true,
             status: true,
+            provider: true,
           },
         },
       },
@@ -1345,6 +1881,7 @@ export class OrdersPublicService {
         orderId: order.id,
         number: order.number,
         orderStatus: order.status,
+        total: order.total,
       };
     }
 
@@ -1357,6 +1894,7 @@ export class OrdersPublicService {
         orderId: order.id,
         number: order.number,
         orderStatus: order.status,
+        total: order.total,
         message:
           order.status === OrderStatus.CANCELLED
             ? 'Заказ отменён.'
@@ -1369,26 +1907,51 @@ export class OrdersPublicService {
       if (!p.externalId) continue;
       if (p.status === PaymentStatus.SUCCEEDED) continue;
       try {
-        const remote = await this.yookassa.getPayment(p.externalId);
-        if (remote.paid || remote.status === 'succeeded') {
-          lateOutcome = await this.markOrderPaid(order.id, remote);
-          break;
-        }
-        if (
-          remote.status === 'canceled' &&
-          p.status === PaymentStatus.PENDING
-        ) {
-          await this.prisma.payment.update({
-            where: { id: p.id },
-            data: {
-              status: PaymentStatus.CANCELED,
-              raw: remote as unknown as Prisma.InputJsonValue,
-            },
-          });
+        if (p.provider === 'yandexpay') {
+          const remote = await this.yandexPay.getOrder(p.externalId);
+          if (remote.paymentStatus === 'CAPTURED') {
+            lateOutcome = await this.markOrderPaidYandex(order.id, {
+              id: p.externalId,
+              amountRub: remote.amountRub,
+              status: remote.paymentStatus,
+              raw: remote.raw,
+            });
+            break;
+          }
+          if (
+            remote.paymentStatus === 'FAILED' &&
+            p.status === PaymentStatus.PENDING
+          ) {
+            await this.prisma.payment.update({
+              where: { id: p.id },
+              data: {
+                status: PaymentStatus.CANCELED,
+                raw: remote.raw as Prisma.InputJsonValue,
+              },
+            });
+          }
+        } else {
+          const remote = await this.yookassa.getPayment(p.externalId);
+          if (remote.paid || remote.status === 'succeeded') {
+            lateOutcome = await this.markOrderPaid(order.id, remote);
+            break;
+          }
+          if (
+            remote.status === 'canceled' &&
+            p.status === PaymentStatus.PENDING
+          ) {
+            await this.prisma.payment.update({
+              where: { id: p.id },
+              data: {
+                status: PaymentStatus.CANCELED,
+                raw: remote as unknown as Prisma.InputJsonValue,
+              },
+            });
+          }
         }
       } catch (e) {
         this.logger.warn(
-          `checkoutSuccessStatus yookassa ${p.externalId}: ${
+          `checkoutSuccessStatus ${p.provider || 'yookassa'} ${p.externalId}: ${
             e instanceof Error ? e.message : String(e)
           }`,
         );
@@ -1397,7 +1960,7 @@ export class OrdersPublicService {
 
     const fresh = await this.prisma.order.findUnique({
       where: { id: order.id },
-      select: { id: true, number: true, status: true },
+      select: { id: true, number: true, status: true, total: true },
     });
     const paid = Boolean(
       fresh && FULFILLED_STATUSES.includes(fresh.status),
@@ -1410,6 +1973,7 @@ export class OrdersPublicService {
       orderId: fresh?.id ?? order.id,
       number: fresh?.number ?? order.number,
       orderStatus: fresh?.status ?? order.status,
+      total: fresh?.total ?? order.total,
       latePayment: late,
       message: paid
         ? undefined
@@ -1698,6 +2262,7 @@ export class OrdersPublicService {
         paymentId: null,
         amount: order.total,
         reason: 'missing_remote_payment_id',
+        provider: 'yookassa',
       });
       return 'late_failed';
     }
@@ -1713,6 +2278,7 @@ export class OrdersPublicService {
         paymentId,
         amount,
         reason: 'yookassa_not_configured',
+        provider: 'yookassa',
       });
       return 'late_failed';
     }
@@ -1730,10 +2296,11 @@ export class OrdersPublicService {
       await this.lifecycle.addEvent(this.prisma, {
         orderId: order.id,
         type: 'REFUND',
-        message: `Автовозврат ${amount} ₽ (оплата после ${order.status})`,
+        message: `Автовозврат ${amount} ₽ (ЮKassa, оплата после ${order.status})`,
         meta: {
           amount,
           auto: true,
+          provider: 'yookassa',
           refundId: refund.id,
           status: refund.status,
           yookassaPaymentId: paymentId,
@@ -1754,6 +2321,7 @@ export class OrdersPublicService {
         paymentId,
         amount,
         reason: msg,
+        provider: 'yookassa',
       });
       return 'late_failed';
     }
@@ -1768,20 +2336,24 @@ export class OrdersPublicService {
     paymentId: string | null;
     amount: number;
     reason: string;
+    provider?: 'yookassa' | 'yandexpay';
   }): Promise<void> {
     const { order, paymentId, amount, reason } = input;
+    const provider = input.provider || 'yookassa';
     this.logger.error(
-      `OPS_ALERT late_payment_failed orderId=${order.id} number=${order.number} status=${order.status} paymentId=${paymentId ?? 'none'} amount=${amount} reason=${reason}`,
+      `OPS_ALERT late_payment_failed orderId=${order.id} number=${order.number} status=${order.status} paymentId=${paymentId ?? 'none'} amount=${amount} provider=${provider} reason=${reason}`,
     );
 
     await this.lifecycle.addEvent(this.prisma, {
       orderId: order.id,
       type: 'OPS_ALERT',
-      message: `Автовозврат не удался: ${reason}${paymentId ? ` (payment ${paymentId})` : ''}`,
+      message: `Автовозврат не удался (${provider === 'yandexpay' ? 'Яндекс Пэй' : 'ЮKassa'}): ${reason}${paymentId ? ` (payment ${paymentId})` : ''}`,
       meta: {
         lateFailed: true,
         opsAlert: 'late_payment_failed',
-        yookassaPaymentId: paymentId,
+        paymentProvider: provider,
+        yookassaPaymentId: provider === 'yookassa' ? paymentId : null,
+        yandexPayOrderId: provider === 'yandexpay' ? paymentId : null,
         amount,
         reason,
       },

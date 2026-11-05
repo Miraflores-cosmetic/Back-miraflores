@@ -18,6 +18,7 @@ https://miraflores-shop.com/
   /admin            → Next miraflores-admin :3010
   /api/cdek|yandex… → Next BFF :3010
   /api/yookassa/…   → Next BFF :3010
+  /api/yandexpay/…  → Next BFF :3010 (Merchant webhook JWT)
 
 Postgres docker miraflores_db :5432 (только localhost)
 systemd: miraflores-api, miraflores-admin
@@ -197,6 +198,63 @@ journalctl -u miraflores-api --since "1 hour ago" --no-pager | grep -E "Ozon|OPS
 ```
 
 Если что-то не так: «Отключить» в карточке Ozon — витрина сразу вернётся к СДЭК.
+
+---
+
+## Яндекс Пэй: выкатка на прод
+
+Рядом с ЮKassa (кнопка Web SDK + Merchant API), не вместо. Код можно выкатывать раньше ключей — без `YANDEX_PAY_*` кнопка на витрине скрыта.
+
+**1. Env на VPS** — `/opt/miraflores/backend/.env` (деплой не затирает):
+
+```bash
+YANDEX_PAY_MERCHANT_ID=…          # публичный Merchant ID из ЛК Яндекс Пэй
+YANDEX_PAY_API_KEY=…              # API-ключ (только Nest)
+# sandbox | production (default production)
+YANDEX_PAY_ENV=production
+```
+
+Front **не** дублирует Merchant ID в `VITE_*` — кнопка читает только `GET /api/v1/orders/yandexpay/config` (иначе drift Front≠API).
+
+Чек 54-ФЗ: `receipt.tax = 1` («без НДС»); позиции — `yandex-pay-fiscal-cart.ts` (shipping отдельной строкой, promo/gift — ratio shrink; gratitude 0 ₽ вне чека).
+
+**2. Callback URL в ЛК Яндекс Пэй** — ровно:
+
+```text
+https://miraflores-shop.com/api/yandexpay
+```
+
+Яндекс сам добавит `/v1/webhook` → Next BFF `Admin/app/api/yandexpay/v1/webhook` → Nest `POST /api/v1/orders/yandexpay/webhook`. Ответ по схеме: `200 {"status":"success"}` или `400 {"status":"fail","reasonCode":…}`.
+
+**3. nginx** — уже в `deploy/nginx/miraflores.conf`:
+
+```nginx
+location /api/yandexpay/ {
+    proxy_pass http://miraflores_admin;
+    …
+}
+```
+
+После правки conf: `nginx -t && systemctl reload nginx`.
+
+**4. Sandbox → production**
+
+1. В ЛК Яндекс Пэй завести боевой Merchant / API-ключ (отдельные от sandbox).
+2. На VPS: `YANDEX_PAY_ENV=production` (или убрать строку), обновить `YANDEX_PAY_MERCHANT_ID` / `YANDEX_PAY_API_KEY`.
+3. `systemctl restart miraflores-api` — Front подхватит env/merchant из `GET /orders/yandexpay/config` (без `VITE_*`, redeploy front не нужен).
+4. Callback URL на проде тот же host; sandbox-хост (`sandbox.pay.yandex.ru`) для JWKS/API больше не используется.
+5. Smoke: `curl -s …/orders/yandexpay/config` → `"env":"PRODUCTION"` и тот же `merchantId`, что в `.env`.
+
+**5. Проверка**
+
+```bash
+curl -s https://miraflores-shop.com/api/v1/orders/yandexpay/config
+# {"enabled":true,"merchantId":"…","env":"PRODUCTION"}
+
+journalctl -u miraflores-api --since "1 hour ago" --no-pager | grep -iE "YandexPay|yandexpay"
+```
+
+Витрина `/order` и deep-link из письма `/order/pay` показывают кнопку Яндекс Пэй, если config enabled. Exclusive: старт YaPay гасит PENDING ЮKassa и наоборот.
 
 ---
 

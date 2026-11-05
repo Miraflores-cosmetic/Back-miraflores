@@ -7,8 +7,9 @@ import {
   Post,
   Query,
   Req,
+  Res,
 } from '@nestjs/common';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { Public } from '../common/decorators/public.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -62,6 +63,32 @@ export class OrdersPublicController {
     );
     if (!result) return { cost: null, daysMin: null, daysMax: null };
     return { cost: result.cost, daysMin: result.daysMin, daysMax: result.daysMax };
+  }
+
+  /** Публичный конфиг Web SDK Яндекс Пэй (без секретов). */
+  @Get('yandexpay/config')
+  yandexPayConfig() {
+    return this.orders.yandexPayPublicConfig();
+  }
+
+  /**
+   * Webhook Merchant API Яндекс Пэй.
+   * Callback URL в ЛК: https://site/api/yandexpay → POST .../v1/webhook (Next BFF).
+   * Сюда BFF проксирует JWT (text/plain или raw).
+   */
+  @Post('yandexpay/webhook')
+  async yandexPayWebhook(@Req() req: Request, @Res() res: Response) {
+    const body = req.body;
+    const token =
+      typeof body === 'string'
+        ? body
+        : Buffer.isBuffer(body)
+          ? body.toString('utf8')
+          : typeof body?.jwt === 'string'
+            ? body.jwt
+            : '';
+    const result = await this.orders.handleYandexPayWebhook(token);
+    return res.status(result.httpStatus).json(result.body);
   }
 
   /** Статика до :orderId — иначе «yookassa» / «payments» попадут в param. */
@@ -132,6 +159,21 @@ export class OrdersPublicController {
     const buyerUserId =
       user?.role === 'USER' && user.sub ? user.sub : null;
     return this.orders.createPayment(orderId, {
+      payToken: body.payToken,
+      buyerUserId,
+    });
+  }
+
+  /** Яндекс Пэй: создаёт merchant order → paymentUrl для Web SDK. */
+  @Post(':orderId/pay/yandexpay')
+  createYandexPayPayment(
+    @Param('orderId') orderId: string,
+    @Body() body: OrderPayAccessDto,
+    @CurrentUser() user?: { sub?: string; role?: string },
+  ) {
+    const buyerUserId =
+      user?.role === 'USER' && user.sub ? user.sub : null;
+    return this.orders.createYandexPayPayment(orderId, {
       payToken: body.payToken,
       buyerUserId,
     });
