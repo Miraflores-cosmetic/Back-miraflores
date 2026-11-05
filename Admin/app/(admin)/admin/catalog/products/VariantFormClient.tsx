@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AdminCheckbox } from '@/components/admin/AdminCheckbox/AdminCheckbox';
 import { AdminCompactBtn, AdminCompactBtnLink } from '@/components/AdminCompactBtn/AdminCompactBtn';
@@ -14,6 +14,7 @@ import {
 } from '@/lib/adminBackendFetch';
 import type { AdminVariant, AdminVariantShade } from '@/lib/adminCatalogTypes';
 import { revalidateCatalogStorefront } from '@/lib/revalidateCatalogStorefront';
+import { isSampleVariantName } from '@/lib/sampleVariant';
 import styles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
 import { VariantGalleryModal } from './VariantGalleryModal';
 import vg from './VariantGalleryModal.module.css';
@@ -118,6 +119,7 @@ export function VariantFormClient({
   const [stock, setStock] = useState('0');
   const [stockReserve, setStockReserve] = useState('0');
   const [active, setActive] = useState(true);
+  const [isSample, setIsSample] = useState(false);
   const [shades, setShades] = useState<ShadeDraft[]>([]);
   const shadeFileRef = useRef<HTMLInputElement>(null);
   const [shadeUploadKey, setShadeUploadKey] = useState<string | null>(null);
@@ -125,6 +127,11 @@ export function VariantFormClient({
   function markDirty() {
     setDirty(true);
   }
+
+  const nameSuggestsSample = useMemo(
+    () => isSampleVariantName(name),
+    [name],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -210,6 +217,7 @@ export function VariantFormClient({
     setStock(String(v.stock));
     setStockReserve(String(v.stockReserve ?? 0));
     setActive(v.active);
+    setIsSample(Boolean(v.isSample));
     setShades(shadesToDraft(v.shades ?? []));
   }
 
@@ -265,6 +273,7 @@ export function VariantFormClient({
         stock: parseOptionalInt(stock, 'Остаток') ?? 0,
         stockReserve: parseOptionalInt(stockReserve, 'Резерв') ?? 0,
         active,
+        isSample,
         shades: shadePayload,
       };
 
@@ -657,6 +666,25 @@ export function VariantFormClient({
               />
               <label htmlFor="variant-active">Активен</label>
             </div>
+            <div className={styles.checkboxRow}>
+              <input
+                id="variant-is-sample"
+                type="checkbox"
+                checked={isSample}
+                onChange={(e) => {
+                  markDirty();
+                  setIsSample(e.target.checked);
+                }}
+                disabled={saving}
+              />
+              <label htmlFor="variant-is-sample">Пробник (лимиты покупки)</label>
+            </div>
+            {nameSuggestsSample && !isSample ? (
+              <p className={pn.placementHint}>
+                В названии есть «пробник» — включите флаг вручную, если это пробник для
+                правил покупки (переименование само флаг не меняет).
+              </p>
+            ) : null}
           </div>
 
           <div className={pn.placementBlock}>

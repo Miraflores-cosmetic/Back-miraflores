@@ -11,6 +11,7 @@ import {
   type CatalogCardVolumeOption,
 } from '../catalog/catalog-card.util';
 import { catalogSellablePrices } from '../catalog/catalog-price.util';
+import { resolveSampleOrderMaxQty } from '../catalog/sample-purchase.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { CatalogVisibilityService } from '../user-groups/catalog-visibility.service';
 import { CommerceContextService } from '../user-groups/commerce-context.service';
@@ -26,6 +27,7 @@ function cardFromFavorite(
     variant: {
       id: string;
       name: string;
+      isSample: boolean;
       price: number;
       compareAt: number | null;
       orderMinQty: number;
@@ -52,8 +54,12 @@ function cardFromFavorite(
   const p = v.product;
   const available = availableOf(v);
   const minQty = Math.max(1, v.orderMinQty ?? 1);
-  let maxQty =
-    v.orderMaxQty != null ? Math.min(v.orderMaxQty, available) : available;
+  let maxQty = resolveSampleOrderMaxQty(
+    v.name,
+    v.orderMaxQty,
+    available,
+    v.isSample,
+  );
   if (maxQty > 0 && minQty > maxQty) maxQty = 0;
   const shade = v.shades[0] ?? null;
   const imageUrls = p.images.map((i) => i.url).filter(Boolean);
@@ -97,6 +103,7 @@ const favoriteInclude = {
     select: {
       id: true,
       name: true,
+      isSample: true,
       price: true,
       compareAt: true,
       orderMinQty: true,
@@ -177,6 +184,7 @@ export class FavoritesService {
             id: true,
             productId: true,
             name: true,
+            isSample: true,
             price: true,
             compareAt: true,
             orderMinQty: true,
@@ -243,6 +251,7 @@ export class FavoritesService {
           return {
             id: sv.id,
             name: sv.name,
+            isSample: sv.isSample,
             price: groupPrice,
             compareAt: sv.compareAt,
             orderMinQty: sv.orderMinQty,
@@ -283,13 +292,19 @@ export class FavoritesService {
         const favoritedPrice =
           priceMap.get(row.variantId)?.groupPrice ?? row.variant.price;
         if (
-          catalogSellablePrices([{ price: favoritedPrice, name: row.variant.name }])
-            .length
+          catalogSellablePrices([
+            {
+              price: favoritedPrice,
+              name: row.variant.name,
+              isSample: row.variant.isSample,
+            },
+          ]).length
         ) {
           volumeOptions = toCardVolumeOptions([
             {
               id: row.variant.id,
               name: row.variant.name,
+              isSample: row.variant.isSample,
               price: favoritedPrice,
               compareAt: row.variant.compareAt,
               orderMinQty: row.variant.orderMinQty,

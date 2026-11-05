@@ -4,6 +4,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsInt,
+  IsOptional,
   IsString,
   Max,
   MaxLength,
@@ -31,6 +32,16 @@ export class UpdateCartSettingsDto {
   @IsString()
   @MaxLength(100_000)
   legalHtml!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  sampleRulesArticleSlug?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50_000)
+  sampleVariantNoticeHtml?: string | null;
 }
 
 export class DiscardCartUploadsDto {

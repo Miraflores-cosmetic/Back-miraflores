@@ -13,6 +13,8 @@ import { OrderStatus, PaymentStatus, Prisma, ShipmentProvider } from '@prisma/cl
 import { PrismaService } from '../prisma/prisma.service';
 import { scheduleAfterRlsCommitWithBypass } from '../rls/rls-after-commit';
 import { CatalogPublicService } from '../catalog/catalog.public.service';
+import { throwIfSampleCartBlocked } from '../catalog/sample-purchase.errors';
+import { assertSampleOrderLinesAllowedInTx } from '../catalog/sample-purchase.util';
 import { PromoPublicService } from '../promo/promo.service';
 import { promoConsumingRedemptionWhere } from '../promo/promo-redemption.util';
 import { GiftCertificatesPublicService } from '../gift-certificates/gift-certificates.public.service';
@@ -84,6 +86,7 @@ type SyncedCartItem = {
   qty: number;
   baseUnitPrice?: number;
   groupUnitPrice?: number;
+  isSample?: boolean;
   isGratitudeGift?: boolean;
 };
 
@@ -315,6 +318,7 @@ export class OrdersPublicService {
     }
 
     const synced = await this.catalogPublic.syncCartLines(dto.lines ?? [], userId ?? null);
+    throwIfSampleCartBlocked(synced.removedLines);
     const items = synced.items;
     if (!items.length) {
       throw new BadRequestException('Корзина пуста или позиции недоступны');
@@ -498,6 +502,7 @@ export class OrdersPublicService {
     }
 
     const synced = await this.catalogPublic.syncCartLines(dto.lines ?? [], userId ?? null);
+    throwIfSampleCartBlocked(synced.removedLines);
     const items = synced.items;
     if (!items.length) {
       throw new BadRequestException('Корзина пуста или позиции недоступны');
@@ -669,6 +674,8 @@ export class OrdersPublicService {
     }
 
     const order = await this.prisma.$transaction(async (tx) => {
+      await assertSampleOrderLinesAllowedInTx(tx, userId ?? null, itemsForOrder);
+
       if (promoApply) {
         const locked = await tx.$queryRaw<LockedPromo[]>`
           SELECT id, active, "maxUses", "oneShot"

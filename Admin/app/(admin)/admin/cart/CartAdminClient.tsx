@@ -72,6 +72,13 @@ export function CartAdminClient() {
     CART_SETTINGS_DEFAULTS.progressSuccessText,
   );
   const [legalHtml, setLegalHtml] = useState(CART_SETTINGS_DEFAULTS.legalHtml);
+  const [sampleRulesSlug, setSampleRulesSlug] = useState(
+    CART_SETTINGS_DEFAULTS.sampleRulesArticleSlug ?? '',
+  );
+  const [sampleNoticeHtml, setSampleNoticeHtml] = useState(
+    CART_SETTINGS_DEFAULTS.sampleVariantNoticeHtml ?? '',
+  );
+  const [sampleRulesArticleExists, setSampleRulesArticleExists] = useState(true);
   const [previewSum, setPreviewSum] = useState(
     String(Math.round(CART_SETTINGS_DEFAULTS.freeShippingThresholdRub * 0.6)),
   );
@@ -103,6 +110,9 @@ export function CartAdminClient() {
       setContentText(data.progressContentText);
       setSuccessText(data.progressSuccessText);
       setLegalHtml(html);
+      setSampleRulesSlug(data.sampleRulesArticleSlug ?? '');
+      setSampleNoticeHtml(data.sampleVariantNoticeHtml ?? '');
+      setSampleRulesArticleExists(data.sampleRulesArticleExists !== false);
       setPreviewSum(String(Math.round(data.freeShippingThresholdRub * 0.6)));
       markSavedMedia(html);
       sessionUploadsRef.current.clear();
@@ -182,6 +192,8 @@ export function CartAdminClient() {
           progressContentText: contentText.trim(),
           progressSuccessText: successText.trim(),
           legalHtml: legalHtml.trim() || '<p></p>',
+          sampleRulesArticleSlug: sampleRulesSlug.trim() || null,
+          sampleVariantNoticeHtml: sampleNoticeHtml.trim() || null,
         }),
       });
       const data = normalizeCartSettings(raw);
@@ -190,6 +202,9 @@ export function CartAdminClient() {
       setContentText(data.progressContentText);
       setSuccessText(data.progressSuccessText);
       setLegalHtml(html);
+      setSampleRulesSlug(data.sampleRulesArticleSlug ?? '');
+      setSampleNoticeHtml(data.sampleVariantNoticeHtml ?? '');
+      setSampleRulesArticleExists(data.sampleRulesArticleExists !== false);
       const leftovers = [...sessionUploadsRef.current];
       markSavedMedia(html);
       discardSessionUploads(leftovers.filter((u) => !savedMediaRef.current.has(u)));
@@ -348,6 +363,39 @@ export function CartAdminClient() {
               </div>
             </div>
           </div>
+
+          <p className={catalogStyles.lead}>Пробники</p>
+          <AdminTextField
+            label="Slug статьи «Правила приобретения пробников»"
+            value={sampleRulesSlug}
+            onChange={(e) => {
+              markDirty();
+              setSampleRulesSlug(e.target.value);
+            }}
+            disabled={saving}
+            maxLength={200}
+          />
+          <p className={catalogStyles.cardNote}>
+            Страница на витрине: /articles/[slug]
+          </p>
+          {!sampleRulesArticleExists ? (
+            <p className={catalogStyles.cardNote} role="alert">
+              Статья не найдена или не опубликована — ссылка на витрине будет недоступна.
+              Создайте запись в блоге или укажите другой slug (пустое поле — дефолт{' '}
+              {CART_SETTINGS_DEFAULTS.sampleRulesArticleSlug}).
+            </p>
+          ) : null}
+          <AdminRichField
+            label="Текст под описанием пробника на карточке товара"
+            value={sampleNoticeHtml}
+            onChange={(v) => {
+              markDirty();
+              setSampleNoticeHtml(v);
+            }}
+            onUploaded={trackUpload}
+            tall
+            disabled={saving}
+          />
 
           <p className={catalogStyles.lead}>Текст в корзине</p>
           <AdminRichField

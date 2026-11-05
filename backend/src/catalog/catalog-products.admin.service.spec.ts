@@ -437,4 +437,64 @@ describe('CatalogProductsAdminService', () => {
       data: { name: 'Новое' },
     });
   });
+
+  it('updateVariant: PATCH только name не меняет isSample', async () => {
+    prisma.productVariant.findUnique.mockResolvedValue({
+      id: 'v1',
+      productId: 'p1',
+      name: 'Пробник 5 мл',
+      slug: 'sample-5',
+      sku: 'sku-1',
+      volumeMl: 5,
+      orderMinQty: 1,
+      orderMaxQty: 1,
+      nationalCatalogName: null,
+      price: 100,
+      compareAt: null,
+      weightGrams: null,
+      lengthMm: null,
+      widthMm: null,
+      heightMm: null,
+      packageVolume: null,
+      stock: 0,
+      stockReserve: 0,
+      active: true,
+      isSample: true,
+      product: { id: 'p1', slug: 'krem' },
+    });
+
+    prisma.productVariant.findUniqueOrThrow.mockResolvedValue({
+      id: 'v1',
+      productId: 'p1',
+      name: 'Крем 5 мл',
+      slug: 'sample-5',
+      nationalCatalogName: null,
+      volumeMl: 5,
+      sku: 'sku-1',
+      price: 100,
+      compareAt: null,
+      orderMinQty: 1,
+      orderMaxQty: 1,
+      weightGrams: null,
+      lengthMm: null,
+      widthMm: null,
+      heightMm: null,
+      packageVolume: null,
+      stock: 0,
+      stockReserve: 0,
+      active: true,
+      isSample: true,
+      galleryLinks: [],
+      shades: [],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => fn(prisma));
+
+    await svc.updateVariant('v1', { name: 'Крем 5 мл' });
+
+    const updateArg = prisma.productVariant.update.mock.calls.at(-1)?.[0];
+    expect(updateArg?.data).toEqual({ name: 'Крем 5 мл', orderMaxQty: 1 });
+    expect(updateArg?.data).not.toHaveProperty('isSample');
+  });
 });

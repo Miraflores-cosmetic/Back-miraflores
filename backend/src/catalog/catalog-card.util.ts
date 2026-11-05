@@ -1,20 +1,19 @@
 import { Prisma } from '@prisma/client';
 import { isCatalogSellableVariant } from './catalog-price.util';
+import { capMaxQtyForSampleVariant } from './sample-purchase.util';
 
 /** Prisma `where` для объёмов на PLP (без пробников / price ≤ 0). */
 export const catalogSellableVariantWhere = {
   active: true,
   price: { gt: 0 },
-  NOT: [
-    { name: { equals: 'пробник', mode: 'insensitive' as const } },
-    { name: { contains: 'пробник', mode: 'insensitive' as const } },
-  ],
+  isSample: false,
 } satisfies Prisma.ProductVariantWhereInput;
 
 /** Минимальный вариант для объёмов на карточке (каталог / избранное). */
 export type CatalogCardVariantSource = {
   id: string;
   name: string;
+  isSample?: boolean;
   price: number;
   compareAt: number | null;
   orderMinQty: number;
@@ -38,6 +37,7 @@ export function cardVariantQty(v: CatalogCardVariantSource) {
   const minQty = Math.max(1, v.orderMinQty ?? 1);
   let maxQty =
     v.orderMaxQty != null ? Math.min(v.orderMaxQty, available) : available;
+  maxQty = capMaxQtyForSampleVariant(v.name, maxQty, v.isSample);
   if (maxQty > 0 && minQty > maxQty) maxQty = 0;
   return { available, minQty, maxQty };
 }

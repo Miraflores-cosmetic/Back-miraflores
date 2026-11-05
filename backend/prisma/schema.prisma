@@ -484,6 +484,8 @@ model ProductVariant {
   stock                Int       @default(0)
   /// Резерв
   stockReserve         Int       @default(0)
+  /// Пробник (purchase rules, PLP); надёжнее эвристики по name
+  isSample             Boolean   @default(false)
   active               Boolean   @default(true)
   /// Оттенки варианта (имя + опциональное фото)
   shades               ProductVariantShade[]
@@ -1325,6 +1327,10 @@ model CartSettings {
   progressSuccessText      String   @default("Бесплатная доставка!")
   /// HTML текста в корзине (accordion / legal info)
   legalHtml                String   @default("<p></p>") @db.Text
+  /// Slug статьи «Правила приобретения пробников» (/articles/:slug)
+  sampleRulesArticleSlug   String?
+  /// HTML под описанием пробника на PDP (Quill)
+  sampleVariantNoticeHtml  String?  @db.Text
   updatedAt                DateTime @updatedAt
 }
 

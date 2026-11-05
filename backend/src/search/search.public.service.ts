@@ -88,7 +88,12 @@ type ProductSearchRow = {
   slug: string;
   categoryId: string;
   images: Array<{ url: string }>;
-  variants: Array<{ id: string; price: number }>;
+  variants: Array<{
+    id: string;
+    price: number;
+    name: string;
+    isSample: boolean;
+  }>;
 };
 
 type BlogSearchRow = {
@@ -112,7 +117,7 @@ const productSelect = {
   },
   variants: {
     where: { active: true },
-    select: { id: true, price: true },
+    select: { id: true, price: true, name: true, isSample: true },
     orderBy: { price: 'asc' as const },
     take: 20,
   },

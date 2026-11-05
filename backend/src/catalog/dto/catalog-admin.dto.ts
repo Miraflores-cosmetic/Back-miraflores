@@ -152,6 +152,12 @@ export class VariantInputDto {
   @MinLength(1)
   name!: string;
 
+  /** Пробник; не задан — выводится из name при создании. */
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  isSample?: boolean;
+
   @IsOptional()
   @IsString()
   @MinLength(1)
@@ -535,6 +541,11 @@ export class UpdateProductDto {
 export class CreateVariantDto extends VariantInputDto {}
 
 export class UpdateVariantDto {
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  isSample?: boolean;
+
   @IsOptional()
   @IsString()
   @MinLength(1)

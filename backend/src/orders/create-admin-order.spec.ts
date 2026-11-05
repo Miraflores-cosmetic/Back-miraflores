@@ -180,6 +180,7 @@ describe('createAdminOrder', () => {
     expect(syncCartLines).toHaveBeenCalledWith(
       [expect.objectContaining({ variantId: 'v1', shadeId: 'sh1', qty: 1 })],
       null,
+      { bypassSamplePurchaseRules: true },
     );
     const data = orderCreate.mock.calls[0][0].data;
     expect(data.items.create[0].shadeId).toBe('sh1');

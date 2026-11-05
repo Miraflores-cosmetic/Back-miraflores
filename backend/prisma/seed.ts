@@ -29,6 +29,27 @@ const CATALOG_TAGS = [
   'Ногти',
 ] as const;
 
+async function seedSampleRulesArticle(db: Db) {
+  const slug = 'pravila-priobreteniya-probnikov';
+  await db.blogPost.upsert({
+    where: { slug },
+    create: {
+      id: 'cm2sample000rules000article00001',
+      slug,
+      title: 'Правила приобретения пробников',
+      body: '<p>Условия заказа пробников интернет-магазина Miraflores. Пробники доступны зарегистрированным покупателям, один раз на каждый вариант, в количестве 1 шт.</p>',
+      isPublished: true,
+      publishedAt: new Date(),
+      sortOrder: 0,
+    },
+    update: {
+      isPublished: true,
+      publishedAt: new Date(),
+    },
+  });
+  console.log(`[seed] Sample rules article: /articles/${slug}`);
+}
+
 async function seedAdmin(db: Db) {
   const emailRaw = process.env.ADMIN_SEED_EMAIL ?? 'admin@miraflores-shop.com';
   const passwordRaw = process.env.ADMIN_SEED_PASSWORD ?? 'change-me-admin';
@@ -210,6 +231,7 @@ async function main() {
       await seedCatalogTags(db);
       await seedUserGroups(db);
       await seedGiftDenominations(db);
+      await seedSampleRulesArticle(db);
     },
     { maxWait: 15_000, timeout: 600_000 },
   );

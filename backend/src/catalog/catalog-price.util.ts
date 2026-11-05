@@ -1,21 +1,26 @@
 /** Пробники и нулевые цены не должны задавать «цену от» в карточке / minPrice. */
 
-export function isSampleVariantName(name: string | null | undefined): boolean {
-  const n = (name ?? '').trim().toLowerCase();
-  if (!n) return false;
-  return n === 'пробник' || n.includes('пробник');
-}
+export {
+  isProductVariantSample,
+  isSampleVariantName,
+  resolveVariantIsSampleFlag,
+  type SampleVariantLike,
+} from './sample-variant.util';
+import { isProductVariantSample } from './sample-variant.util';
 
 export function isCatalogSellableVariant(v: {
   price: number;
   name?: string | null;
+  isSample?: boolean | null;
 }): boolean {
-  return Number.isFinite(v.price) && v.price > 0 && !isSampleVariantName(v.name);
+  return (
+    Number.isFinite(v.price) && v.price > 0 && !isProductVariantSample(v)
+  );
 }
 
 /** Цены для min/max на карточке и в поиске. */
 export function catalogSellablePrices(
-  variants: Array<{ price: number; name?: string | null }>,
+  variants: Array<{ price: number; name?: string | null; isSample?: boolean | null }>,
 ): number[] {
   return variants.filter(isCatalogSellableVariant).map((v) => v.price);
 }

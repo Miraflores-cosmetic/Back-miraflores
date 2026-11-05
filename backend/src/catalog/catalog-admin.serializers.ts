@@ -94,6 +94,7 @@ export function serializeVariant(
     compareAt: v.compareAt,
     orderMinQty: v.orderMinQty,
     orderMaxQty: v.orderMaxQty,
+    isSample: v.isSample,
     weightGrams: v.weightGrams,
     lengthMm: v.lengthMm,
     widthMm: v.widthMm,

@@ -17,6 +17,7 @@ import {
 import { buildProductContentSearchText } from '../common/html-to-search-text.util';
 import { sanitizeRichHtmlOrNull } from './catalog-html.util';
 import { slugify, volumeSlugPart } from './slug.util';
+import { resolveVariantIsSampleFlag } from './sample-variant.util';
 import type {
   CreateProductDto,
   CreateVariantDto,
@@ -485,14 +486,20 @@ export class CatalogProductsAdminService {
     });
     if (!variant) throw new NotFoundException('Вариант не найден');
 
+    const nextName = dto.name !== undefined ? dto.name.trim() : variant.name;
     const nextMin =
       dto.orderMinQty !== undefined ? dto.orderMinQty : variant.orderMinQty;
-    const nextMax =
+    let nextMax =
       dto.orderMaxQty !== undefined ? dto.orderMaxQty : variant.orderMaxQty;
+    // PATCH: isSample только при явном dto.isSample (rename не сбрасывает флаг).
+    const nextIsSample =
+      dto.isSample !== undefined ? dto.isSample : variant.isSample;
+    if (nextIsSample) {
+      nextMax = 1;
+    }
     this.assertOrderQty(nextMin, nextMax);
 
     const data: Prisma.ProductVariantUpdateInput = {};
-    const nextName = dto.name !== undefined ? dto.name.trim() : variant.name;
     if (dto.name !== undefined) {
       if (!nextName) throw new BadRequestException('Укажите название варианта');
       data.name = nextName;
@@ -517,6 +524,12 @@ export class CatalogProductsAdminService {
     if (dto.compareAt !== undefined) data.compareAt = dto.compareAt;
     if (dto.orderMinQty !== undefined) data.orderMinQty = dto.orderMinQty;
     if (dto.orderMaxQty !== undefined) data.orderMaxQty = dto.orderMaxQty;
+    if (dto.isSample !== undefined) {
+      data.isSample = dto.isSample;
+    }
+    if (nextIsSample) {
+      data.orderMaxQty = 1;
+    }
     if (dto.weightGrams !== undefined) data.weightGrams = dto.weightGrams;
     if (dto.lengthMm !== undefined) data.lengthMm = dto.lengthMm;
     if (dto.widthMm !== undefined) data.widthMm = dto.widthMm;
@@ -729,7 +742,9 @@ export class CatalogProductsAdminService {
   ) {
     const name = dto.name.trim();
     if (!name) throw new BadRequestException('Укажите название варианта');
-    this.assertOrderQty(dto.orderMinQty ?? 1, dto.orderMaxQty ?? null);
+    const isSample = resolveVariantIsSampleFlag(name, dto.isSample);
+    const orderMaxQty = isSample ? 1 : (dto.orderMaxQty ?? null);
+    this.assertOrderQty(dto.orderMinQty ?? 1, orderMaxQty);
 
     const slug = await this.uniqueVariantSlug(
       productId,
@@ -762,7 +777,8 @@ export class CatalogProductsAdminService {
         price: dto.price,
         compareAt: dto.compareAt ?? null,
         orderMinQty: dto.orderMinQty ?? 1,
-        orderMaxQty: dto.orderMaxQty ?? null,
+        orderMaxQty,
+        isSample,
         weightGrams: dto.weightGrams ?? null,
         lengthMm: dto.lengthMm ?? null,
         widthMm: dto.widthMm ?? null,

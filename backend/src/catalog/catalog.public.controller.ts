@@ -8,7 +8,9 @@ import {
   Post,
   Query,
   Req,
+  UseGuards,
 } from '@nestjs/common';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { UserRole } from '@prisma/client';
 import { Public } from '../common/decorators/public.decorator';
 import type { JwtPayload } from '../common/decorators/current-user.decorator';
@@ -18,6 +20,7 @@ import {
 } from '../common/parse-positive-int';
 import { CatalogPublicService } from './catalog.public.service';
 import { SyncCartDto } from './dto/cart-sync.dto';
+import { SampleEligibilityDto } from './dto/sample-eligibility.dto';
 
 @Public()
 @Controller('catalog')
@@ -68,6 +71,24 @@ export class CatalogPublicController {
   @Post('cart/sync')
   syncCart(@Body() dto: SyncCartDto, @Req() req: { user?: JwtPayload }) {
     return this.catalogPublic.syncCartLines(dto.lines ?? [], this.buyerUserId(req));
+  }
+
+  @Get('samples/rules')
+  sampleRules() {
+    return this.catalogPublic.getSamplePurchaseRules();
+  }
+
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @Post('samples/eligibility')
+  sampleEligibility(
+    @Body() dto: SampleEligibilityDto,
+    @Req() req: { user?: JwtPayload },
+  ) {
+    return this.catalogPublic.resolveSampleEligibility(
+      dto.variantIds ?? [],
+      this.buyerUserId(req),
+    );
   }
 
   @Get('products/:slug/set-siblings')

@@ -16,6 +16,7 @@ import {
 } from './order-shipping.resolve';
 import { shouldSyncOrderToYourich } from '../yourich/yourich-lead';
 import type { AdminCreateOrderDto } from './dto/admin-create-order.dto';
+import { throwIfSampleCartBlocked } from '../catalog/sample-purchase.errors';
 import type { PrismaService } from '../prisma/prisma.service';
 
 export type AdminSyncedCartItem = {
@@ -24,6 +25,7 @@ export type AdminSyncedCartItem = {
   shadeName: string | null;
   name: string;
   variantName: string;
+  isSample?: boolean;
   sku: string;
   price: number;
   qty: number;
@@ -128,6 +130,7 @@ export async function computeAdminCreateQuote(
       qty: l.qty,
     })),
     userId,
+    { bypassSamplePurchaseRules: true },
   );
 
   const overrideKey = (variantId: string, shadeId: string | null | undefined) =>
@@ -158,6 +161,7 @@ export async function computeAdminCreateQuote(
   });
 
   if (!items.length) {
+    throwIfSampleCartBlocked(synced.removedLines);
     throw new BadRequestException('Корзина пуста или позиции недоступны');
   }
 

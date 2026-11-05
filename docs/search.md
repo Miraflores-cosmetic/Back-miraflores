@@ -62,6 +62,8 @@ PLP hydrate (`catalogLoad`) ищет `g.key === 'product'`. Неверный к�
 1. `CatalogVisibilityService` — скрытые варианты/товары убираются из hits.
 2. `GroupPricingService` — subtitle цены = group price.
 
+Subtitle min/max по вариантам hit’а — **`catalogSellablePrices`** (пробники и `price ≤ 0` не участвуют; нужны **`name`** + **`isSample`** в select вариантов).
+
 PLP `/catalog?q=`:
 
 - SSR: guest search + guest cards by slug.
@@ -88,3 +90,4 @@ Hero CTA «Программа благодарности» (Front `HomeHero`): `
 | `Admin/app/api/public/search/route.ts` | BFF + JWT |
 | `Front/src/components/home-hero/HomeHero.tsx` | gratitude CTA |
 | `Front/src/config/siteNavLinks.ts` | `SITE_GRATITUDE_HREF` |
+| `docs/runbooks/catalog-samples.md` | PLP без sample-only, флаг `isSample` |

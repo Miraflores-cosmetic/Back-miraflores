@@ -37,6 +37,14 @@ import {
   cartSyncLineKey,
   mergeCartSyncInputLines,
 } from './catalog-cart-sync-merge.util';
+import { isProductVariantSample } from './sample-variant.util';
+import { resolveSampleRulesArticleSlug } from './sample-purchase.article.util';
+import { DEFAULT_SAMPLE_RULES_ARTICLE_SLUG } from './sample-purchase.constants';
+import {
+  findPurchasedSampleVariantIds,
+  resolveSampleOrderMaxQty,
+  samplePurchaseBlockReason,
+} from './sample-purchase.util';
 
 type ProductCardSource = {
   id: string;
@@ -342,6 +350,7 @@ export class CatalogPublicService {
         orderMaxQty: number | null;
         stock: number;
         stockReserve: number;
+        isSample: boolean;
         galleryLinks: Array<{
           sortOrder: number;
           productImage: { id: string; url: string; mediaType: string | null };
@@ -385,6 +394,7 @@ export class CatalogPublicService {
         orderMaxQty: v.orderMaxQty,
         stock: v.stock,
         stockReserve: v.stockReserve,
+        isSample: v.isSample,
         available,
         ...(images?.length ? { images } : {}),
       };
@@ -456,10 +466,13 @@ export class CatalogPublicService {
 
     const prices = catalogSellablePrices(variants);
 
+    const samplePurchaseRules = await this.getSamplePurchaseRules();
+
     const base = {
       id: row.id,
       slug: row.slug,
       name: row.name,
+      samplePurchaseRules,
       shortDescription: row.shortDescription,
       pageShortDescriptionHtml: row.pageShortDescriptionHtml,
       productType: row.productType,
@@ -1137,7 +1150,12 @@ export class CatalogPublicService {
   async syncCartLines(
     lines: Array<{ variantId: string; shadeId?: string | null; qty: number }>,
     userId?: string | null,
+    opts?: {
+      bypassSamplePurchaseRules?: boolean;
+      excludeSampleOrderId?: string | null;
+    },
   ) {
+    const bypassSampleRules = Boolean(opts?.bypassSamplePurchaseRules);
     const ctx = await this.resolveBuyerContext(userId);
     const lineKey = cartSyncLineKey;
     const cleaned = mergeCartSyncInputLines(lines, 100);
@@ -1147,7 +1165,7 @@ export class CatalogPublicService {
         removedKeys: [] as string[],
         removedLines: [] as Array<{
           key: string;
-          reason: 'oos' | 'missing';
+          reason: 'oos' | 'missing' | 'sample_guest' | 'sample_already_purchased';
           name?: string;
         }>,
         listSubtotal: 0,
@@ -1185,6 +1203,7 @@ export class CatalogPublicService {
       minQty: number;
       maxQty: number;
       qty: number;
+      isSample?: boolean;
       /** Номинал сертификата — без кампаний и без FK variant. */
       isGiftDenom?: boolean;
     };
@@ -1192,7 +1211,7 @@ export class CatalogPublicService {
     const removedKeys: string[] = [];
     const removedLines: Array<{
       key: string;
-      reason: 'oos' | 'missing';
+      reason: 'oos' | 'missing' | 'sample_guest' | 'sample_already_purchased';
       name?: string;
     }> = [];
 
@@ -1287,6 +1306,7 @@ export class CatalogPublicService {
             orderMaxQty: true,
             stock: true,
             stockReserve: true,
+            isSample: true,
             product: {
               select: {
                 id: true,
@@ -1333,6 +1353,23 @@ export class CatalogPublicService {
       })),
     );
 
+    const sampleVariantIdsInCart = catalogLines
+      .map((l) => byId.get(l.variantId))
+      .filter((v): v is NonNullable<typeof v> => Boolean(v))
+      .filter((v) => isProductVariantSample(v))
+      .map((v) => v.id);
+    const purchasedSampleIds =
+      bypassSampleRules || !userId?.trim()
+        ? new Set<string>()
+        : await findPurchasedSampleVariantIds(
+            this.prisma,
+            userId,
+            sampleVariantIdsInCart,
+            {
+              excludeOrderId: opts?.excludeSampleOrderId,
+            },
+          );
+
     for (const line of catalogLines) {
       const key = lineKey(line.variantId, line.shadeId);
       const v = byId.get(line.variantId);
@@ -1365,10 +1402,36 @@ export class CatalogPublicService {
         continue;
       }
 
+      if (!bypassSampleRules) {
+        const sampleBlock = samplePurchaseBlockReason(
+          userId,
+          v.name,
+          purchasedSampleIds,
+          v.id,
+          v.isSample,
+        );
+        if (sampleBlock) {
+          removedKeys.push(key);
+          removedLines.push({
+            key,
+            reason:
+              sampleBlock === 'guest'
+                ? 'sample_guest'
+                : 'sample_already_purchased',
+            name: v.product.name,
+          });
+          continue;
+        }
+      }
+
       const available = Math.max(0, v.stock - v.stockReserve);
       const minQty = Math.max(1, v.orderMinQty ?? 1);
-      let maxQty =
-        v.orderMaxQty != null ? Math.min(v.orderMaxQty, available) : available;
+      let maxQty = resolveSampleOrderMaxQty(
+        v.name,
+        v.orderMaxQty,
+        available,
+        v.isSample,
+      );
       if (maxQty > 0 && minQty > maxQty) maxQty = 0;
       if (maxQty <= 0) {
         removedKeys.push(key);
@@ -1403,6 +1466,7 @@ export class CatalogPublicService {
         variantName: v.name,
         sku: v.sku,
         imageUrl,
+        isSample: v.isSample,
         basePrice,
         listPrice: sellingPrice,
         compareAt:
@@ -1467,6 +1531,7 @@ export class CatalogPublicService {
         minQty: r.minQty,
         maxQty: r.maxQty,
         qty: r.qty,
+        isSample: r.isSample ?? false,
       };
     });
 
@@ -1510,6 +1575,84 @@ export class CatalogPublicService {
         allowPromoCodes: ctx.allowPromoCodes,
       },
     };
+  }
+
+  async getSamplePurchaseRules() {
+    const row = await this.prisma.cartSettings.findUnique({
+      where: { id: 'default' },
+      select: {
+        sampleRulesArticleSlug: true,
+        sampleVariantNoticeHtml: true,
+      },
+    });
+    const slug = await resolveSampleRulesArticleSlug(
+      this.prisma,
+      row?.sampleRulesArticleSlug,
+    );
+    return {
+      sampleRulesArticleSlug: slug ?? DEFAULT_SAMPLE_RULES_ARTICLE_SLUG,
+      sampleRulesArticleUrl: slug ? `/articles/${slug}` : null,
+      sampleVariantNoticeHtml: row?.sampleVariantNoticeHtml?.trim() || null,
+    };
+  }
+
+  async resolveSampleEligibility(
+    variantIds: string[],
+    userId?: string | null,
+  ) {
+    const rules = await this.getSamplePurchaseRules();
+    const ids = [...new Set(variantIds.map((id) => id.trim()).filter(Boolean))];
+    const variants = ids.length
+      ? await this.prisma.productVariant.findMany({
+          where: { id: { in: ids }, active: true },
+          select: { id: true, name: true, isSample: true },
+        })
+      : [];
+    const sampleIds = variants
+      .filter((v) => isProductVariantSample(v))
+      .map((v) => v.id);
+    const purchased = userId?.trim()
+      ? await findPurchasedSampleVariantIds(this.prisma, userId, sampleIds)
+      : new Set<string>();
+
+    const byVariantId: Record<
+      string,
+      {
+        isSample: boolean;
+        eligible: boolean;
+        reason?: 'guest' | 'already_purchased' | 'unknown_variant';
+      }
+    > = {};
+
+    for (const id of ids) {
+      const row = variants.find((v) => v.id === id);
+      if (!row) {
+        byVariantId[id] = {
+          isSample: false,
+          eligible: false,
+          reason: 'unknown_variant',
+        };
+        continue;
+      }
+      if (!isProductVariantSample(row)) {
+        byVariantId[id] = { isSample: false, eligible: true };
+        continue;
+      }
+      const block = samplePurchaseBlockReason(
+        userId,
+        row.name,
+        purchased,
+        row.id,
+        row.isSample,
+      );
+      byVariantId[id] = {
+        isSample: true,
+        eligible: !block,
+        ...(block ? { reason: block } : {}),
+      };
+    }
+
+    return { ...rules, variants: byVariantId };
   }
 
   /**

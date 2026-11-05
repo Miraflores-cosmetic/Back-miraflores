@@ -18,6 +18,23 @@ describe('listCardVolumeOptions', () => {
     ).toBeUndefined();
   });
 
+  it('caps maxQty at 1 for isSample without «пробник» in name', () => {
+    const opts = toCardVolumeOptions([
+      {
+        id: 'v1',
+        name: 'Крем 5 мл',
+        isSample: true,
+        price: 200,
+        ...base,
+        orderMaxQty: 10,
+      },
+      { id: 'v2', name: '50 мл', price: 1000, ...base },
+    ]);
+    const sample = opts.find((o) => o.id === 'v1');
+    expect(sample).toBeUndefined();
+    expect(opts).toHaveLength(1);
+  });
+
   it('returns options when 2+ sellable volumes', () => {
     const opts = listCardVolumeOptions([
       { id: 'v1', name: '50 мл', price: 1000, ...base },

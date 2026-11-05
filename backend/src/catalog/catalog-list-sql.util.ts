@@ -19,12 +19,11 @@ export type CatalogListSqlFilters = {
 type IdRow = { id: string };
 type CountRow = { count: bigint };
 
-/** Sellable variant predicate (mirrors catalog-price.util sample exclusion). */
+/** Sellable variant predicate (mirrors catalogSellableVariantWhere). */
 const SELLABLE_VARIANT_SQL = Prisma.sql`
   v.active = true
   AND v.price > 0
-  AND lower(trim(v.name)) <> 'пробник'
-  AND v.name NOT ILIKE '%пробник%'
+  AND v."isSample" = false
 `;
 
 function orderSql(sort: string, useCollectionSort: boolean): Prisma.Sql {

@@ -257,13 +257,33 @@ describe('SearchPublicService.search', () => {
           categoryId: 'cat',
           images: [],
           variants: [
-            { id: 'va', price: 500 },
-            { id: 'vb', price: 900 },
+            { id: 'va', price: 500, name: '50 мл', isSample: false },
+            { id: 'vb', price: 900, name: '100 мл', isSample: false },
           ],
         },
       ])
       .mockResolvedValueOnce([]);
     const res = await service.search('крем');
     expect(res.groups[0]?.items[0]?.subtitle).toBe('от 500 р.');
+  });
+
+  it('subtitle min-price без пробника (isSample / имя)', async () => {
+    productFindMany
+      .mockResolvedValueOnce([
+        {
+          id: '1',
+          name: 'Сыворотка',
+          slug: 'serum',
+          categoryId: 'cat',
+          images: [],
+          variants: [
+            { id: 'vs', price: 150, name: 'Крем 5 мл', isSample: true },
+            { id: 'vf', price: 3200, name: '50 мл', isSample: false },
+          ],
+        },
+      ])
+      .mockResolvedValueOnce([]);
+    const res = await service.search('сыворотка');
+    expect(res.groups[0]?.items[0]?.subtitle).toBe('3 200 р.');
   });
 });

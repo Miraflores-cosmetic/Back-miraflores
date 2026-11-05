@@ -13,6 +13,10 @@ import {
 } from '@miraflores/admin-types';
 import { extractMediaUrlsFromRichHtml } from '../blog/blog-html.util';
 import { sanitizeProductRichHtml } from '../catalog/catalog-html.util';
+import {
+  DEFAULT_SAMPLE_RULES_ARTICLE_SLUG,
+} from '../catalog/sample-purchase.constants';
+import { publishedBlogPostSlugExists } from '../catalog/sample-purchase.article.util';
 import { sanitizeFaqTextForWrite } from './faq-html.util';
 import {
   catalogSellablePrices,
@@ -283,20 +287,34 @@ function serializeHomepageSetAdmin(row: {
   };
 }
 
-function serializeCart(row: {
-  id: string;
-  freeShippingThresholdRub: number;
-  progressContentText: string;
-  progressSuccessText: string;
-  legalHtml: string;
-  updatedAt: Date;
-}) {
+async function serializeCartAdmin(
+  prisma: PrismaService,
+  row: {
+    id: string;
+    freeShippingThresholdRub: number;
+    progressContentText: string;
+    progressSuccessText: string;
+    legalHtml: string;
+    sampleRulesArticleSlug: string | null;
+    sampleVariantNoticeHtml: string | null;
+    updatedAt: Date;
+  },
+) {
+  const effectiveSlug =
+    row.sampleRulesArticleSlug?.trim() || DEFAULT_SAMPLE_RULES_ARTICLE_SLUG;
+  const sampleRulesArticleExists = await publishedBlogPostSlugExists(
+    prisma,
+    effectiveSlug,
+  );
   return {
     id: row.id,
     freeShippingThresholdRub: row.freeShippingThresholdRub,
     progressContentText: row.progressContentText,
     progressSuccessText: row.progressSuccessText,
     legalHtml: row.legalHtml,
+    sampleRulesArticleSlug: row.sampleRulesArticleSlug,
+    sampleVariantNoticeHtml: row.sampleVariantNoticeHtml,
+    sampleRulesArticleExists,
     updatedAt: row.updatedAt.toISOString(),
   };
 }
@@ -945,16 +963,23 @@ export class SettingsAdminService {
       where: { id: 'default' },
     });
     if (!row) {
+      const sampleRulesArticleExists = await publishedBlogPostSlugExists(
+        this.prisma,
+        DEFAULT_SAMPLE_RULES_ARTICLE_SLUG,
+      );
       return {
         id: CART_DEFAULTS.id,
         freeShippingThresholdRub: CART_DEFAULTS.freeShippingThresholdRub,
         progressContentText: CART_DEFAULTS.progressContentText,
         progressSuccessText: CART_DEFAULTS.progressSuccessText,
         legalHtml: CART_DEFAULTS.legalHtml,
+        sampleRulesArticleSlug: null,
+        sampleVariantNoticeHtml: null,
+        sampleRulesArticleExists,
         updatedAt: null,
       };
     }
-    return serializeCart(row);
+    return serializeCartAdmin(this.prisma, row);
   }
 
   async updateCart(dto: UpdateCartSettingsDto) {
@@ -964,6 +989,21 @@ export class SettingsAdminService {
     const legalHtml =
       sanitizeProductRichHtml(dto.legalHtml.trim() || '<p></p>').trim() ||
       '<p></p>';
+    const sampleRulesArticleSlug = trimOrNull(dto.sampleRulesArticleSlug);
+    if (sampleRulesArticleSlug) {
+      const ok = await publishedBlogPostSlugExists(
+        this.prisma,
+        sampleRulesArticleSlug,
+      );
+      if (!ok) {
+        throw new BadRequestException(
+          'Статья с таким slug не найдена или не опубликована — создайте запись в блоге или укажите другой slug',
+        );
+      }
+    }
+    const sampleVariantNoticeHtml = dto.sampleVariantNoticeHtml?.trim()
+      ? sanitizeProductRichHtml(dto.sampleVariantNoticeHtml.trim())
+      : null;
 
     const row = await this.prisma.cartSettings.upsert({
       where: { id: 'default' },
@@ -973,12 +1013,16 @@ export class SettingsAdminService {
         progressContentText: dto.progressContentText.trim(),
         progressSuccessText: dto.progressSuccessText.trim(),
         legalHtml,
+        sampleRulesArticleSlug,
+        sampleVariantNoticeHtml,
       },
       update: {
         freeShippingThresholdRub: dto.freeShippingThresholdRub,
         progressContentText: dto.progressContentText.trim(),
         progressSuccessText: dto.progressSuccessText.trim(),
         legalHtml,
+        sampleRulesArticleSlug,
+        sampleVariantNoticeHtml,
       },
     });
 
@@ -995,7 +1039,7 @@ export class SettingsAdminService {
       }
     }
 
-    return serializeCart(row);
+    return serializeCartAdmin(this.prisma, row);
   }
 
   async getDelivery() {
@@ -1648,6 +1692,8 @@ export class SettingsPublicService {
         progressContentText: CART_DEFAULTS.progressContentText,
         progressSuccessText: CART_DEFAULTS.progressSuccessText,
         legalHtml: CART_DEFAULTS.legalHtml,
+        sampleRulesArticleSlug: null,
+        sampleVariantNoticeHtml: null,
       };
     }
     return {
@@ -1655,6 +1701,10 @@ export class SettingsPublicService {
       progressContentText: row.progressContentText,
       progressSuccessText: row.progressSuccessText,
       legalHtml: sanitizeProductRichHtml(row.legalHtml),
+      sampleRulesArticleSlug: row.sampleRulesArticleSlug,
+      sampleVariantNoticeHtml: row.sampleVariantNoticeHtml
+        ? sanitizeProductRichHtml(row.sampleVariantNoticeHtml)
+        : null,
     };
   }
 
