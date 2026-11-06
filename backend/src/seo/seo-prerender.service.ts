@@ -4,6 +4,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CatalogPublicService } from '../catalog/catalog.public.service';
 import { resolvePublicSiteUrl } from './site-public-url.util';
 
+export type BotHtmlResult = { status: number; body: string };
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, '&amp;')
@@ -106,62 +108,81 @@ export class SeoPrerenderService {
   /**
    * `uri` как в nginx `$request_uri`: путь + query, напр. /product/x или /catalog?collection=z
    */
-  async renderBotHtml(uri: string): Promise<string> {
+  async renderBotHtml(uri: string): Promise<BotHtmlResult> {
     const raw = uri?.trim() || '/';
     let pathname = '/';
     let collection = '';
     let tag = '';
     let q = '';
+    let pathWithQuery = '/';
     try {
       const base = 'https://placeholder.local';
       const u = new URL(raw.startsWith('/') ? `${base}${raw}` : raw);
       pathname = u.pathname || '/';
+      pathWithQuery = `${pathname}${u.search}`;
       collection = u.searchParams.get('collection')?.trim() || '';
       tag = u.searchParams.get('tag')?.trim() || '';
       q = u.searchParams.get('q')?.trim() || '';
     } catch {
       pathname = '/';
+      pathWithQuery = '/';
     }
 
     if (pathname === '/' || pathname === '') {
-      return this.renderHome();
+      const body = await this.renderHome();
+      return { status: 200, body };
     }
 
     if (pathname.startsWith('/catalog')) {
-      return this.catalogPublic.renderOpenGraphHtml({
-        path: pathname,
-        collection,
-        tag,
-        q,
-      });
+      try {
+        const body = await this.catalogPublic.renderOpenGraphHtml({
+          path: pathname,
+          collection,
+          tag,
+          q,
+        });
+        return { status: 200, body };
+      } catch (e) {
+        if (e instanceof NotFoundException) {
+          return {
+            status: 404,
+            body: await this.catalogPublic.renderBotNotFoundPage(pathWithQuery),
+          };
+        }
+        throw e;
+      }
     }
 
     if (pathname.startsWith('/product/')) {
       const slug = decodeURIComponent(
         pathname.slice('/product/'.length).split('/')[0] ?? '',
       ).trim();
-      if (!slug) throw new NotFoundException();
-      return this.renderProduct(slug);
+      if (!slug) {
+        return {
+          status: 404,
+          body: await this.catalogPublic.renderBotNotFoundPage(pathWithQuery),
+        };
+      }
+      return this.renderProduct(slug, pathWithQuery);
     }
 
     if (pathname.startsWith('/articles/')) {
       const slug = decodeURIComponent(
         pathname.slice('/articles/'.length).split('/')[0] ?? '',
       ).trim();
-      if (!slug) throw new NotFoundException();
-      return this.renderArticle(slug);
+      if (!slug) {
+        return {
+          status: 404,
+          body: await this.catalogPublic.renderBotNotFoundPage(pathWithQuery),
+        };
+      }
+      return this.renderArticle(slug, pathWithQuery);
     }
 
-    const seo = await this.siteSeo();
-    const o = this.origin();
-    return buildShell({
-      title: seo.titleSuffix,
-      description: seo.defaultMetaDescription?.trim() || '',
-      canonical: `${o}${pathname}`,
-      image: seo.defaultOgImageUrl,
-      h1: seo.titleSuffix,
-      noIndex: true,
-    });
+    return {
+      status: 404,
+      body: await this.catalogPublic.renderBotNotFoundPage(pathWithQuery),
+    };
   }
 
   private async renderHome(): Promise<string> {
@@ -184,7 +205,10 @@ export class SeoPrerenderService {
     });
   }
 
-  private async renderProduct(slug: string): Promise<string> {
+  private async renderProduct(
+    slug: string,
+    requestPathWithQuery: string,
+  ): Promise<BotHtmlResult> {
     const row = await this.prisma.product.findFirst({
       where: { slug, active: true, excludeFromCatalog: false },
       select: {
@@ -203,7 +227,12 @@ export class SeoPrerenderService {
         },
       },
     });
-    if (!row) throw new NotFoundException();
+    if (!row) {
+      return {
+        status: 404,
+        body: await this.catalogPublic.renderBotNotFoundPage(requestPathWithQuery),
+      };
+    }
 
     const o = this.origin();
     const path =
@@ -225,18 +254,24 @@ export class SeoPrerenderService {
     const img =
       row.ogImageUrl?.trim() || row.images[0]?.url || seo.defaultOgImageUrl;
 
-    return buildShell({
-      title,
-      description: desc,
-      canonical,
-      image: img,
-      h1: row.name,
-      lead: row.shortDescription?.trim() || undefined,
-      noIndex: row.seoNoIndex === true,
-    });
+    return {
+      status: 200,
+      body: buildShell({
+        title,
+        description: desc,
+        canonical,
+        image: img,
+        h1: row.name,
+        lead: row.shortDescription?.trim() || undefined,
+        noIndex: row.seoNoIndex === true,
+      }),
+    };
   }
 
-  private async renderArticle(slug: string): Promise<string> {
+  private async renderArticle(
+    slug: string,
+    requestPathWithQuery: string,
+  ): Promise<BotHtmlResult> {
     const s = slug.trim();
     const now = new Date();
     const row = await this.prisma.blogPost.findFirst({
@@ -256,7 +291,12 @@ export class SeoPrerenderService {
         coverUrl: true,
       },
     });
-    if (!row) throw new NotFoundException();
+    if (!row) {
+      return {
+        status: 404,
+        body: await this.catalogPublic.renderBotNotFoundPage(requestPathWithQuery),
+      };
+    }
 
     const o = this.origin();
     const path =
@@ -277,14 +317,17 @@ export class SeoPrerenderService {
     const img =
       row.ogImageUrl?.trim() || row.coverUrl || seo.defaultOgImageUrl;
 
-    return buildShell({
-      title,
-      description: desc,
-      canonical,
-      image: img,
-      h1: row.title,
-      lead: stripHtml(row.excerpt, 200) || undefined,
-      noIndex: row.seoNoIndex === true,
-    });
+    return {
+      status: 200,
+      body: buildShell({
+        title,
+        description: desc,
+        canonical,
+        image: img,
+        h1: row.title,
+        lead: stripHtml(row.excerpt, 200) || undefined,
+        noIndex: row.seoNoIndex === true,
+      }),
+    };
   }
 }

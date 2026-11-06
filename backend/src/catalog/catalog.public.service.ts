@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { DiscountsPublicService } from '../discounts/discounts-public.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -38,6 +38,8 @@ import {
   mergeCartSyncInputLines,
 } from './catalog-cart-sync-merge.util';
 import { isProductVariantSample } from './sample-variant.util';
+import { isValidCatalogListPath } from '../seo/catalog-path-validate.util';
+import { buildBotNotFoundHtml } from '../seo/seo-bot-html.util';
 import { resolveSampleRulesArticleSlug } from './sample-purchase.article.util';
 import { DEFAULT_SAMPLE_RULES_ARTICLE_SLUG } from './sample-purchase.constants';
 import {
@@ -1655,6 +1657,23 @@ export class CatalogPublicService {
     return { ...rules, variants: byVariantId };
   }
 
+  /** 404 HTML для ботов (Nest задаёт HTTP 404). */
+  async renderBotNotFoundPage(canonicalPath: string): Promise<string> {
+    const seo = await this.prisma.siteSettings.findUnique({
+      where: { id: 'default' },
+      select: { siteUrl: true, titleSuffix: true },
+    });
+    const origin =
+      (seo?.siteUrl || '').replace(/\/+$/, '') || 'https://miraflores-shop.com';
+    const suffix = seo?.titleSuffix?.trim() || 'Miraflores';
+    const path = canonicalPath.startsWith('/') ? canonicalPath : `/${canonicalPath}`;
+    return buildBotNotFoundHtml({
+      title: `Страница не найдена — ${suffix}`,
+      description: 'Запрашиваемая страница не существует или была удалена.',
+      canonical: `${origin}${path}`,
+    });
+  }
+
   /**
    * HTML с title/canonical/OG для шаринг-ботов (Telegram/VK), без JS.
    * Nginx: User-Agent share-bot → этот URL.
@@ -1679,8 +1698,44 @@ export class CatalogPublicService {
 
     const rawPath = opts.path.split('?')[0] || '/catalog';
     const parts = rawPath.split('/').filter(Boolean);
-    const cat = parts[0] === 'catalog' ? (parts[1] ?? '') : '';
-    const sub = parts[0] === 'catalog' ? (parts[2] ?? '') : '';
+    if (parts[0] !== 'catalog') {
+      throw new NotFoundException();
+    }
+    if (parts.length > 3) {
+      throw new NotFoundException();
+    }
+    const cat = parts[1] ?? '';
+    const sub = parts[2] ?? '';
+
+    const categoryRows = await this.prisma.category.findMany({
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        parentId: true,
+        coverImageUrl: true,
+      },
+    });
+    if (!isValidCatalogListPath(cat, sub, categoryRows)) {
+      throw new NotFoundException();
+    }
+
+    const collectionSlug = opts.collection?.trim() || '';
+    const tagSlug = opts.tag?.trim() || '';
+    if (collectionSlug) {
+      const exists = await this.prisma.collection.findFirst({
+        where: { slug: collectionSlug, active: true },
+        select: { id: true },
+      });
+      if (!exists) throw new NotFoundException();
+    }
+    if (tagSlug) {
+      const exists = await this.prisma.catalogTag.findFirst({
+        where: { slug: tagSlug },
+        select: { id: true },
+      });
+      if (!exists) throw new NotFoundException();
+    }
 
     let label = 'Каталог';
     let image = seo?.defaultOgImageUrl?.trim() || '';
@@ -1688,18 +1743,18 @@ export class CatalogPublicService {
 
     if (opts.q) {
       label = `Поиск: ${opts.q}`;
-    } else if (opts.collection) {
+    } else if (collectionSlug) {
       const col = await this.prisma.collection.findFirst({
-        where: { slug: opts.collection, active: true },
+        where: { slug: collectionSlug, active: true },
         select: { name: true, coverImageUrl: true, productPreviewUrl: true },
       });
       if (col) {
         label = col.name;
         image = col.coverImageUrl || col.productPreviewUrl || image;
       }
-    } else if (opts.tag) {
+    } else if (tagSlug) {
       const tag = await this.prisma.catalogTag.findFirst({
-        where: { slug: opts.tag },
+        where: { slug: tagSlug },
         select: { name: true, coverImageUrl: true },
       });
       if (tag) {
@@ -1707,15 +1762,7 @@ export class CatalogPublicService {
         image = tag.coverImageUrl || image;
       }
     } else if (cat) {
-      const rows = await this.prisma.category.findMany({
-        select: {
-          id: true,
-          name: true,
-          slug: true,
-          parentId: true,
-          coverImageUrl: true,
-        },
-      });
+      const rows = categoryRows;
       const root = rows.find((r) => r.slug === cat && !r.parentId);
       if (root) {
         label = root.name;

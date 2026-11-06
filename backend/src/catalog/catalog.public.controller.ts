@@ -8,8 +8,10 @@ import {
   Post,
   Query,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { UserRole } from '@prisma/client';
 import { Public } from '../common/decorators/public.decorator';
@@ -125,18 +127,36 @@ export class CatalogPublicController {
   @Get('open-graph')
   @Header('Content-Type', 'text/html; charset=utf-8')
   @Header('Cache-Control', 'public, max-age=120')
-  openGraphHtml(
+  async openGraphHtml(
+    @Res({ passthrough: true }) res: Response,
     @Query('path') path?: string,
     @Query('collection') collection?: string,
     @Query('tag') tag?: string,
     @Query('q') q?: string,
   ) {
-    return this.catalogPublic.renderOpenGraphHtml({
-      path: path?.trim() || '/catalog',
-      collection: collection?.trim() || '',
-      tag: tag?.trim() || '',
-      q: q?.trim() || '',
-    });
+    const pathTrim = path?.trim() || '/catalog';
+    const qs = new URLSearchParams();
+    const c = collection?.trim();
+    const t = tag?.trim();
+    const qq = q?.trim();
+    if (c) qs.set('collection', c);
+    if (t) qs.set('tag', t);
+    if (qq) qs.set('q', qq);
+    const fullPath = `${pathTrim}${qs.toString() ? `?${qs}` : ''}`;
+    try {
+      return await this.catalogPublic.renderOpenGraphHtml({
+        path: pathTrim,
+        collection: c || '',
+        tag: t || '',
+        q: qq || '',
+      });
+    } catch (e) {
+      if (e instanceof NotFoundException) {
+        res.status(404);
+        return this.catalogPublic.renderBotNotFoundPage(fullPath);
+      }
+      throw e;
+    }
   }
 
   @Get('collections')

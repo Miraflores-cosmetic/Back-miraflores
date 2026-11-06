@@ -22,9 +22,9 @@
 
 Ботам с плохим/без JS отдаётся **лёгкий HTML** с `<title>`, `meta description`, `canonical`, OG/Twitter — не полный React.
 
-- **API:** `GET /api/v1/seo/bot-html` с заголовком **`X-Bot-Request-URI: $request_uri`** (nginx передаёт полный путь + query).
-- **Nginx:** `map $http_user_agent $seo_bot_prerender` → для `/`, `/catalog*`, `/product/*`, `/articles/*` при матче бота — `error_page 418 = @seo_bot_prerender` → proxy на Nest.
-- **Каталог:** тот же контент, что и раньше у share-bot (`renderOpenGraphHtml`).
+- **API:** `GET /api/v1/seo/bot-html` с заголовком **`X-Bot-Request-URI: $request_uri`** (nginx передаёт полный путь + query). Ответ **200 или 404** (нет товара/статьи/неверный каталог/collection/tag — не «soft 404»).
+- **Nginx:** `map $http_user_agent $seo_bot_prerender` → для **любого пути** под SPA (в т.ч. `/quiz/...`) кроме статики: `location /` + `location = /` с `if ($seo_bot_prerender) return 418` → `@seo_bot_prerender`.
+- **Каталог:** `renderOpenGraphHtml` с валидацией сегментов `/catalog`, категорий, `collection`, `tag`; иначе **404** + `noindex` в теле.
 - **Товары и статьи:** данные из БД + `SiteSettings` (home meta — для `/`).
 
 Люди в браузере по-прежнему получают **тот же Vite `index.html`** и SPA — визуально ничего не меняется. Отличие только в **первом ответе** для перечисленных ботов.
