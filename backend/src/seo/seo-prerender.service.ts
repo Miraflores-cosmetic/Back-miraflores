@@ -167,18 +167,20 @@ export class SeoPrerenderService {
   private async renderHome(): Promise<string> {
     const seo = await this.siteSeo();
     const o = this.origin();
-    const title = seo.homeMetaTitle?.trim() || seo.titleSuffix;
+    const homeTitle = seo.homeMetaTitle?.trim();
+    const title = homeTitle || seo.titleSuffix;
+    const h1 = homeTitle || seo.titleSuffix;
     const desc =
       seo.homeMetaDescription?.trim() ||
       seo.defaultMetaDescription?.trim() ||
-      title;
+      h1;
     const image = seo.homeOgImageUrl?.trim() || seo.defaultOgImageUrl?.trim();
     return buildShell({
-      title: `${title} — ${seo.titleSuffix}`,
+      title,
       description: desc,
       canonical: `${o}/`,
       image,
-      h1: title,
+      h1,
     });
   }
 
