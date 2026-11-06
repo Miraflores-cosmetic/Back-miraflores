@@ -3,9 +3,11 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { ConfigService } from '@nestjs/config';
 import { json, raw, urlencoded, type NextFunction, type Request, type Response } from 'express';
+import type { Express } from 'express';
 import { mkdirSync } from 'fs';
 import { join } from 'path';
 import { AppModule } from './app.module';
+import { SeoService } from './seo/seo.service';
 
 function backendRootDir(): string {
   const cwd = process.cwd().replace(/\/+$/, '');
@@ -62,6 +64,18 @@ async function bootstrap() {
   });
   /** Файлы с диска: http://host:3001/uploads/... (не под /api/v1; chat/ — только signed API) */
   app.useStaticAssets(localDir, { prefix: '/uploads/' });
+
+  // SEO: вне globalPrefix — https://site/robots.txt и /sitemap.xml (см. nginx)
+  const seo = app.get(SeoService);
+  const expressApp = app.getHttpAdapter().getInstance() as Express;
+  expressApp.get('/robots.txt', (_req, res) => {
+    res.type('text/plain; charset=utf-8');
+    res.send(seo.getRobotsTxt());
+  });
+  expressApp.get('/sitemap.xml', async (_req, res) => {
+    res.type('application/xml; charset=utf-8');
+    res.send(await seo.getSitemapXml());
+  });
 
   app.setGlobalPrefix('api/v1');
   app.useGlobalPipes(

@@ -23,6 +23,7 @@ import { ReviewsModule } from './reviews/reviews.module';
 import { QuizModule } from './quiz/quiz.module';
 import { AssistantModule } from './assistant/assistant.module';
 import { OnecModule } from './onec/onec.module';
+import { SeoModule } from './seo/seo.module';
 import { UserGroupsModule } from './user-groups/user-groups.module';
 import { NewsletterModule } from './newsletter/newsletter.module';
 import { OrderChatModule } from './order-chat/order-chat.module';
@@ -67,6 +68,7 @@ import { RlsInterceptor } from './rls/rls.interceptor';
     QuizModule,
     AssistantModule,
     OnecModule,
+    SeoModule,
     UserGroupsModule,
     NewsletterModule,
     OrderChatModule,
