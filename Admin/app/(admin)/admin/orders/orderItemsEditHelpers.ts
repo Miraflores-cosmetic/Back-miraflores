@@ -42,11 +42,12 @@ export function matchingPresetPct(
   return null;
 }
 
-/** Зеркало бэкенд-clamp промо/gift при правке состава. */
+/** Зеркало бэкенд-clamp промо/gift/wallet при правке состава. */
 export function estimateAfterItemsEdit(opts: {
   subtotal: number;
   discountTotal: number;
   giftCertificateAmount: number;
+  referralWalletAmount?: number;
   shippingCost: number;
   netPaid: number;
 }) {
@@ -55,22 +56,31 @@ export function estimateAfterItemsEdit(opts: {
     Math.max(0, Math.round(opts.subtotal)),
   );
   const shipping = Math.max(0, Math.round(opts.shippingCost));
-  const maxGift = Math.max(0, opts.subtotal - discount + shipping);
+  const payableAfterDiscount = Math.max(0, opts.subtotal - discount + shipping);
   const gift = Math.min(
     Math.max(0, Math.round(opts.giftCertificateAmount)),
-    maxGift,
+    payableAfterDiscount,
   );
-  const total = Math.max(0, opts.subtotal - discount - gift + shipping);
+  const wallet = Math.min(
+    Math.max(0, Math.round(opts.referralWalletAmount ?? 0)),
+    Math.max(0, payableAfterDiscount - gift),
+  );
+  const total = Math.max(
+    0,
+    opts.subtotal - discount - gift - wallet + shipping,
+  );
   const netPaid = Math.max(0, Math.round(opts.netPaid));
   return {
     discount,
     gift,
+    wallet,
     shipping,
     total,
     balanceDue: Math.max(0, total - netPaid),
     refundSuggested: Math.max(0, netPaid - total),
     discountClamped: discount < Math.max(0, opts.discountTotal),
     giftClamped: gift < Math.max(0, opts.giftCertificateAmount),
+    walletClamped: wallet < Math.max(0, opts.referralWalletAmount ?? 0),
   };
 }
 

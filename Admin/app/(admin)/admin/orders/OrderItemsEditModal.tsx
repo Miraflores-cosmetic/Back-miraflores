@@ -67,6 +67,7 @@ function digitsOnly(raw: string): string {
 export type OrderItemsPricingSnapshot = {
   discountTotal: number;
   giftCertificateAmount: number;
+  referralWalletAmount?: number;
   shippingCost: number;
   netPaid: number;
   currentTotal: number;
@@ -85,7 +86,7 @@ export function OrderItemsEditModal({
   open: boolean;
   initialItems: AdminOrderItem[];
   busy: boolean;
-  /** Промо/сертификат — бэкенд clamp'ит суммы при урезании состава. */
+  /** Промо/сертификат/wallet — бэкенд clamp'ит суммы при урезании состава. */
   hasPromoOrGift?: boolean;
   pricing: OrderItemsPricingSnapshot;
   onClose: () => void;
@@ -158,6 +159,7 @@ export function OrderItemsEditModal({
         subtotal,
         discountTotal: pricing.discountTotal,
         giftCertificateAmount: pricing.giftCertificateAmount,
+        referralWalletAmount: pricing.referralWalletAmount ?? 0,
         shippingCost: pricing.shippingCost,
         netPaid: pricing.netPaid,
       }),
@@ -337,6 +339,7 @@ export function OrderItemsEditModal({
         subtotal: confirmMeta.nextSubtotal,
         discountTotal: pricing.discountTotal,
         giftCertificateAmount: pricing.giftCertificateAmount,
+        referralWalletAmount: pricing.referralWalletAmount ?? 0,
         shippingCost: pricing.shippingCost,
         netPaid: pricing.netPaid,
       })
@@ -674,6 +677,15 @@ export function OrderItemsEditModal({
                   {estimate.giftClamped ? ' · по составу' : ''}
                 </span>
                 <span>−{formatAdminMoney(estimate.gift)}</span>
+              </div>
+            ) : null}
+            {(pricing.referralWalletAmount ?? 0) > 0 || estimate.wallet > 0 ? (
+              <div className={styles.itemsEditPreviewRow}>
+                <span>
+                  Реф. баланс
+                  {estimate.walletClamped ? ' · по составу' : ''}
+                </span>
+                <span>−{formatAdminMoney(estimate.wallet)}</span>
               </div>
             ) : null}
             <div className={styles.itemsEditPreviewRow}>

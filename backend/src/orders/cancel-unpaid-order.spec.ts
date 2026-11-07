@@ -109,6 +109,26 @@ describe('cancelUnpaidOrderInTx', () => {
     });
   });
 
+  it('вызывает referralWallet.releaseSpendInTx при abandon/cancel', async () => {
+    const tx = buildTx();
+    tx.payment.findMany.mockResolvedValue([]);
+    const referralWallet = {
+      releaseSpendInTx: vi.fn(async () => true),
+    };
+
+    await cancelUnpaidOrderInTx(tx as never, {
+      orderId,
+      fromStatus: OrderStatus.AWAITING_PAYMENT,
+      items: [],
+      reason: 'abandon',
+      referralWallet: referralWallet as never,
+    });
+
+    expect(referralWallet.releaseSpendInTx).toHaveBeenCalledWith(tx, orderId, {
+      note: 'Возврат реф. баланса при отмене заказа',
+    });
+  });
+
   it('integration: reserve → cancel освобождает stockReserve', async () => {
     const stateful = createStatefulStockTx({
       v1: { stock: 10, stockReserve: 0 },

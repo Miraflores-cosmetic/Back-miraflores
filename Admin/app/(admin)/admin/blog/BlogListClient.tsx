@@ -20,6 +20,7 @@ import {
   adminBackendJson,
 } from '@/lib/adminBackendFetch';
 import { formatAdminDateTime } from '@/lib/adminFormat';
+import { articleStorefrontHref } from '@/lib/storefrontHref';
 import { useAdminPaginatedList } from '@/lib/useAdminPaginatedList';
 import catalogStyles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
 import { BlogCategoriesPanel } from './BlogCategoriesPanel';
@@ -427,7 +428,7 @@ export function BlogListClient({ embedded = false }: { embedded?: boolean } = {}
                     <>
                       {' '}
                       <a
-                        href={`/blog/${encodeURIComponent(row.slug)}`}
+                        href={articleStorefrontHref(row.slug)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className={catalogStyles.mutedInline}

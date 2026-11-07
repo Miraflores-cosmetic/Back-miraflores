@@ -1,4 +1,5 @@
 import { OrderStatus } from '@prisma/client';
+import { computeCommissionBase } from '../orders/commission-base';
 
 export type YourichLeadEvent = 'NEW' | 'DEAL' | 'CANCEL';
 
@@ -8,20 +9,16 @@ export type YourichLeadOrderInput = {
   subtotal: number;
   discountTotal: number;
   giftCertificateAmount: number;
+  referralWalletAmount?: number;
   refundedAmount: number;
   customerName: string | null;
   /** Покупка только сертификата — в YouRich не отправляем */
   giftPurchaseDenominationId: string | null;
 };
 
-/** Сумма для партнёра: товары после скидки, без доставки, минус сертификат и возвраты. */
+/** Сумма для партнёра YouRich (= shared commission base). */
 export function computeYourichLeadSum(order: YourichLeadOrderInput): number {
-  const goods = Math.max(
-    0,
-    Math.floor(order.subtotal) - Math.max(0, Math.floor(order.discountTotal)),
-  );
-  const afterGift = Math.max(0, goods - Math.max(0, Math.floor(order.giftCertificateAmount)));
-  return Math.max(0, afterGift - Math.max(0, Math.floor(order.refundedAmount)));
+  return computeCommissionBase(order);
 }
 
 export function computeYourichLeadEvent(status: OrderStatus): YourichLeadEvent {

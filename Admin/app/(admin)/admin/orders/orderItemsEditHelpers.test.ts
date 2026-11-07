@@ -105,13 +105,41 @@ describe('estimateAfterItemsEdit', () => {
     expect(e).toMatchObject({
       discount: 400,
       gift: 100,
+      wallet: 0,
       shipping: 100,
       total: 0,
       balanceDue: 0,
       refundSuggested: 0,
       discountClamped: true,
       giftClamped: true,
+      walletClamped: false,
     });
+  });
+
+  it('wallet clamp после gift (XOR обычно 0, но оценка безопасна)', () => {
+    const e = estimateAfterItemsEdit({
+      subtotal: 1000,
+      discountTotal: 0,
+      giftCertificateAmount: 0,
+      referralWalletAmount: 900,
+      shippingCost: 100,
+      netPaid: 0,
+    });
+    expect(e.wallet).toBe(900);
+    expect(e.total).toBe(200);
+    expect(e.walletClamped).toBe(false);
+
+    const clamped = estimateAfterItemsEdit({
+      subtotal: 300,
+      discountTotal: 0,
+      giftCertificateAmount: 0,
+      referralWalletAmount: 900,
+      shippingCost: 0,
+      netPaid: 0,
+    });
+    expect(clamped.wallet).toBe(300);
+    expect(clamped.walletClamped).toBe(true);
+    expect(clamped.total).toBe(0);
   });
 
   it('снижение товаров при netPaid → refundSuggested', () => {

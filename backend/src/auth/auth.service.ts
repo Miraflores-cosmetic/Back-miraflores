@@ -17,9 +17,11 @@ import {
   MARKETING_CONSENT_VERSION,
   PRIVACY_CONSENT_VERSION,
 } from './consent-versions';
+import { ReferralCodeService } from '../referral/referral-code.service';
 
 const BCRYPT_ROUNDS = 10;
 const RESET_TTL = '1h';
+const REGISTER_CODE_ATTEMPTS = 8;
 
 type PasswordResetPayload = {
   sub: string;
@@ -37,6 +39,7 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly mail: MailService,
     private readonly orderChat: OrderChatService,
+    private readonly referralCodes: ReferralCodeService,
   ) {}
 
   async validateAdmin(emailOrPhone: string, password: string) {
@@ -95,26 +98,55 @@ export class AuthService {
     const now = new Date();
     const marketing = input.consentMarketing === true;
     const passwordHash = await bcrypt.hash(input.password, BCRYPT_ROUNDS);
-    const user = await this.prisma.user.create({
-      data: {
-        email,
-        passwordHash,
-        role: UserRole.USER,
-        displayName: input.displayName?.trim() || null,
-        privacyConsentAt: now,
-        privacyConsentVersion: PRIVACY_CONSENT_VERSION,
-        marketingConsent: marketing,
-        marketingConsentAt: marketing ? now : null,
-        marketingConsentVersion: marketing ? MARKETING_CONSENT_VERSION : null,
-      },
-      select: {
-        id: true,
-        email: true,
-        role: true,
-        displayName: true,
-      },
-    });
-    return user;
+
+    let lastErr: unknown;
+    for (let i = 0; i < REGISTER_CODE_ATTEMPTS; i++) {
+      const referralCode = await this.referralCodes.allocateUniqueCode();
+      try {
+        const user = await this.prisma.user.create({
+          data: {
+            email,
+            passwordHash,
+            role: UserRole.USER,
+            displayName: input.displayName?.trim() || null,
+            privacyConsentAt: now,
+            privacyConsentVersion: PRIVACY_CONSENT_VERSION,
+            marketingConsent: marketing,
+            marketingConsentAt: marketing ? now : null,
+            marketingConsentVersion: marketing
+              ? MARKETING_CONSENT_VERSION
+              : null,
+            referralCode,
+            referralCodeActive: true,
+          },
+          select: {
+            id: true,
+            email: true,
+            role: true,
+            displayName: true,
+            referralCode: true,
+          },
+        });
+        return user;
+      } catch (e) {
+        lastErr = e;
+        if (
+          e instanceof Prisma.PrismaClientKnownRequestError &&
+          e.code === 'P2002'
+        ) {
+          const targets = (e.meta?.target as string[] | undefined) ?? [];
+          if (targets.includes('referralCode') || targets.includes('User_referralCode_key')) {
+            continue;
+          }
+          if (targets.includes('email') || targets.includes('User_email_key')) {
+            throw new ConflictException('Пользователь с таким email уже есть');
+          }
+        }
+        throw e;
+      }
+    }
+    this.logger.error(`registerBuyer: referral code alloc failed: ${String(lastErr)}`);
+    throw new BadRequestException('Не удалось создать аккаунт');
   }
 
   /**

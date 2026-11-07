@@ -56,13 +56,16 @@ export function recalcOrderTotal(opts: {
   subtotal: number;
   discountTotal: number;
   giftCertificateAmount: number;
+  /** Списание реф. кошелька (XOR с gift; при clamp тоже вычитаем). */
+  referralWalletAmount?: number;
   shippingCost: number;
 }): number {
   return Math.max(
     0,
     Math.round(opts.subtotal) -
       Math.max(0, Math.round(opts.discountTotal)) -
-      Math.max(0, Math.round(opts.giftCertificateAmount)) +
+      Math.max(0, Math.round(opts.giftCertificateAmount)) -
+      Math.max(0, Math.round(opts.referralWalletAmount ?? 0)) +
       Math.max(0, Math.round(opts.shippingCost)),
   );
 }

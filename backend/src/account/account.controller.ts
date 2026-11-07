@@ -7,6 +7,7 @@ import {
   Post,
   Put,
   Patch,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { AccountService } from './account.service';
@@ -36,6 +37,45 @@ export class AccountController {
   @Get('me')
   getProfile(@CurrentUser() user: JwtPayload) {
     return this.account.getProfile(user.sub);
+  }
+
+  /** Выдать реф. код, если ещё нет (кнопка «получить ссылку» в ЛК). */
+  @Post('me/referral')
+  ensureReferral(@CurrentUser() user: JwtPayload) {
+    return this.account.ensureReferralCode(user.sub);
+  }
+
+  /**
+   * Quote spend: ?payable= — ₽ к оплате до wallet (товары+доставка после промо).
+   * Cap/enabled также в GET /me (referralSpendCapPercent, referralEnabled).
+   */
+  @Get('me/referral/wallet')
+  quoteReferralWallet(
+    @CurrentUser() user: JwtPayload,
+    @Query('payable') payableRaw?: string,
+  ) {
+    const payable = Math.max(0, Math.floor(Number(payableRaw) || 0));
+    return this.account.quoteReferralSpend(user.sub, payable);
+  }
+
+  /** ЛК: dual balance + ссылка + share template. */
+  @Get('me/referral')
+  getReferralDashboard(@CurrentUser() user: JwtPayload) {
+    return this.account.getReferralDashboard(user.sub);
+  }
+
+  /** ЛК: история ledger (без PII приглашённого). */
+  @Get('me/referral/ledger')
+  listReferralLedger(
+    @CurrentUser() user: JwtPayload,
+    @Query('limit') limitRaw?: string,
+    @Query('cursor') cursor?: string,
+  ) {
+    const limit = Math.min(50, Math.max(1, Math.floor(Number(limitRaw) || 20)));
+    return this.account.listReferralLedger(user.sub, {
+      limit,
+      cursor: cursor ?? null,
+    });
   }
 
   @Patch('me')

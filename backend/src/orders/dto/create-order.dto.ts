@@ -158,6 +158,14 @@ export class OrderAffiliateDto {
   extUserId?: string | null;
 }
 
+/** Внутренняя рефка Miraflores (?mf=CODE) — отдельно от YouRich. */
+export class OrderReferralDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  code?: string | null;
+}
+
 export class CreateOrderDto {
   @IsArray()
   @ArrayMaxSize(100)
@@ -209,11 +217,25 @@ export class CreateOrderDto {
   @Type(() => OrderAffiliateDto)
   affiliate?: OrderAffiliateDto | null;
 
-  /** Подарочный сертификат (взаимоисключающе с promoCode). */
+  /** Атрибуция внутренней рефки Miraflores (?mf=). */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => OrderReferralDto)
+  referral?: OrderReferralDto | null;
+
+  /** Подарочный сертификат (взаимоисключающе с promoCode / useReferralWallet). */
   @IsOptional()
   @IsString()
   @MaxLength(64)
   giftCertificateCode?: string | null;
+
+  /**
+   * Списать available реф. баланс (XOR с promo/gift).
+   * Только для JWT USER; сумма = min(balance, cap%×payable, payable).
+   */
+  @IsOptional()
+  @IsBoolean()
+  useReferralWallet?: boolean;
 
   /** UUID/cuid от клиента — повтор create с тем же ключом возвращает тот же заказ. */
   @IsString()

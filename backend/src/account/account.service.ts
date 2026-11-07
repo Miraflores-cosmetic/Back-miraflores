@@ -27,6 +27,8 @@ import type {
   UpdateBuyerProfileDto,
   UpsertBuyerAddressDto,
 } from './dto/account.dto';
+import { ReferralCodeService } from '../referral/referral-code.service';
+import { ReferralWalletService } from '../referral/referral-wallet.service';
 
 const BCRYPT_ROUNDS = 10;
 
@@ -96,6 +98,8 @@ export class AccountService {
     private readonly yandexPay: YandexPayService,
     private readonly commerceContext: CommerceContextService,
     private readonly orderChat: OrderChatService,
+    private readonly referralCodes: ReferralCodeService,
+    private readonly referralWallet: ReferralWalletService,
   ) {}
 
   async getProfile(userId: string) {
@@ -110,16 +114,52 @@ export class AccountService {
         marketingConsent: true,
         marketingConsentAt: true,
         createdAt: true,
+        referralCode: true,
+        referralCodeActive: true,
       },
     });
     if (!user) throw new NotFoundException('User not found');
-    const [hasGiftCertificates, pricing] = await Promise.all([
+
+    // Legacy buyers without code — lazy issue on profile load.
+    let referralCode = user.referralCode;
+    let referralCodeActive = user.referralCodeActive;
+    if (!referralCode) {
+      const issued = await this.referralCodes.ensureForUser(userId);
+      referralCode = issued.code;
+      referralCodeActive = issued.active;
+    }
+
+    const [
+      hasGiftCertificates,
+      pricing,
+      referralWalletAvailable,
+      referralWalletPending,
+      spendPolicy,
+    ] = await Promise.all([
       this.hasPurchasedGiftCertificates(userId, user.email),
       this.commerceContext.resolveFromUserId(userId),
+      this.referralWallet.availableBalance(userId),
+      this.referralWallet.pendingBalance(userId),
+      this.referralWallet.getSpendPolicy(),
     ]);
     return {
-      ...user,
+      id: user.id,
+      email: user.email,
+      displayName: user.displayName,
+      phone: user.phone,
       birthday: formatBirthdayIso(user.birthday),
+      marketingConsent: user.marketingConsent,
+      marketingConsentAt: user.marketingConsentAt,
+      createdAt: user.createdAt,
+      referralCode,
+      referralCodeActive,
+      referralLinkPath: referralCode ? `/?mf=${encodeURIComponent(referralCode)}` : null,
+      referralWalletAvailable,
+      referralWalletPending,
+      /** Программа включена (spend gated). */
+      referralEnabled: spendPolicy.enabled,
+      /** Cap % от payable до wallet — для checkout preview. */
+      referralSpendCapPercent: spendPolicy.spendCapPercent,
       hasGiftCertificates,
       pricing: {
         context: pricing.kind,
@@ -132,6 +172,75 @@ export class AccountService {
         allowPromoCodes: pricing.allowPromoCodes,
       },
     };
+  }
+
+  /** Явная кнопка ЛК «получить / обновить ссылку» — ensure (без regenerate). */
+  async ensureReferralCode(userId: string) {
+    const issued = await this.referralCodes.ensureForUser(userId);
+    return {
+      code: issued.code,
+      active: issued.active,
+      created: issued.created,
+      linkPath: `/?mf=${encodeURIComponent(issued.code)}`,
+    };
+  }
+
+  /**
+   * Публичный quoteSpend: amount = min(available, floor(payable×cap%)).
+   * Checkout preview обычно берёт cap из /me; этот endpoint — точный server quote.
+   */
+  async quoteReferralSpend(userId: string, payableRub: number) {
+    return this.referralWallet.quoteSpend(userId, payableRub);
+  }
+
+  /**
+   * ЛК Phase 4: dual balance + ссылка + shareText template.
+   * Absolute URL / UTM собирает Front (origin + linkPath).
+   */
+  async getReferralDashboard(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        referralCode: true,
+        referralCodeActive: true,
+      },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    let code = user.referralCode;
+    let codeActive = user.referralCodeActive;
+    if (!code) {
+      const issued = await this.referralCodes.ensureForUser(userId);
+      code = issued.code;
+      codeActive = issued.active;
+    }
+
+    const [available, pending, policy, share] = await Promise.all([
+      this.referralWallet.availableBalance(userId),
+      this.referralWallet.pendingBalance(userId),
+      this.referralWallet.getSpendPolicy(),
+      this.referralWallet.getBuyerShare(),
+    ]);
+
+    return {
+      enabled: policy.enabled,
+      code,
+      codeActive,
+      linkPath: code ? `/?mf=${encodeURIComponent(code)}` : null,
+      shareTextTemplate: share.shareTextTemplate,
+      available,
+      pending,
+      spendCapPercent: policy.spendCapPercent,
+      inviteeBonusEnabled: share.inviteeBonusEnabled,
+      inviteeBonusRub: share.inviteeBonusRub,
+    };
+  }
+
+  async listReferralLedger(
+    userId: string,
+    opts: { limit?: number; cursor?: string | null },
+  ) {
+    return this.referralWallet.listLedgerHistory(userId, opts);
   }
 
   /** Пункт меню ЛК — только если есть купленный (PURCHASE) сертификат. */
@@ -759,6 +868,7 @@ export class AccountService {
         message: 'Заказ отменён покупателем',
         actorUserId: userId,
         reason: 'account',
+        referralWallet: this.referralWallet,
       });
     });
 

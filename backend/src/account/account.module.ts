@@ -10,9 +10,16 @@ import { AccountService } from './account.service';
 import { FavoritesService } from './favorites.service';
 import { QuizResultService } from './quiz-result.service';
 import { OrderChatModule } from '../order-chat/order-chat.module';
+import { ReferralModule } from '../referral/referral.module';
 
 @Module({
-  imports: [PrismaModule, UserGroupsModule, DiscountsModule, OrderChatModule],
+  imports: [
+    PrismaModule,
+    UserGroupsModule,
+    DiscountsModule,
+    OrderChatModule,
+    ReferralModule,
+  ],
   controllers: [AccountController],
   providers: [
     AccountService,

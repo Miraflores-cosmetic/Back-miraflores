@@ -87,7 +87,11 @@ describe('applyPaidInTx', () => {
     expect(commitStockOnPaid).toHaveBeenCalled();
     expect(tx.order.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: { status: OrderStatus.PAID, adminViewedAt: expect.any(Date) },
+        data: {
+          status: OrderStatus.PAID,
+          paidAt: expect.any(Date),
+          adminViewedAt: expect.any(Date),
+        },
       }),
     );
     expect(tx.payment.create).toHaveBeenCalledWith(
@@ -116,7 +120,11 @@ describe('applyPaidInTx', () => {
     expect(res.kind).toBe('paid');
     expect(tx.order.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: { status: OrderStatus.PAID, adminViewedAt: null },
+        data: {
+          status: OrderStatus.PAID,
+          paidAt: expect.any(Date),
+          adminViewedAt: null,
+        },
       }),
     );
     expect(tx.payment.create).toHaveBeenCalledWith(

@@ -10,11 +10,13 @@ import { RegistrationCleanupWorker } from './registration-cleanup.worker';
 import { resolveJwtSecret } from './jwt-secret';
 import { PrismaModule } from '../prisma/prisma.module';
 import { OrderChatModule } from '../order-chat/order-chat.module';
+import { ReferralModule } from '../referral/referral.module';
 
 @Module({
   imports: [
     PrismaModule,
     OrderChatModule,
+    ReferralModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports: [ConfigModule],

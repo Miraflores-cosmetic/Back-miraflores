@@ -353,6 +353,8 @@ export async function applyPaidInTx(
     where: { id: orderId },
     data: {
       status: OrderStatus.PAID,
+      // Первая оплата — якорь для DAYS_AFTER_PAID quarantine.
+      paidAt: new Date(),
       // Оплата через ЮKassa — снова «новый» заказ для бейджа, даже если карточку открывали до оплаты.
       adminViewedAt: source.kind === 'admin' ? new Date() : null,
     },

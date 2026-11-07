@@ -61,6 +61,8 @@ Miraflores 3.0/
 │   ├── emails.md             ← transactional email + remind (без авто-TTL)
 │   ├── search.md             ← публичный поиск (состав/статьи, S1, trgm)
 │   ├── settings-home.md      ← GET /settings/home + hero/promo/gratitude
+│   ├── referral-wallet.md    ← MF wallet vs YouRich; admin knobs; ledger
+│   ├── runbooks/referral-smoke.md ← smoke перед prod
 │   ├── ozon-delivery.md
 │   └── order-chat.md
 ├── package.json              ← workspaces (без Front)
@@ -158,6 +160,15 @@ Miraflores 3.0/
 - Two-phase ranking (title-хиты не вытесняются composition-only); HTML-noise q (`div`/`href`/…) не ищут rich-text.
 - PLP `?q`: guest SSR → client slug hydrate с BFF JWT (`CatalogClient`); group key API = `product` (не `products`).
 - Hero CTA «Программа благодарности» → `/articles/programma-blagodarnosti-2` (`SITE_GRATITUDE_HREF`); home CMS: [docs/settings-home.md](./docs/settings-home.md).
+
+### Реферальный кошелёк (MF)
+
+Полный контракт: [docs/referral-wallet.md](./docs/referral-wallet.md). Smoke: [docs/runbooks/referral-smoke.md](./docs/runbooks/referral-smoke.md).
+
+- YouRich keep (CRM lead) **и** MF wallet (`?mf=`) — независимо; UI раздельно.
+- Admin: `/admin/settings/referral` (ACL `settings`); заказ — блок «Рефералка Miraflores».
+- Earn base = `computeCommissionBase`; quarantine snapshot; spend XOR promo/gift + cap%.
+- Specs: `backend/src/referral/*.spec.ts` + `orders/commission-base.spec.ts`.
 
 ### Order chat: inbound mail + sticky unread
 

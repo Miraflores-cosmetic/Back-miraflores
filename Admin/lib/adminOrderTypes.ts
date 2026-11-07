@@ -148,6 +148,8 @@ export type AdminOrderDetail = {
   discountTotal: number;
   giftCertificateAmount?: number;
   giftCertificateCode?: string | null;
+  /** Списание реф. кошелька (₽); XOR с promo/gift. */
+  referralWalletAmount?: number;
   giftPurchaseDenominationId?: string | null;
   giftPurchaseRecipientEmail?: string | null;
   issuedGiftCertificates?: Array<{
@@ -184,6 +186,37 @@ export type AdminOrderDetail = {
     lastError: string | null;
     lastHttpStatus: number | null;
     syncedAt: string | null;
+  } | null;
+  /** MF referral wallet — отдельно от YouRich. */
+  mfReferral?: {
+    attribution: {
+      code: string;
+      referrerUserId: string;
+      referrerEmail: string | null;
+      referrerCode: string | null;
+      createdAt: string;
+    } | null;
+    walletSpent: number;
+    /** Referrer EARN POSTED (без INVITEE_BONUS). */
+    earned: number;
+    pending: number;
+    inviteeBonus?: number;
+    inviteeBonusPending?: number;
+    clawback: number;
+    inviteeBonusClawback?: number;
+    spentHold: number;
+    entries: Array<{
+      id: string;
+      kind: string;
+      status: string;
+      amount: number;
+      userId: string;
+      userEmail?: string | null;
+      userDisplayName?: string | null;
+      /** referrer_earn | buyer_spend | invitee_bonus | other */
+      walletRole?: string;
+      createdAt: string;
+    }>;
   } | null;
   pricingGroupId?: string | null;
   pricingGroupName?: string | null;

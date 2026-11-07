@@ -81,6 +81,8 @@ import {
   type RemindMailByStage,
 } from './order-awaiting-payment-schedule';
 import { YourichSyncService } from '../yourich/yourich-sync.service';
+import { scheduleReferralTouch } from '../referral/referral-touch';
+import { ReferralWalletService } from '../referral/referral-wallet.service';
 import { OrdersPublicService } from './orders.public.service';
 
 const LIST_MAX = 100;
@@ -125,11 +127,17 @@ export class OrdersAdminService {
     private readonly ordersPublic: OrdersPublicService,
     private readonly yandexPay: YandexPayService,
     @Optional() private readonly yourichSync?: YourichSyncService,
+    @Optional() private readonly referralWallet?: ReferralWalletService,
   ) {}
 
+  /** YouRich outbox + MF referral earn/clawback. */
   private scheduleYourichTouch(orderId: string) {
-    if (!this.yourichSync) return;
-    scheduleAfterRlsCommitWithBypass(this.prisma, () => this.yourichSync!.touch(orderId));
+    if (this.yourichSync) {
+      scheduleAfterRlsCommitWithBypass(this.prisma, () =>
+        this.yourichSync!.touch(orderId),
+      );
+    }
+    scheduleReferralTouch(this.prisma, this.referralWallet, orderId);
   }
 
   private async enrichEvents(
@@ -388,6 +396,7 @@ export class OrdersAdminService {
         discountTotal: true,
         giftCertificateAmount: true,
         giftCertificateCode: true,
+        referralWalletAmount: true,
         giftPurchaseDenominationId: true,
         giftPurchaseRecipientEmail: true,
         total: true,
@@ -565,6 +574,10 @@ export class OrdersAdminService {
           ).get(order.id) ?? null
         : null;
 
+    const mfReferral = this.referralWallet
+      ? await this.referralWallet.getOrderReferralSummary(id)
+      : null;
+
     return {
       id: order.id,
       number: order.number,
@@ -595,6 +608,7 @@ export class OrdersAdminService {
       discountTotal: order.discountTotal,
       giftCertificateAmount: order.giftCertificateAmount,
       giftCertificateCode: order.giftCertificateCode,
+      referralWalletAmount: order.referralWalletAmount ?? 0,
       giftPurchaseDenominationId: order.giftPurchaseDenominationId,
       giftPurchaseRecipientEmail: order.giftPurchaseRecipientEmail,
       issuedGiftCertificates,
@@ -651,6 +665,8 @@ export class OrdersAdminService {
             syncedAt: order.affiliateLead.syncedAt,
           }
         : null,
+      /** MF referral wallet — отдельно от YouRich affiliate. */
+      mfReferral,
       items: order.items.map((i) => {
         const shadeImageUrl = i.shade?.imageUrl ?? null;
         const variantImageUrl =
@@ -1471,6 +1487,7 @@ export class OrdersAdminService {
 
   async deliver(id: string, actorUserId: string) {
     await this.setStatus(id, OrderStatus.DELIVERED, actorUserId, 'Заказ доставлен');
+    this.scheduleYourichTouch(id);
     const order = await this.prisma.order.findUniqueOrThrow({
       where: { id },
       select: { number: true, email: true },
@@ -1599,6 +1616,7 @@ export class OrdersAdminService {
         message: 'Заказ отменён',
         actorUserId: actorUserId ?? null,
         reason: 'admin',
+        referralWallet: this.referralWallet,
       });
 
       return {
@@ -1641,9 +1659,9 @@ export class OrdersAdminService {
    * Возврат: при providerRefund ЮKassa вызывается внутри tx до записи БД —
    * ошибка PSP откатывает транзакцию (нет «в системе возвращено / на карте нет»).
    *
-   * Политика gift: при redeem/purchase частичный card refund запрещён.
-   * RELEASE / revoke issued codes — только на полный возврат. Ручная правка
-   * баланса — в admin «Сертификаты».
+   * Политика gift/wallet: при redeem/purchase/wallet spend частичный card
+   * refund запрещён. RELEASE / revoke — только на полный возврат (нет
+   * proportional RELEASE). Ручная правка gift — в admin «Сертификаты».
    */
   async refund(
     id: string,
@@ -1679,9 +1697,15 @@ export class OrdersAdminService {
           ),
         );
         const giftApplied = (order.giftCertificateAmount ?? 0) > 0;
+        const walletApplied = (order.referralWalletAmount ?? 0) > 0;
         const isGiftPurchase = Boolean(order.giftPurchaseDenominationId);
-        // Карта уже вся возвращена, но ещё можно открутить redeem или отозвать purchase-коды.
-        if (remainingCard <= 0 && !giftApplied && !isGiftPurchase) {
+        // Карта уже вся возвращена, но ещё можно открутить redeem / wallet / отозвать purchase-коды.
+        if (
+          remainingCard <= 0 &&
+          !giftApplied &&
+          !isGiftPurchase &&
+          !walletApplied
+        ) {
           throw new BadRequestException('По заказу уже возвращена вся сумма');
         }
         if (remainingCard <= 0 && order.status === OrderStatus.REFUNDED) {
@@ -1690,13 +1714,15 @@ export class OrdersAdminService {
 
         let amount: number;
         if (remainingCard <= 0) {
-          // gift-only / card already 0 / purchase revoke: только RELEASE/REVOKE + REFUNDED
+          // gift/wallet-only / card already 0 / purchase revoke: только RELEASE/REVOKE + REFUNDED
           amount = 0;
           if (opts.amount != null && Math.round(opts.amount) !== 0) {
             throw new BadRequestException(
               isGiftPurchase
                 ? 'По карте возвращать нечего — оформите полный возврат (0 ₽) для отзыва кодов покупки'
-                : 'По карте возвращать нечего — оформите полный возврат (0 ₽) для открутки сертификата',
+                : walletApplied
+                  ? 'По карте возвращать нечего — оформите полный возврат (0 ₽) для RELEASE реф. баланса'
+                  : 'По карте возвращать нечего — оформите полный возврат (0 ₽) для открутки сертификата',
             );
           }
         } else {
@@ -1706,16 +1732,18 @@ export class OrdersAdminService {
               `Сумма возврата должна быть от 1 до ${remainingCard} ₽`,
             );
           }
-          // Политика: gift redeem / purchase — только полный card refund (иначе hold/balance
-          // и issued codes остаются в подвешенном состоянии без proportional RELEASE).
+          // Политика: gift / wallet / purchase — только полный card refund
+          // (нет proportional RELEASE; иначе hold остаётся в подвешенном состоянии).
           if (
             amount < remainingCard &&
-            (giftApplied || isGiftPurchase)
+            (giftApplied || isGiftPurchase || walletApplied)
           ) {
             throw new BadRequestException(
               giftApplied
                 ? 'Заказ с подарочным сертификатом: доступен только полный возврат. Частичный возврат картой не трогает резерв сертификата — оформите полный refund или скорректируйте баланс вручную в «Сертификаты».'
-                : 'Покупка сертификата: доступен только полный возврат (иначе выданные коды не отзовутся). Частичный возврат запрещён.',
+                : walletApplied
+                  ? 'Заказ с реферальным балансом: доступен только полный возврат. Частичный возврат картой не делает RELEASE кошелька — оформите полный refund.'
+                  : 'Покупка сертификата: доступен только полный возврат (иначе выданные коды не отзовутся). Частичный возврат запрещён.',
             );
           }
         }
@@ -1805,10 +1833,10 @@ export class OrdersAdminService {
 
         const newRefunded = order.refundedAmount + amount;
         const paidSucceeded = sumSucceededPayments(order.payments);
-        // Полный возврат: вернули все успешные платежи (или gift-only / purchase revoke 0₽).
+        // Полный возврат: вернули все успешные платежи (или gift/wallet-only / purchase revoke 0₽).
         const full =
           paidSucceeded <= 0
-            ? amount === 0 && (giftApplied || isGiftPurchase)
+            ? amount === 0 && (giftApplied || isGiftPurchase || walletApplied)
             : newRefunded >= paidSucceeded;
         const nextStatus = full ? OrderStatus.REFUNDED : order.status;
 
@@ -1827,6 +1855,11 @@ export class OrdersAdminService {
         if (full && giftApplied) {
           giftReleased = await releaseGiftCertificateForOrder(tx, id, {
             note: 'Возврат при полном refund заказа',
+          });
+        }
+        if (full && this.referralWallet) {
+          await this.referralWallet.releaseSpendInTx(tx, id, {
+            note: 'Возврат реф. баланса при полном refund заказа',
           });
         }
         if (full && isGiftPurchase) {
@@ -2041,6 +2074,7 @@ export class OrdersAdminService {
         subtotal: order.subtotal,
         discountTotal: order.discountTotal,
         giftCertificateAmount: order.giftCertificateAmount,
+        referralWalletAmount: order.referralWalletAmount,
         shippingCost,
       });
 
@@ -2175,18 +2209,18 @@ export class OrdersAdminService {
       const resolved = await this.resolveAdminItemLines(tx, dto.items);
       const subtotal = resolved.reduce((s, l) => s + l.lineTotal, 0);
 
-      // Промо и сертификат «заморожены» при создании — clamp к новому составу.
+      // Промо / сертификат / реф. кошелёк «заморожены» при создании — clamp к новому составу.
       const discountTotal = Math.min(
         Math.max(0, order.discountTotal),
         subtotal,
       );
-      const maxGift = Math.max(
+      const payableAfterDiscount = Math.max(
         0,
         subtotal - discountTotal + Math.max(0, order.shippingCost),
       );
       let giftCertificateAmount = Math.min(
         Math.max(0, order.giftCertificateAmount),
-        maxGift,
+        payableAfterDiscount,
       );
       let giftCertificateId = order.giftCertificateId;
       let giftCertificateCode = order.giftCertificateCode;
@@ -2217,11 +2251,37 @@ export class OrdersAdminService {
         giftCertificateAmount = 0;
       }
 
+      const maxWallet = Math.max(0, payableAfterDiscount - giftCertificateAmount);
+      let referralWalletAmount = Math.min(
+        Math.max(0, order.referralWalletAmount ?? 0),
+        maxWallet,
+      );
+      if (
+        this.referralWallet &&
+        order.userId &&
+        referralWalletAmount !== (order.referralWalletAmount ?? 0)
+      ) {
+        await this.referralWallet.replaceSpendHoldInTx(tx, {
+          userId: order.userId,
+          orderId: id,
+          amount: referralWalletAmount,
+          note: 'Пересчёт при изменении состава',
+        });
+      } else if (referralWalletAmount <= 0 && (order.referralWalletAmount ?? 0) > 0) {
+        if (this.referralWallet) {
+          await this.referralWallet.releaseSpendInTx(tx, id, {
+            note: 'Снятие реф. баланса при изменении состава',
+          });
+        }
+        referralWalletAmount = 0;
+      }
+
       previousTotal = order.total;
       newTotal = recalcOrderTotal({
         subtotal,
         discountTotal,
         giftCertificateAmount,
+        referralWalletAmount,
         shippingCost: order.shippingCost,
       });
 
@@ -2264,6 +2324,7 @@ export class OrdersAdminService {
           giftCertificateAmount,
           giftCertificateId,
           giftCertificateCode,
+          referralWalletAmount,
         },
       });
 
@@ -2393,13 +2454,13 @@ export class OrdersAdminService {
       const removedDiscount = Math.max(0, order.discountTotal);
       const discountTotal = 0;
 
-      const maxGift = Math.max(
+      const payableAfterDiscount = Math.max(
         0,
         order.subtotal - discountTotal + Math.max(0, order.shippingCost),
       );
       let giftCertificateAmount = Math.min(
         Math.max(0, order.giftCertificateAmount),
-        maxGift,
+        payableAfterDiscount,
       );
       let giftCertificateId = order.giftCertificateId;
       let giftCertificateCode = order.giftCertificateCode;
@@ -2428,11 +2489,39 @@ export class OrdersAdminService {
         giftCertificateAmount = 0;
       }
 
+      const maxWallet = Math.max(0, payableAfterDiscount - giftCertificateAmount);
+      let referralWalletAmount = Math.min(
+        Math.max(0, order.referralWalletAmount ?? 0),
+        maxWallet,
+      );
+      if (
+        this.referralWallet &&
+        order.userId &&
+        referralWalletAmount !== (order.referralWalletAmount ?? 0)
+      ) {
+        await this.referralWallet.replaceSpendHoldInTx(tx, {
+          userId: order.userId,
+          orderId: id,
+          amount: referralWalletAmount,
+          note: 'Пересчёт при снятии промокода',
+        });
+      } else if (
+        referralWalletAmount <= 0 &&
+        (order.referralWalletAmount ?? 0) > 0 &&
+        this.referralWallet
+      ) {
+        await this.referralWallet.releaseSpendInTx(tx, id, {
+          note: 'Снятие реф. баланса при снятии промокода',
+        });
+        referralWalletAmount = 0;
+      }
+
       previousTotal = order.total;
       newTotal = recalcOrderTotal({
         subtotal: order.subtotal,
         discountTotal,
         giftCertificateAmount,
+        referralWalletAmount,
         shippingCost: order.shippingCost,
       });
 
@@ -2447,6 +2536,7 @@ export class OrdersAdminService {
           giftCertificateAmount,
           giftCertificateId,
           giftCertificateCode,
+          referralWalletAmount,
         },
       });
 

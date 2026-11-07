@@ -39,6 +39,18 @@ describe('AccountService', () => {
   let payTokens: {
     issue: ReturnType<typeof vi.fn>;
   };
+  let referralCodes: {
+    ensureForUser: ReturnType<typeof vi.fn>;
+  };
+  let referralWallet: {
+    availableBalance: ReturnType<typeof vi.fn>;
+    pendingBalance: ReturnType<typeof vi.fn>;
+    getSpendPolicy: ReturnType<typeof vi.fn>;
+    getBuyerShare: ReturnType<typeof vi.fn>;
+    listLedgerHistory: ReturnType<typeof vi.fn>;
+    quoteSpend: ReturnType<typeof vi.fn>;
+    releaseSpendInTx: ReturnType<typeof vi.fn>;
+  };
   let svc: AccountService;
 
   beforeEach(() => {
@@ -46,6 +58,34 @@ describe('AccountService', () => {
     prisma = makePrisma(tx);
     payTokens = {
       issue: vi.fn().mockReturnValue('tok'),
+    };
+    referralCodes = {
+      ensureForUser: vi.fn(async () => ({
+        code: 'ABCD2345',
+        active: true,
+        created: false,
+      })),
+    };
+    referralWallet = {
+      availableBalance: vi.fn(async () => 0),
+      pendingBalance: vi.fn(async () => 0),
+      getSpendPolicy: vi.fn(async () => ({
+        enabled: true,
+        spendCapPercent: 50,
+      })),
+      getBuyerShare: vi.fn(async () => ({
+        shareTextTemplate: 'Закажи: {link}',
+        inviteeBonusEnabled: false,
+        inviteeBonusRub: 0,
+      })),
+      listLedgerHistory: vi.fn(async () => ({ items: [], nextCursor: null })),
+      quoteSpend: vi.fn(async () => ({
+        enabled: true,
+        available: 0,
+        spendCapPercent: 50,
+        amount: 0,
+      })),
+      releaseSpendInTx: vi.fn(async () => false),
     };
     svc = new AccountService(
       prisma as never,
@@ -59,6 +99,8 @@ describe('AccountService', () => {
       } as never,
       {} as never,
       { applyRetentionForOrder: vi.fn() } as never,
+      referralCodes as never,
+      referralWallet as never,
     );
   });
 
@@ -315,5 +357,130 @@ describe('AccountService', () => {
     await expect(svc.getOrder('u1', 'missing')).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+
+  describe('referral dashboard / ledger wiring', () => {
+    it('getReferralDashboard: существующий код + dual balance + share', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        referralCode: 'MFCODE12',
+        referralCodeActive: true,
+      });
+      referralWallet.availableBalance.mockResolvedValue(1500);
+      referralWallet.pendingBalance.mockResolvedValue(400);
+      referralWallet.getSpendPolicy.mockResolvedValue({
+        enabled: true,
+        spendCapPercent: 40,
+      });
+      referralWallet.getBuyerShare.mockResolvedValue({
+        shareTextTemplate: 'Ссылка {link} код {code}',
+        inviteeBonusEnabled: true,
+        inviteeBonusRub: 300,
+      });
+
+      const dash = await svc.getReferralDashboard('u1');
+
+      expect(referralCodes.ensureForUser).not.toHaveBeenCalled();
+      expect(referralWallet.availableBalance).toHaveBeenCalledWith('u1');
+      expect(referralWallet.pendingBalance).toHaveBeenCalledWith('u1');
+      expect(referralWallet.getSpendPolicy).toHaveBeenCalled();
+      expect(referralWallet.getBuyerShare).toHaveBeenCalled();
+      expect(dash).toEqual({
+        enabled: true,
+        code: 'MFCODE12',
+        codeActive: true,
+        linkPath: '/?mf=MFCODE12',
+        shareTextTemplate: 'Ссылка {link} код {code}',
+        available: 1500,
+        pending: 400,
+        spendCapPercent: 40,
+        inviteeBonusEnabled: true,
+        inviteeBonusRub: 300,
+      });
+    });
+
+    it('getReferralDashboard: нет кода → ensureForUser, не реактивирует inactive', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        referralCode: null,
+        referralCodeActive: false,
+      });
+      referralCodes.ensureForUser.mockResolvedValue({
+        code: 'NEWcode1',
+        active: true,
+        created: true,
+      });
+
+      const dash = await svc.getReferralDashboard('u1');
+
+      expect(referralCodes.ensureForUser).toHaveBeenCalledWith('u1');
+      expect(dash.code).toBe('NEWcode1');
+      expect(dash.codeActive).toBe(true);
+      expect(dash.linkPath).toBe('/?mf=NEWcode1');
+    });
+
+    it('getReferralDashboard: inactive код без ensure', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        referralCode: 'OFFCODE1',
+        referralCodeActive: false,
+      });
+
+      const dash = await svc.getReferralDashboard('u1');
+
+      expect(referralCodes.ensureForUser).not.toHaveBeenCalled();
+      expect(dash).toEqual(
+        expect.objectContaining({
+          code: 'OFFCODE1',
+          codeActive: false,
+          linkPath: '/?mf=OFFCODE1',
+        }),
+      );
+    });
+
+    it('getReferralDashboard → NotFound', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+      await expect(svc.getReferralDashboard('missing')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+
+    it('listReferralLedger прокидывает limit/cursor в wallet', async () => {
+      referralWallet.listLedgerHistory.mockResolvedValue({
+        items: [
+          {
+            id: 'l1',
+            createdAt: '2026-06-01T12:00:00.000Z',
+            kind: 'EARN',
+            status: 'POSTED',
+            amount: 250,
+            orderNumber: 'AA-000123',
+          },
+        ],
+        nextCursor: 'c1',
+      });
+
+      const page = await svc.listReferralLedger('u1', {
+        limit: 10,
+        cursor: 'prev',
+      });
+
+      expect(referralWallet.listLedgerHistory).toHaveBeenCalledWith('u1', {
+        limit: 10,
+        cursor: 'prev',
+      });
+      expect(page.items).toHaveLength(1);
+      expect(page.items[0].orderNumber).toBe('AA-000123');
+      expect(page.nextCursor).toBe('c1');
+    });
+
+    it('quoteReferralSpend → wallet.quoteSpend', async () => {
+      referralWallet.quoteSpend.mockResolvedValue({
+        enabled: true,
+        available: 900,
+        spendCapPercent: 50,
+        amount: 500,
+      });
+      const q = await svc.quoteReferralSpend('u1', 1000);
+      expect(referralWallet.quoteSpend).toHaveBeenCalledWith('u1', 1000);
+      expect(q.amount).toBe(500);
+    });
   });
 });

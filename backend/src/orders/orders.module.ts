@@ -22,6 +22,7 @@ import { UserGroupsModule } from '../user-groups/user-groups.module';
 import { OrderChatModule } from '../order-chat/order-chat.module';
 import { OzonModule } from '../ozon/ozon.module';
 import { YourichModule } from '../yourich/yourich.module';
+import { ReferralModule } from '../referral/referral.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { YourichModule } from '../yourich/yourich.module';
     OrderChatModule,
     OzonModule,
     YourichModule,
+    ReferralModule,
   ],
   controllers: [OrdersPublicController, OrdersAdminController],
   providers: [

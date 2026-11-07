@@ -203,6 +203,15 @@ async function seedUserGroups(db: Db) {
   console.log('[seed] User groups: guests + retail-registered');
 }
 
+async function seedReferralSettings(db: Db) {
+  await db.referralSettings.upsert({
+    where: { id: 'default' },
+    create: { id: 'default' },
+    update: {},
+  });
+  console.log('[seed] ReferralSettings: default (enabled=false until admin)');
+}
+
 async function seedGiftDenominations(db: Db) {
   const existing = await db.giftCertificateDenomination.count();
   if (existing > 0) {
@@ -231,6 +240,7 @@ async function main() {
       await seedCatalogTags(db);
       await seedUserGroups(db);
       await seedGiftDenominations(db);
+      await seedReferralSettings(db);
       await seedSampleRulesArticle(db);
     },
     { maxWait: 15_000, timeout: 600_000 },

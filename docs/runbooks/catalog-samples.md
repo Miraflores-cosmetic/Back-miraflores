@@ -12,6 +12,10 @@
 
 - Subtitle цены товара считается через **`catalogSellablePrices`** по вариантам hit’а; в select вариантов есть **`name`** и **`isSample`**, пробники не задают «от … р.».
 
+## URL статей на витрине
+
+Публичный путь — **`/articles/:slug`**, не `/blog/...` (в nginx и Vite есть редирект `/blog` → `/articles`).
+
 ## Покупка
 
 - Лимиты и eligibility: `ProductVariant.isSample` (приоритет над «пробник» в имени), см. `sample-purchase.util.ts` и статью правил в настройках корзины.

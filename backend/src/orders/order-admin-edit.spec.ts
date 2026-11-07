@@ -15,6 +15,13 @@ describe('order-admin-edit', () => {
       giftCertificateAmount: 50,
       shippingCost: 200,
     })).toBe(1050);
+    expect(recalcOrderTotal({
+      subtotal: 1000,
+      discountTotal: 0,
+      giftCertificateAmount: 0,
+      referralWalletAmount: 300,
+      shippingCost: 200,
+    })).toBe(900);
 
     expect(balanceAfterTotal(1200, 1000)).toEqual({
       balanceDue: 200,

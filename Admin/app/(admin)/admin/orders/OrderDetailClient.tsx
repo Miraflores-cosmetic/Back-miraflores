@@ -25,7 +25,10 @@ import {
   refundProviderFromPayments,
 } from '@/lib/orderStatusLabels';
 import { parseJcosAddressMeta } from '@/lib/shipping/addressShippingMeta';
-import { GIFT_PARTIAL_REFUND_POLICY } from '@/lib/giftHoldCopy';
+import {
+  GIFT_PARTIAL_REFUND_POLICY,
+  WALLET_PARTIAL_REFUND_POLICY,
+} from '@/lib/giftHoldCopy';
 import { useAdminOrderChatUnreadForOrder } from '@/hooks/useAdminOrderChatUnreadForOrder';
 import { dispatchAdminOrdersUnviewedRefresh } from '@/hooks/useAdminUnviewedOrdersCount';
 import { OrderAccordion, OrderIconBtn } from './OrderAccordion';
@@ -464,9 +467,13 @@ export function OrderDetailClient({
       const giftBlocksPartial =
         (row.giftCertificateAmount ?? 0) > 0 ||
         Boolean(row.giftPurchaseDenominationId);
-      if (giftBlocksPartial && refundSug < (row.refundRemaining ?? 0)) {
+      const walletBlocksPartial = (row.referralWalletAmount ?? 0) > 0;
+      if (
+        (giftBlocksPartial || walletBlocksPartial) &&
+        refundSug < (row.refundRemaining ?? 0)
+      ) {
         setError(
-          `${GIFT_PARTIAL_REFUND_POLICY} Переплата ${formatAdminMoney(refundSug)} — оформите полный возврат вручную в блоке «Возврат».`,
+          `${giftBlocksPartial ? GIFT_PARTIAL_REFUND_POLICY : WALLET_PARTIAL_REFUND_POLICY} Переплата ${formatAdminMoney(refundSug)} — оформите полный возврат вручную в блоке «Возврат».`,
         );
         return;
       }
@@ -1116,8 +1123,118 @@ export function OrderDetailClient({
             </div>
           ) : null}
 
+          {order.mfReferral &&
+          (order.mfReferral.attribution ||
+            order.mfReferral.walletSpent > 0 ||
+            (order.mfReferral.entries?.length ?? 0) > 0) ? (
+            <div className={styles.orderAccordion}>
+              <div className={styles.orderAccordionHead}>
+                <span className={styles.orderAccordionTitle}>
+                  Рефералка Miraflores
+                </span>
+              </div>
+              <div className={styles.orderAccordionBody}>
+                <dl className={styles.detailDl}>
+                  {order.mfReferral.attribution ? (
+                    <>
+                      <div className={styles.detailDlRow}>
+                        <dt>Код (?mf=)</dt>
+                        <dd>{order.mfReferral.attribution.code}</dd>
+                      </div>
+                      <div className={styles.detailDlRow}>
+                        <dt>Реферер</dt>
+                        <dd>
+                          {order.mfReferral.attribution.referrerEmail ||
+                            order.mfReferral.attribution.referrerUserId}
+                          {order.mfReferral.attribution.referrerCode
+                            ? ` · ${order.mfReferral.attribution.referrerCode}`
+                            : ''}
+                        </dd>
+                      </div>
+                    </>
+                  ) : null}
+                  <div className={styles.detailDlRow}>
+                    <dt>Earned / pending</dt>
+                    <dd>
+                      {formatAdminMoney(order.mfReferral.earned)} /{' '}
+                      {formatAdminMoney(order.mfReferral.pending)}
+                    </dd>
+                  </div>
+                  {(order.mfReferral.inviteeBonus ?? 0) > 0 ||
+                  (order.mfReferral.inviteeBonusPending ?? 0) > 0 ? (
+                    <div className={styles.detailDlRow}>
+                      <dt>Бонус приглашённому</dt>
+                      <dd>
+                        {formatAdminMoney(order.mfReferral.inviteeBonus ?? 0)}
+                        {(order.mfReferral.inviteeBonusPending ?? 0) > 0
+                          ? ` / pending ${formatAdminMoney(order.mfReferral.inviteeBonusPending ?? 0)}`
+                          : ''}
+                      </dd>
+                    </div>
+                  ) : null}
+                  {(order.mfReferral.clawback ?? 0) > 0 ? (
+                    <div className={styles.detailDlRow}>
+                      <dt>Clawback (earn)</dt>
+                      <dd>−{formatAdminMoney(order.mfReferral.clawback)}</dd>
+                    </div>
+                  ) : null}
+                  {(order.mfReferral.inviteeBonusClawback ?? 0) > 0 ? (
+                    <div className={styles.detailDlRow}>
+                      <dt>Clawback (бонус)</dt>
+                      <dd>
+                        −{formatAdminMoney(order.mfReferral.inviteeBonusClawback ?? 0)}
+                      </dd>
+                    </div>
+                  ) : null}
+                  <div className={styles.detailDlRow}>
+                    <dt>Wallet spend</dt>
+                    <dd>
+                      {(order.mfReferral.walletSpent ?? 0) > 0
+                        ? `−${formatAdminMoney(order.mfReferral.walletSpent)}`
+                        : '—'}
+                      {(order.mfReferral.spentHold ?? 0) > 0
+                        ? ` (hold net ${formatAdminMoney(order.mfReferral.spentHold)})`
+                        : ''}
+                    </dd>
+                  </div>
+                  {(order.mfReferral.entries?.length ?? 0) > 0 ? (
+                    <div className={styles.detailDlRow}>
+                      <dt>Ledger</dt>
+                      <dd>
+                        <ul style={{ margin: 0, paddingLeft: 18 }}>
+                          {order.mfReferral.entries.map((e) => {
+                            const owner =
+                              e.userDisplayName ||
+                              e.userEmail ||
+                              e.userId;
+                            const roleLabel =
+                              e.walletRole === 'referrer_earn'
+                                ? 'реферер (earn)'
+                                : e.walletRole === 'buyer_spend'
+                                  ? 'покупатель (spend)'
+                                  : e.walletRole === 'invitee_bonus'
+                                    ? 'приглашённый (бонус)'
+                                    : e.kind;
+                            return (
+                              <li key={e.id}>
+                                {e.kind} · {e.status} ·{' '}
+                                {e.amount > 0 ? '+' : ''}
+                                {e.amount} ₽ · {owner} · {roleLabel}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </dd>
+                    </div>
+                  ) : null}
+                </dl>
+              </div>
+            </div>
+          ) : null}
+
           {order.promoCode ||
           order.giftCertificateCode ||
+          (order.referralWalletAmount ?? 0) > 0 ||
           order.giftPurchaseDenominationId ? (
             <div className={styles.orderAccordion}>
               <div className={styles.orderAccordionHead}>
@@ -1167,6 +1284,25 @@ export function OrderDetailClient({
                         ) : (
                           <p className={styles.lead} style={{ marginTop: 8 }}>
                             {GIFT_PARTIAL_REFUND_POLICY}
+                          </p>
+                        )}
+                      </dd>
+                    </div>
+                  ) : null}
+                  {(order.referralWalletAmount ?? 0) > 0 ? (
+                    <div className={styles.detailDlRow}>
+                      <dt>Реф. баланс</dt>
+                      <dd>
+                        −{formatAdminMoney(order.referralWalletAmount ?? 0)}
+                        {order.status === 'AWAITING_PAYMENT' ||
+                        order.status === 'NEW' ? (
+                          <p className={styles.lead} style={{ marginTop: 8 }}>
+                            SPEND_HOLD при создании: available уже уменьшен; при отмене
+                            — RELEASE. Нельзя совмещать с промо/сертификатом.
+                          </p>
+                        ) : (
+                          <p className={styles.lead} style={{ marginTop: 8 }}>
+                            {WALLET_PARTIAL_REFUND_POLICY}
                           </p>
                         )}
                       </dd>
@@ -1514,6 +1650,12 @@ export function OrderDetailClient({
                 <div className={`${styles.orderTotalRow} ${styles.orderTotalRowMinus}`}>
                   <dt>Сертификат</dt>
                   <dd>−{formatAdminMoney(order.giftCertificateAmount ?? 0)}</dd>
+                </div>
+              ) : null}
+              {(order.referralWalletAmount ?? 0) > 0 ? (
+                <div className={`${styles.orderTotalRow} ${styles.orderTotalRowMinus}`}>
+                  <dt>Реф. баланс</dt>
+                  <dd>−{formatAdminMoney(order.referralWalletAmount ?? 0)}</dd>
                 </div>
               ) : null}
               {order.shippingCost > 0 ? (
@@ -1928,6 +2070,11 @@ export function OrderDetailClient({
                         {GIFT_PARTIAL_REFUND_POLICY}
                       </p>
                     ) : null}
+                    {(order.referralWalletAmount ?? 0) > 0 ? (
+                      <p className={styles.orderHint} role="note">
+                        {WALLET_PARTIAL_REFUND_POLICY}
+                      </p>
+                    ) : null}
                     <AdminTextField
                       label="Сумма ₽"
                       value={refundAmount}
@@ -1937,12 +2084,14 @@ export function OrderDetailClient({
                       disabled={
                         busy ||
                         (order.giftCertificateAmount ?? 0) > 0 ||
-                        Boolean(order.giftPurchaseDenominationId)
+                        Boolean(order.giftPurchaseDenominationId) ||
+                        (order.referralWalletAmount ?? 0) > 0
                       }
                       inputMode="numeric"
                     />
                     {(order.giftCertificateAmount ?? 0) > 0 ||
-                    order.giftPurchaseDenominationId ? (
+                    order.giftPurchaseDenominationId ||
+                    (order.referralWalletAmount ?? 0) > 0 ? (
                       <p className={styles.orderHint}>
                         Сумма зафиксирована на полный остаток по карте (
                         {formatAdminMoney(order.refundRemaining)}).
@@ -2254,11 +2403,13 @@ export function OrderDetailClient({
           order.discountTotal > 0 ||
           Boolean(order.promoCode) ||
           (order.giftCertificateAmount ?? 0) > 0 ||
-          Boolean(order.giftCertificateCode)
+          Boolean(order.giftCertificateCode) ||
+          (order.referralWalletAmount ?? 0) > 0
         }
         pricing={{
           discountTotal: order.discountTotal,
           giftCertificateAmount: order.giftCertificateAmount ?? 0,
+          referralWalletAmount: order.referralWalletAmount ?? 0,
           shippingCost: order.shippingCost,
           netPaid: order.netPaid ?? 0,
           currentTotal: order.total,

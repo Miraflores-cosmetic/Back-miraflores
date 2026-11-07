@@ -1,5 +1,6 @@
 import { OrderStatus, PaymentStatus, Prisma } from '@prisma/client';
 import { releaseGiftCertificateForOrder } from '../gift-certificates/gift-certificate-hold.util';
+import type { ReferralWalletService } from '../referral/referral-wallet.service';
 import { releaseStockReserve } from './order-stock';
 
 type Tx = Prisma.TransactionClient;
@@ -14,6 +15,8 @@ export type CancelUnpaidOrderOpts = {
   giftNote?: string;
   /** Доп. meta события (reason: abandon | account | admin). ttl — legacy, не используется. */
   reason?: string;
+  /** Release SPEND_HOLD реф. кошелька (если был). */
+  referralWallet?: ReferralWalletService | null;
 };
 
 export type PendingProviderPayment = {
@@ -64,6 +67,11 @@ export async function cancelUnpaidOrderInTx(
   await releaseGiftCertificateForOrder(tx, opts.orderId, {
     note: opts.giftNote?.trim() || 'Возврат при отмене заказа',
   });
+  if (opts.referralWallet) {
+    await opts.referralWallet.releaseSpendInTx(tx, opts.orderId, {
+      note: 'Возврат реф. баланса при отмене заказа',
+    });
+  }
   // Снимаем hold промокода (иначе слот останется до CASCADE при удалении заказа).
   await tx.promoCodeRedemption.deleteMany({ where: { orderId: opts.orderId } });
   await tx.payment.updateMany({

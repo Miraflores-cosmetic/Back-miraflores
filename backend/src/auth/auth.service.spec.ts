@@ -18,21 +18,39 @@ describe('AuthService.registerBuyer', () => {
     order: {
       updateMany: vi.fn(),
     },
+    runInRlsTransaction: vi.fn(
+      async (_ctx: unknown, fn: (tx: unknown) => Promise<unknown>) => fn(prisma),
+    ),
   };
   const jwt = { sign: vi.fn(() => 'token'), verify: vi.fn() };
   const mail = {
     isConfigured: vi.fn(() => false),
     sendPasswordResetLink: vi.fn(),
   };
+  const orderChat = {
+    seedCustomerNotesForUser: vi.fn(),
+    disconnectRealtimeSessionsForUser: vi.fn(),
+  };
+  const referralCodes = {
+    allocateUniqueCode: vi.fn(async () => 'ABCD2345'),
+    ensureForUser: vi.fn(),
+    regenerateForUser: vi.fn(),
+    setActive: vi.fn(),
+  };
   let svc: AuthService;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    referralCodes.allocateUniqueCode.mockResolvedValue('ABCD2345');
+    prisma.runInRlsTransaction.mockImplementation(
+      async (_ctx: unknown, fn: (tx: unknown) => Promise<unknown>) => fn(prisma),
+    );
     svc = new AuthService(
       prisma as never,
       jwt as never,
       mail as never,
-      { seedCustomerNotesForUser: vi.fn() } as never,
+      orderChat as never,
+      referralCodes as never,
     );
   });
 
@@ -87,6 +105,7 @@ describe('AuthService.registerBuyer', () => {
     });
 
     expect(user.id).toBe('u1');
+    expect(referralCodes.allocateUniqueCode).toHaveBeenCalled();
     expect(prisma.user.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -97,6 +116,8 @@ describe('AuthService.registerBuyer', () => {
           marketingConsent: false,
           marketingConsentAt: null,
           marketingConsentVersion: null,
+          referralCode: 'ABCD2345',
+          referralCodeActive: true,
         }),
       }),
     );
@@ -174,22 +195,36 @@ describe('AuthService (base)', () => {
     order: {
       updateMany: vi.fn(),
     },
+    runInRlsTransaction: vi.fn(
+      async (_ctx: unknown, fn: (tx: unknown) => Promise<unknown>) => fn(prisma),
+    ),
   };
   const jwt = { sign: vi.fn(() => 'token'), verify: vi.fn() };
   const mail = {
     isConfigured: vi.fn(() => false),
     sendPasswordResetLink: vi.fn(),
   };
+  const orderChat = {
+    seedCustomerNotesForUser: vi.fn(),
+    disconnectRealtimeSessionsForUser: vi.fn(),
+  };
+  const referralCodes = {
+    allocateUniqueCode: vi.fn(async () => 'ABCD2345'),
+  };
   let svc: AuthService;
 
   beforeEach(() => {
     vi.clearAllMocks();
     prisma.order.updateMany.mockResolvedValue({ count: 0 });
+    prisma.runInRlsTransaction.mockImplementation(
+      async (_ctx: unknown, fn: (tx: unknown) => Promise<unknown>) => fn(prisma),
+    );
     svc = new AuthService(
       prisma as never,
       jwt as never,
       mail as never,
-      { seedCustomerNotesForUser: vi.fn() } as never,
+      orderChat as never,
+      referralCodes as never,
     );
   });
 

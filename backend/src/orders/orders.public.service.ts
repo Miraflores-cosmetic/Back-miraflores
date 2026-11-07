@@ -56,6 +56,7 @@ import {
 import { ShippingServerEstimateService } from './shipping-server-estimate.service';
 import type { ShippingQuoteRequestDto } from './dto/shipping-quote.dto';
 import { applyPaidInTx } from './mark-order-paid';
+import { canMarkPaid } from './order-transitions';
 import { YooKassaService } from './yookassa.service';
 import { YandexPayService } from './yandex-pay.service';
 import { OrderPayTokenService } from './order-pay-token.service';
@@ -74,6 +75,10 @@ import { allocateNextOrderNumber } from './order-number';
 import { shouldSyncOrderToYourich } from '../yourich/yourich-lead';
 import { YourichSyncService } from '../yourich/yourich-sync.service';
 import { YourichClient } from '../yourich/yourich.client';
+import { normalizeReferralCode } from '../referral/referral-code';
+import { resolveReferralAttribution } from '../referral/referral-attribution';
+import { scheduleReferralTouch } from '../referral/referral-touch';
+import { ReferralWalletService } from '../referral/referral-wallet.service';
 
 type SyncedCartItem = {
   variantId: string;
@@ -132,7 +137,12 @@ export class OrdersPublicService {
     @Optional() private readonly ozonAuth?: OzonAuthService,
     @Optional() private readonly yourichSync?: YourichSyncService,
     @Optional() private readonly yourichClient?: YourichClient,
+    @Optional() private readonly referralWallet?: ReferralWalletService,
   ) {}
+
+  private scheduleReferralTouch(orderId: string) {
+    scheduleReferralTouch(this.prisma, this.referralWallet, orderId);
+  }
 
   /**
    * Подарки благодарности по порогу суммы товаров **после промокода**.
@@ -207,6 +217,42 @@ export class OrdersPublicService {
     return lines;
   }
 
+  /**
+   * 0 ₽ после промо/сертификата/кошелька: без ЮKassa, сразу PAID.
+   * Иначе create успевает, а pay падает → «висяк» AWAITING_PAYMENT в админке.
+   */
+  private async finalizeZeroTotalCheckoutIfNeeded(
+    orderId: string,
+  ): Promise<ReturnType<OrdersPublicService['serializeCreated']> & {
+    alreadyPaid: true;
+  } | null> {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: true },
+    });
+    if (!order || order.needsAddressClarification || order.total > 0) {
+      return null;
+    }
+    if (
+      order.status === OrderStatus.PAID ||
+      order.status === OrderStatus.PACKING ||
+      order.status === OrderStatus.SHIPPED ||
+      order.status === OrderStatus.DELIVERED
+    ) {
+      return { ...this.serializeCreated(order), alreadyPaid: true };
+    }
+    if (!canMarkPaid(order.status)) {
+      return null;
+    }
+    await this.markOrderPaid(order.id, null);
+    const refreshed = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: true },
+    });
+    if (!refreshed) return null;
+    return { ...this.serializeCreated(refreshed), alreadyPaid: true };
+  }
+
   private serializeCreated(order: {
     id: string;
     number: string;
@@ -216,6 +262,7 @@ export class OrdersPublicService {
     subtotal: number;
     discountTotal: number;
     giftCertificateAmount: number;
+    referralWalletAmount?: number;
     total: number;
     promoCode: string | null;
     giftCertificateCode: string | null;
@@ -234,6 +281,7 @@ export class OrdersPublicService {
       subtotal: order.subtotal,
       discountTotal: order.discountTotal,
       giftCertificateAmount: order.giftCertificateAmount,
+      referralWalletAmount: order.referralWalletAmount ?? 0,
       total: order.total,
       promoCode: order.promoCode,
       giftCertificateCode: order.giftCertificateCode,
@@ -498,6 +546,8 @@ export class OrdersPublicService {
     });
     if (existing) {
       this.assertIdempotentGuest(existing, guestId);
+      const finalized = await this.finalizeZeroTotalCheckoutIfNeeded(existing.id);
+      if (finalized) return finalized;
       return this.serializeCreated(existing);
     }
 
@@ -542,9 +592,20 @@ export class OrdersPublicService {
 
     const promoRaw = dto.promoCode?.trim();
     const giftRaw = dto.giftCertificateCode?.trim();
+    const wantWallet = dto.useReferralWallet === true;
     if (promoRaw && giftRaw) {
       throw new BadRequestException(
         'Нельзя применить промокод и сертификат одновременно',
+      );
+    }
+    if (wantWallet && (promoRaw || giftRaw)) {
+      throw new BadRequestException(
+        'Реферальный баланс нельзя совмещать с промокодом или сертификатом',
+      );
+    }
+    if (wantWallet && !userId) {
+      throw new BadRequestException(
+        'Чтобы списать реферальный баланс, войдите в аккаунт',
       );
     }
 
@@ -585,6 +646,56 @@ export class OrdersPublicService {
         refHash,
         affiliatePromo: Boolean(promoApply?.affiliate),
       });
+
+    /** MF referral (?mf=) — независимо от Yourich; earn в фазе 2. */
+    let referralAttribution: { code: string; referrerUserId: string } | null =
+      null;
+    if (!giftOnly) {
+      const codeNorm = normalizeReferralCode(dto.referral?.code);
+      if (codeNorm) {
+        const buyerPhones: Array<string | null> = [
+          phone,
+          dto.shippingAddress?.phone?.trim() || null,
+        ];
+        if (userId) {
+          const buyer = await this.prisma.user.findUnique({
+            where: { id: userId },
+            select: {
+              phone: true,
+              addresses: { select: { phone: true } },
+            },
+          });
+          if (buyer?.phone) buyerPhones.push(buyer.phone);
+          for (const a of buyer?.addresses ?? []) {
+            if (a.phone) buyerPhones.push(a.phone);
+          }
+        }
+        const referrer = await this.prisma.user.findFirst({
+          where: { referralCode: codeNorm },
+          select: {
+            id: true,
+            email: true,
+            phone: true,
+            referralCode: true,
+            referralCodeActive: true,
+            isActive: true,
+            addresses: { select: { phone: true } },
+          },
+        });
+        const referrerPhones: Array<string | null> = [
+          referrer?.phone ?? null,
+          ...(referrer?.addresses.map((a) => a.phone) ?? []),
+        ];
+        referralAttribution = resolveReferralAttribution({
+          codeRaw: codeNorm,
+          referrer,
+          buyerUserId: userId ?? null,
+          buyerEmail: email,
+          buyerPhones,
+          referrerPhones,
+        });
+      }
+    }
 
     const payableAfterPromo = Math.max(0, subtotal - discountTotal);
 
@@ -649,7 +760,28 @@ export class OrdersPublicService {
 
     const giftCertificateAmount = giftApply?.applyAmount ?? 0;
     const giftCertificateCode = giftApply?.code ?? null;
-    const total = Math.max(0, payableForGift - giftCertificateAmount);
+
+    let referralWalletAmount = 0;
+    if (wantWallet && userId && !giftOnly) {
+      if (!this.referralWallet) {
+        throw new BadRequestException('Реферальный кошелёк временно недоступен');
+      }
+      const quote = await this.referralWallet.quoteSpend(userId, payableForGift);
+      if (!quote.enabled) {
+        throw new BadRequestException('Реферальная программа выключена');
+      }
+      referralWalletAmount = quote.amount;
+      if (referralWalletAmount < 1) {
+        throw new BadRequestException(
+          'Недостаточно реферального баланса для списания',
+        );
+      }
+    }
+
+    const total = Math.max(
+      0,
+      payableForGift - giftCertificateAmount - referralWalletAmount,
+    );
 
     // Подарки благодарности — только к physical-заказам (не к digital gift-denom).
     // Порог — payableAfterPromo (товары после промо), не сырой subtotal.
@@ -743,6 +875,7 @@ export class OrdersPublicService {
               giftCertificateCode,
               giftCertificateId: giftApply?.certificateId ?? null,
               giftCertificateAmount,
+              referralWalletAmount,
               subtotal,
               total,
               shippingCost,
@@ -885,6 +1018,14 @@ export class OrdersPublicService {
         });
       }
 
+      if (referralWalletAmount > 0 && userId && this.referralWallet) {
+        await this.referralWallet.holdSpendInTx(tx, {
+          userId,
+          orderId: created.id,
+          amount: referralWalletAmount,
+        });
+      }
+
       await reserveStockForLines(
         tx,
         created.items.map((i) => ({
@@ -944,6 +1085,16 @@ export class OrdersPublicService {
         }
       }
 
+      if (referralAttribution) {
+        await tx.orderReferralAttribution.create({
+          data: {
+            orderId: created.id,
+            code: referralAttribution.code,
+            referrerUserId: referralAttribution.referrerUserId,
+          },
+        });
+      }
+
       return created;
     });
 
@@ -964,6 +1115,8 @@ export class OrdersPublicService {
       this.lifecycle.notifyAdminOrderCreated(order.number),
     );
 
+    const finalized = await this.finalizeZeroTotalCheckoutIfNeeded(order.id);
+    if (finalized) return finalized;
     return this.serializeCreated(order);
   }
 
@@ -1032,6 +1185,7 @@ export class OrdersPublicService {
         items: order.items,
         message: 'Заказ отменён (checkout)',
         reason: 'abandon',
+        referralWallet: this.referralWallet,
       });
       return {
         id: cancelled.id,
@@ -1056,6 +1210,7 @@ export class OrdersPublicService {
           this.yourichSync!.touch(result.id),
         );
       }
+      this.scheduleReferralTouch(result.id);
     }
     return {
       id: result.id,
@@ -1462,6 +1617,7 @@ export class OrdersPublicService {
           this.yourichSync!.touch(orderId),
         );
       }
+      this.scheduleReferralTouch(orderId);
       if (txResult.isGiftPurchase) {
         await this.notifyGiftPurchasePaid(txResult.orderId, txResult.number);
       } else {
@@ -2198,6 +2354,7 @@ export class OrdersPublicService {
           this.yourichSync!.touch(orderId),
         );
       }
+      this.scheduleReferralTouch(orderId);
       if (txResult.isGiftPurchase) {
         await this.notifyGiftPurchasePaid(txResult.orderId, txResult.number);
       } else {

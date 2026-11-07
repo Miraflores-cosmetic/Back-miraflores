@@ -23,6 +23,7 @@ import {
 import catalogStyles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
 import pn from '@/app/(admin)/admin/catalog/products/productNew.module.css';
 import type { AdminBlogCategoryRow, AdminBlogPostDetail } from './blogAdminTypes';
+import { articleStorefrontHref } from '@/lib/storefrontHref';
 import { dateInputToIso, isoOrNowToDateInputValue } from './blogDateInput';
 import blogStyles from './blogAdmin.module.css';
 
@@ -345,7 +346,7 @@ export function BlogPostEditorClient({ postId }: Props) {
             {isEdit && isPublished && slug ? (
               <a
                 className={pn.storefrontLink}
-                href={`/blog/${encodeURIComponent(slug)}`}
+                href={articleStorefrontHref(slug)}
                 target="_blank"
                 rel="noopener noreferrer"
               >

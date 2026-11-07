@@ -5,6 +5,8 @@ import {
   Get,
   Param,
   Patch,
+  Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -12,6 +14,7 @@ import { AdminGuard } from '../common/guards/admin.guard';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { parseOptionalPositiveInt } from '../common/parse-positive-int';
 import { UpdateUserGroupAssignmentDto } from '../user-groups/dto/user-groups-admin.dto';
+import { SetReferralActiveDto } from './dto/referral-admin.dto';
 import { UsersAdminService } from './users-admin.service';
 
 /** Покупатели с аккаунтом — как Win-Win /admin/clients, без партнёров и групп. */
@@ -48,6 +51,23 @@ export class UsersAdminController {
   @Patch(':id/group')
   updateGroup(@Param('id') id: string, @Body() dto: UpdateUserGroupAssignmentDto) {
     return this.users.updateUserGroup(id, dto.groupId ?? null);
+  }
+
+  /** Выдать referralCode, если ещё нет. */
+  @Post(':id/referral')
+  ensureReferral(@Param('id') id: string) {
+    return this.users.ensureReferralCode(id);
+  }
+
+  /** Сменить код (инвалидирует старые ?mf=). */
+  @Post(':id/referral/regenerate')
+  regenerateReferral(@Param('id') id: string) {
+    return this.users.regenerateReferralCode(id);
+  }
+
+  @Put(':id/referral/active')
+  setReferralActive(@Param('id') id: string, @Body() dto: SetReferralActiveDto) {
+    return this.users.setReferralCodeActive(id, dto.active);
   }
 
   @Delete(':id')

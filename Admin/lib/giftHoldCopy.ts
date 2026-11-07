@@ -29,3 +29,10 @@ export const GIFT_HOLD_ACCOUNT_UNPAID =
  */
 export const GIFT_PARTIAL_REFUND_POLICY =
   'Заказ с подарочным сертификатом: только полный возврат. Частичный возврат картой недоступен — баланс сертификата не меняется до полного refund. Ручная корректировка — в разделе «Сертификаты».';
+
+/**
+ * Зеркало gift: partial card refund при wallet spend запрещён —
+ * RELEASE только на полном refund (нет proportional RELEASE).
+ */
+export const WALLET_PARTIAL_REFUND_POLICY =
+  'Заказ с реферальным балансом: только полный возврат. Частичный возврат картой недоступен — SPEND_HOLD не снимается до полного refund.';

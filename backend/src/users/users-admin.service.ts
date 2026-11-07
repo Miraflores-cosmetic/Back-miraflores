@@ -8,6 +8,7 @@ import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 import { QUIZ_FUNNEL_STEPS } from '../quiz/quiz-events.constants';
 import { PrismaService } from '../prisma/prisma.service';
+import { ReferralCodeService } from '../referral/referral-code.service';
 import { UserGroupsAdminService } from '../user-groups/user-groups-admin.service';
 
 const LIST_MAX = 100;
@@ -37,6 +38,7 @@ export class UsersAdminService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly userGroups: UserGroupsAdminService,
+    private readonly referralCodes: ReferralCodeService,
   ) {}
 
   async listRetailUsers(opts: { q?: string; page?: number; limit?: number } = {}) {
@@ -123,6 +125,8 @@ export class UsersAdminService {
         createdAt: true,
         updatedAt: true,
         groupId: true,
+        referralCode: true,
+        referralCodeActive: true,
         group: {
           select: { id: true, name: true, slug: true, assignable: true },
         },
@@ -206,6 +210,11 @@ export class UsersAdminService {
       orderCount: u._count.orders,
       group: u.group,
       groupId: u.groupId,
+      referralCode: u.referralCode,
+      referralCodeActive: u.referralCodeActive,
+      referralLinkPath: u.referralCode
+        ? `/?mf=${encodeURIComponent(u.referralCode)}`
+        : null,
       addresses: u.addresses,
       orders,
       ordersTotal,
@@ -228,6 +237,37 @@ export class UsersAdminService {
 
   async updateUserGroup(userId: string, groupId: string | null) {
     return this.userGroups.updateUserGroup(userId, groupId);
+  }
+
+  /** Выдать код, если нет (кнопка в карточке клиента). */
+  async ensureReferralCode(userId: string) {
+    const u = await this.prisma.user.findFirst({
+      where: { id: userId, role: UserRole.USER, isActive: true },
+      select: { id: true },
+    });
+    if (!u) throw new NotFoundException('Пользователь не найден');
+    const issued = await this.referralCodes.ensureForUser(userId);
+    return {
+      code: issued.code,
+      active: issued.active,
+      created: issued.created,
+      linkPath: `/?mf=${encodeURIComponent(issued.code)}`,
+    };
+  }
+
+  /** Сменить код (старые ?mf= перестают резолвиться). */
+  async regenerateReferralCode(userId: string) {
+    const out = await this.referralCodes.regenerateForUser(userId);
+    return {
+      code: out.code,
+      active: out.active,
+      linkPath: `/?mf=${encodeURIComponent(out.code)}`,
+    };
+  }
+
+  async setReferralCodeActive(userId: string, active: boolean) {
+    await this.referralCodes.setActive(userId, active);
+    return { active };
   }
 
   /**
