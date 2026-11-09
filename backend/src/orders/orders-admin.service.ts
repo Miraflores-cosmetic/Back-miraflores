@@ -48,6 +48,7 @@ import {
   assertCdekPvzCodePresent,
   assertShippingCommentMatchesCarrier,
   resolvePvzCode,
+  resolveStoredOrderShippingCost,
   type CheckoutCarrier,
 } from './order-shipping.resolve';
 import { YooKassaService } from './yookassa.service';
@@ -62,7 +63,9 @@ import {
   recalcOrderTotal,
   sumSucceededPayments,
 } from './order-admin-edit';
+import { formatPhoneE164, isValidPhone } from '../common/phone.util';
 import type {
+  OrderContactUpdateDto,
   OrderItemUpdateLineDto,
   OrderItemsUpdateDto,
   OrderRemovePromoDto,
@@ -729,6 +732,8 @@ export class OrdersAdminService {
           remaining > 0 &&
           !giftPurchaseRefundBlocked,
         canEditAddress: canEditCore && !hasShipment,
+        /** Контакты заказа (не профиль User); до SHIPPED, в т.ч. сертификаты. */
+        canEditContact: ORDER_EDITABLE_STATUSES.includes(order.status),
         canEditItems: canEditCore,
         canCreateSurcharge:
           canEditCore &&
@@ -1947,6 +1952,98 @@ export class OrdersAdminService {
     return this.getById(id);
   }
 
+  async updateContact(
+    id: string,
+    actorUserId: string,
+    dto: OrderContactUpdateDto,
+  ) {
+    const email = dto.email.trim().toLowerCase();
+    if (!email) throw new BadRequestException('Email обязателен');
+    if (!isValidPhone(dto.phone)) {
+      throw new BadRequestException('Некорректный телефон');
+    }
+    const phone = formatPhoneE164(dto.phone);
+    const customerName =
+      dto.customerName !== undefined
+        ? dto.customerName?.trim() || null
+        : undefined;
+
+    await this.prisma.$transaction(async (tx) => {
+      await lockOrderForUpdate(tx, id);
+      const order = await tx.order.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          status: true,
+          email: true,
+          phone: true,
+          customerName: true,
+          shippingAddress: true,
+        },
+      });
+      if (!order) throw new NotFoundException('Заказ не найден');
+      assertOrderEditable(order.status);
+
+      const before = {
+        email: order.email,
+        phone: order.phone,
+        customerName: order.customerName,
+      };
+      const after = {
+        email,
+        phone,
+        customerName:
+          customerName !== undefined ? customerName : order.customerName,
+      };
+
+      if (
+        before.email === after.email &&
+        before.phone === after.phone &&
+        (before.customerName ?? null) === (after.customerName ?? null)
+      ) {
+        return;
+      }
+
+      const snap = (order.shippingAddress ?? null) as ShippingAddressSnap | null;
+      let shippingAddress: Prisma.InputJsonValue | undefined;
+      if (snap) {
+        const next: ShippingAddressSnap = { ...snap };
+        // Держим тел. получателя в синхроне с контактом заказа.
+        next.phone = phone;
+        const prevName = (order.customerName ?? '').trim();
+        const snapName = (snap.recipientName ?? '').trim();
+        if (
+          customerName !== undefined &&
+          (!snapName || snapName === prevName)
+        ) {
+          next.recipientName = customerName ?? '';
+        }
+        shippingAddress = next as Prisma.InputJsonValue;
+      }
+
+      await tx.order.update({
+        where: { id },
+        data: {
+          email: after.email,
+          phone: after.phone,
+          customerName: after.customerName,
+          ...(shippingAddress !== undefined ? { shippingAddress } : {}),
+        },
+      });
+
+      await this.lifecycle.addEvent(tx, {
+        orderId: id,
+        type: 'CONTACT_UPDATED',
+        message: 'Контакты заказа обновлены',
+        actorUserId,
+        meta: { before, after },
+      });
+    });
+
+    this.scheduleYourichTouch(id);
+    return this.getById(id);
+  }
+
   async updateShippingAddress(
     id: string,
     actorUserId: string,
@@ -2454,9 +2551,42 @@ export class OrdersAdminService {
       const removedDiscount = Math.max(0, order.discountTotal);
       const discountTotal = 0;
 
+      const addrSnap = (order.shippingAddress ??
+        null) as ShippingAddressSnap | null;
+      const cartSettings = await tx.cartSettings.findUnique({
+        where: { id: 'default' },
+        select: { freeShippingThresholdRub: true },
+      });
+      const freeShippingThresholdRub =
+        cartSettings?.freeShippingThresholdRub ?? 10_000;
+      const { cost: shippingCost, freePvz } = resolveStoredOrderShippingCost({
+        subtotal: order.subtotal,
+        discountTotal,
+        shippingComment: addrSnap?.comment,
+        quotedTariffCost: addrSnap?.carrierQuote?.cost,
+        fallbackPaidShippingCost: order.shippingCost,
+        freeShippingThresholdRub,
+      });
+      const previousShippingCost = Math.max(0, order.shippingCost);
+
+      let shippingAddressJson: Prisma.InputJsonValue | undefined;
+      if (
+        shippingCost !== previousShippingCost ||
+        freePvz !== Boolean(addrSnap?.carrierQuote?.freePvz)
+      ) {
+        shippingAddressJson = {
+          ...(addrSnap ?? {}),
+          carrierQuote: {
+            ...(addrSnap?.carrierQuote ?? {}),
+            freePvz,
+            cost: freePvz ? 0 : addrSnap?.carrierQuote?.cost ?? shippingCost,
+          },
+        } as Prisma.InputJsonValue;
+      }
+
       const payableAfterDiscount = Math.max(
         0,
-        order.subtotal - discountTotal + Math.max(0, order.shippingCost),
+        order.subtotal - discountTotal + shippingCost,
       );
       let giftCertificateAmount = Math.min(
         Math.max(0, order.giftCertificateAmount),
@@ -2522,7 +2652,7 @@ export class OrdersAdminService {
         discountTotal,
         giftCertificateAmount,
         referralWalletAmount,
-        shippingCost: order.shippingCost,
+        shippingCost,
       });
 
       await tx.promoCodeRedemption.deleteMany({ where: { orderId: id } });
@@ -2532,11 +2662,15 @@ export class OrdersAdminService {
         data: {
           promoCode: null,
           discountTotal,
+          shippingCost,
           total: newTotal,
           giftCertificateAmount,
           giftCertificateId,
           giftCertificateCode,
           referralWalletAmount,
+          ...(shippingAddressJson
+            ? { shippingAddress: shippingAddressJson }
+            : {}),
         },
       });
 
@@ -2556,9 +2690,12 @@ export class OrdersAdminService {
         }
       }
 
-      const summary = removedCode
+      let summary = removedCode
         ? `Промокод ${removedCode} снят (−${removedDiscount} ₽). Итого ${previousTotal} → ${newTotal} ₽`
         : `Скидка по промо снята (−${removedDiscount} ₽). Итого ${previousTotal} → ${newTotal} ₽`;
+      if (shippingCost !== previousShippingCost) {
+        summary += `. Доставка ${previousShippingCost} → ${shippingCost} ₽`;
+      }
 
       await this.lifecycle.addEvent(tx, {
         orderId: id,
@@ -2571,6 +2708,8 @@ export class OrdersAdminService {
           removedCode,
           removedDiscount,
           giftCertificateAmount,
+          previousShippingCost,
+          shippingCost,
         },
       });
 

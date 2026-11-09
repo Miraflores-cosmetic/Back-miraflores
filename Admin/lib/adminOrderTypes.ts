@@ -110,6 +110,7 @@ export type AdminOrderActions = {
   canDeliver: boolean;
   canRefund: boolean;
   canEditAddress?: boolean;
+  canEditContact?: boolean;
   canEditItems?: boolean;
   canCreateSurcharge?: boolean;
   /** Неоплаченный: выдать новую ссылку ЮKassa на актуальный total. */

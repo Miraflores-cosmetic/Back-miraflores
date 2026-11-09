@@ -14,7 +14,7 @@
 ## 1. Link → attribution
 
 - [ ] Открыть витрину с `?mf=<CODE_A>` (или скопировать из ЛК A).
-- [ ] Cookie / attribution держится до checkout.
+- [ ] Attribution в **localStorage** (`miraflores.mf.ref.v1`) с TTL = admin `linkTtlDays` (не cookie); держится до checkout.
 - [ ] Self-check: залогиниться как A с своим `?mf=` → attribution **не** должна создаться.
 
 ## 2. Order → PAID → pending

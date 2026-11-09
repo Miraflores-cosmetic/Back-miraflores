@@ -161,10 +161,15 @@ export class ReferralWalletService {
   /**
    * История ЛК: дата, kind, status, сумма, номер заказа — без ФИО/телефона invitee.
    * Cursor = createdAt ISO + id.
+   * filter: all | pending (status) | spend (SPEND_* / CLAWBACK).
    */
   async listLedgerHistory(
     userId: string,
-    opts?: { limit?: number; cursor?: string | null },
+    opts?: {
+      limit?: number;
+      cursor?: string | null;
+      filter?: 'all' | 'pending' | 'spend' | null;
+    },
   ): Promise<{
     items: ReferralLedgerHistoryItem[];
     nextCursor: string | null;
@@ -186,10 +191,33 @@ export class ReferralWalletService {
       }
     }
 
+    const filter = opts?.filter === 'pending' || opts?.filter === 'spend'
+      ? opts.filter
+      : 'all';
+
+    const kindFilter =
+      filter === 'spend'
+        ? {
+            kind: {
+              in: [
+                ReferralLedgerKind.SPEND_HOLD,
+                ReferralLedgerKind.SPEND_RELEASE,
+                ReferralLedgerKind.CLAWBACK,
+              ],
+            },
+          }
+        : { kind: { not: ReferralLedgerKind.SPEND_CAPTURE } };
+
+    const statusFilter =
+      filter === 'pending'
+        ? { status: ReferralLedgerStatus.PENDING }
+        : {};
+
     const rows = await this.prisma.referralWalletLedger.findMany({
       where: {
         userId,
-        kind: { not: ReferralLedgerKind.SPEND_CAPTURE },
+        ...kindFilter,
+        ...statusFilter,
         ...(cursorCreatedAt && cursorId
           ? {
               OR: [
@@ -488,11 +516,16 @@ export class ReferralWalletService {
   async getSpendPolicy(): Promise<{
     enabled: boolean;
     spendCapPercent: number;
+    linkTtlDays: number;
   }> {
     const settings = await this.settings.ensureDefaults();
     return {
       enabled: settings.enabled,
       spendCapPercent: settings.spendCapPercent,
+      linkTtlDays: Math.min(
+        3650,
+        Math.max(1, Math.floor(settings.linkTtlDays) || 60),
+      ),
     };
   }
 

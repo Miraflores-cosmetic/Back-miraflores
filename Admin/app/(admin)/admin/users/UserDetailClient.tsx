@@ -1,11 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AdminCompactBtn, AdminCompactBtnLink } from '@/components/AdminCompactBtn/AdminCompactBtn';
 import { AdminListPagination } from '@/components/admin/AdminListPagination/AdminListPagination';
 import { AdminTabs } from '@/components/AdminTabs/AdminTabs';
+import { AdminTextField } from '@/components/AdminTextField/AdminTextField';
 import {
   AdminBackendRequestError,
   adminBackendJson,
@@ -18,7 +19,36 @@ import type {
 } from '@/lib/adminUserTypes';
 import type { AdminUserGroup, AdminUserGroupListResponse } from '@/lib/adminUserGroupTypes';
 import { orderStatusLabel } from '@/lib/orderStatusLabels';
+import {
+  formatPhoneE164,
+  formatPhoneInputValue,
+  isValidEmail,
+  isValidPhone,
+  ruPhoneDigits,
+} from '@/lib/phone';
 import styles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
+
+type ProfileForm = {
+  email: string;
+  displayName: string;
+  phone: string;
+  birthday: string;
+};
+
+type ProfileFieldErrors = {
+  email?: string;
+  phone?: string;
+  birthday?: string;
+};
+
+function profileFromUser(u: AdminRetailUserDetail): ProfileForm {
+  return {
+    email: u.email,
+    displayName: u.displayName?.trim() || '',
+    phone: u.phone ? formatPhoneInputValue(u.phone) : '',
+    birthday: u.birthday ?? '',
+  };
+}
 
 const ORDERS_LIMIT = 50;
 
@@ -67,13 +97,6 @@ function formatAddressLine(a: {
     .join(', ');
 }
 
-function formatBirthday(value: string | null): string {
-  if (!value) return '—';
-  const [year, month, day] = value.split('-');
-  if (year && month && day) return `${day}.${month}.${year}`;
-  return value;
-}
-
 function labelOf(id: string | null | undefined, map: Record<string, string>): string {
   if (!id) return '—';
   return map[id] ?? id;
@@ -98,6 +121,10 @@ export function UserDetailClient({ userId }: { userId: string }) {
   const [user, setUser] = useState<AdminRetailUserDetail | null>(null);
   const [assignableGroups, setAssignableGroups] = useState<AdminUserGroup[]>([]);
   const [groupSaving, setGroupSaving] = useState(false);
+  const [profile, setProfile] = useState<ProfileForm | null>(null);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileErrors, setProfileErrors] = useState<ProfileFieldErrors>({});
+  const [profileError, setProfileError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -111,8 +138,12 @@ export function UserDetailClient({ userId }: { userId: string }) {
         `users/admin/${userId}?${sp}`,
       );
       setUser(row);
+      setProfile(profileFromUser(row));
+      setProfileErrors({});
+      setProfileError(null);
     } catch (e) {
       setUser(null);
+      setProfile(null);
       setError(e instanceof AdminBackendRequestError ? e.message : 'Ошибка загрузки');
     } finally {
       setLoading(false);
@@ -151,6 +182,69 @@ export function UserDetailClient({ userId }: { userId: string }) {
     } finally {
       setGroupSaving(false);
     }
+  }
+
+  const profileDirty = useMemo(() => {
+    if (!user || !profile) return false;
+    const base = profileFromUser(user);
+    return (
+      profile.email.trim() !== base.email.trim() ||
+      profile.displayName.trim() !== base.displayName.trim() ||
+      formatPhoneE164(profile.phone) !== formatPhoneE164(base.phone) ||
+      (profile.birthday || '') !== (base.birthday || '')
+    );
+  }, [user, profile]);
+
+  function validateProfile(form: ProfileForm): ProfileFieldErrors {
+    const next: ProfileFieldErrors = {};
+    const email = form.email.trim();
+    if (!email) next.email = 'Укажите email';
+    else if (!isValidEmail(email)) next.email = 'Укажите корректный email';
+    if (form.phone.trim() && !isValidPhone(form.phone)) {
+      next.phone = 'Укажите корректный телефон';
+    }
+    if (form.birthday.trim() && !/^\d{4}-\d{2}-\d{2}$/.test(form.birthday.trim())) {
+      next.birthday = 'Некорректная дата';
+    }
+    return next;
+  }
+
+  async function onSaveProfile() {
+    if (!profile) return;
+    const fieldErrors = validateProfile(profile);
+    setProfileErrors(fieldErrors);
+    setProfileError(null);
+    if (Object.keys(fieldErrors).length > 0) return;
+
+    setProfileSaving(true);
+    try {
+      await adminBackendJson(`users/admin/${userId}/profile`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          email: profile.email.trim(),
+          displayName: profile.displayName.trim() || null,
+          phone: profile.phone.trim() ? formatPhoneE164(profile.phone) : null,
+          birthday: profile.birthday.trim() || null,
+        }),
+      });
+      setProfileErrors({});
+      await load();
+    } catch (e) {
+      setProfileError(
+        e instanceof AdminBackendRequestError
+          ? e.message
+          : 'Не удалось сохранить профиль',
+      );
+    } finally {
+      setProfileSaving(false);
+    }
+  }
+
+  function onResetProfile() {
+    if (!user) return;
+    setProfile(profileFromUser(user));
+    setProfileErrors({});
+    setProfileError(null);
   }
 
   async function onDelete() {
@@ -219,9 +313,109 @@ export function UserDetailClient({ userId }: { userId: string }) {
         <>
           <dl className={styles.detailDl}>
             <div className={styles.detailDlRow}>
-              <dt>Email</dt>
-              <dd>{user.email}</dd>
+              <dt>Имя</dt>
+              <dd>
+                <AdminTextField
+                  value={profile?.displayName ?? ''}
+                  disabled={profileSaving}
+                  autoComplete="name"
+                  onChange={(e) =>
+                    setProfile((p) => (p ? { ...p, displayName: e.target.value } : p))
+                  }
+                />
+              </dd>
             </div>
+            <div className={styles.detailDlRow}>
+              <dt>Телефон</dt>
+              <dd>
+                <AdminTextField
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  value={profile?.phone ?? ''}
+                  disabled={profileSaving}
+                  error={profileErrors.phone}
+                  onChange={(e) =>
+                    setProfile((p) =>
+                      p ? { ...p, phone: formatPhoneInputValue(e.target.value) } : p,
+                    )
+                  }
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Backspace' || !profile) return;
+                    const digits = ruPhoneDigits(profile.phone);
+                    if (digits.length <= 1) {
+                      e.preventDefault();
+                      setProfile((p) => (p ? { ...p, phone: '' } : p));
+                    }
+                  }}
+                  onBlur={() => {
+                    if (!profile?.phone.trim()) return;
+                    const next = formatPhoneInputValue(profile.phone);
+                    if (next !== profile.phone) {
+                      setProfile((p) => (p ? { ...p, phone: next } : p));
+                    }
+                  }}
+                />
+              </dd>
+            </div>
+            <div className={styles.detailDlRow}>
+              <dt>Дата рождения</dt>
+              <dd>
+                <AdminTextField
+                  type="date"
+                  value={profile?.birthday ?? ''}
+                  disabled={profileSaving}
+                  error={profileErrors.birthday}
+                  max={new Date().toISOString().slice(0, 10)}
+                  onChange={(e) =>
+                    setProfile((p) => (p ? { ...p, birthday: e.target.value } : p))
+                  }
+                />
+              </dd>
+            </div>
+            <div className={styles.detailDlRow}>
+              <dt>Email</dt>
+              <dd>
+                <AdminTextField
+                  type="email"
+                  autoComplete="email"
+                  value={profile?.email ?? ''}
+                  disabled={profileSaving}
+                  error={profileErrors.email}
+                  onChange={(e) => {
+                    setProfile((p) => (p ? { ...p, email: e.target.value } : p));
+                    if (profileErrors.email) {
+                      setProfileErrors((prev) => ({ ...prev, email: undefined }));
+                    }
+                  }}
+                />
+              </dd>
+            </div>
+            {(profileDirty || profileError) && (
+              <div className={styles.detailFormActions}>
+                <AdminCompactBtn
+                  type="button"
+                  variant="accent"
+                  disabled={profileSaving || !profileDirty}
+                  onClick={() => void onSaveProfile()}
+                >
+                  {profileSaving ? 'Сохранение…' : 'Сохранить'}
+                </AdminCompactBtn>
+                <AdminCompactBtn
+                  type="button"
+                  variant="outline"
+                  disabled={profileSaving || !profileDirty}
+                  onClick={onResetProfile}
+                >
+                  Отменить
+                </AdminCompactBtn>
+              </div>
+            )}
+            {profileError ? (
+              <p className={styles.error} role="alert">
+                {profileError}
+              </p>
+            ) : null}
             <div className={styles.detailDlRow}>
               <dt>Группа</dt>
               <dd>
@@ -239,18 +433,6 @@ export function UserDetailClient({ userId }: { userId: string }) {
                   ))}
                 </select>
               </dd>
-            </div>
-            <div className={styles.detailDlRow}>
-              <dt>Имя</dt>
-              <dd>{user.displayName?.trim() || '—'}</dd>
-            </div>
-            <div className={styles.detailDlRow}>
-              <dt>Телефон</dt>
-              <dd>{user.phone?.trim() || '—'}</dd>
-            </div>
-            <div className={styles.detailDlRow}>
-              <dt>Дата рождения</dt>
-              <dd>{formatBirthday(user.birthday)}</dd>
             </div>
             <div className={styles.detailDlRow}>
               <dt>Поздравления</dt>

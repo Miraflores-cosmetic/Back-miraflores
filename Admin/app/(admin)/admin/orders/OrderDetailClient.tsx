@@ -26,6 +26,13 @@ import {
 } from '@/lib/orderStatusLabels';
 import { parseJcosAddressMeta } from '@/lib/shipping/addressShippingMeta';
 import {
+  formatPhoneE164,
+  formatPhoneInputValue,
+  isValidEmail,
+  isValidPhone,
+  ruPhoneDigits,
+} from '@/lib/phone';
+import {
   GIFT_PARTIAL_REFUND_POLICY,
   WALLET_PARTIAL_REFUND_POLICY,
 } from '@/lib/giftHoldCopy';
@@ -107,6 +114,26 @@ function trackingUrl(provider: string, tracking: string): string | null {
 const HISTORY_PREVIEW = 5;
 const SOFT_POLL_FAIL_BANNER_AFTER = 3;
 
+type ContactForm = {
+  customerName: string;
+  email: string;
+  phone: string;
+};
+
+type ContactFieldErrors = {
+  customerName?: string;
+  email?: string;
+  phone?: string;
+};
+
+function contactFromOrder(o: AdminOrderDetail): ContactForm {
+  return {
+    customerName: o.customerName?.trim() || '',
+    email: o.email || '',
+    phone: o.phone ? formatPhoneInputValue(o.phone) : '',
+  };
+}
+
 export function OrderDetailClient({
   orderId,
   canOrdersFinance = false,
@@ -158,6 +185,10 @@ export function OrderDetailClient({
   const [openDelivery, setOpenDelivery] = useState(true);
   const [openItems, setOpenItems] = useState(true);
   const [openRefund, setOpenRefund] = useState(false);
+  const [contact, setContact] = useState<ContactForm | null>(null);
+  const [contactSaving, setContactSaving] = useState(false);
+  const [contactErrors, setContactErrors] = useState<ContactFieldErrors>({});
+  const [contactError, setContactError] = useState<string | null>(null);
   const [openNote, setOpenNote] = useState(false);
   const [noteDraft, setNoteDraft] = useState('');
   const [softPollStale, setSoftPollStale] = useState(false);
@@ -210,6 +241,9 @@ export function OrderDetailClient({
         `orders/admin/${orderId}`,
       );
       setOrder(row);
+      setContact(contactFromOrder(row));
+      setContactErrors({});
+      setContactError(null);
       if (row.refundRemaining > 0) {
         setRefundAmount(String(row.refundRemaining));
       } else if (
@@ -222,6 +256,7 @@ export function OrderDetailClient({
       setSoftPollStale(false);
     } catch (e) {
       setOrder(null);
+      setContact(null);
       setError(
         e instanceof AdminBackendRequestError ? e.message : 'Ошибка загрузки',
       );
@@ -236,6 +271,15 @@ export function OrderDetailClient({
         `orders/admin/${orderId}`,
       );
       setOrder(row);
+      setContact((prev) => {
+        if (!prev) return contactFromOrder(row);
+        const base = contactFromOrder(row);
+        const dirty =
+          prev.customerName.trim() !== base.customerName.trim() ||
+          prev.email.trim() !== base.email.trim() ||
+          formatPhoneE164(prev.phone) !== formatPhoneE164(base.phone);
+        return dirty ? prev : base;
+      });
       if (row.refundRemaining > 0) {
         setRefundAmount(String(row.refundRemaining));
       } else if (
@@ -339,6 +383,15 @@ export function OrderDetailClient({
       });
       if (row.items && row.actions) {
         setOrder(row);
+        setContact((prev) => {
+          if (!prev) return contactFromOrder(row);
+          const base = contactFromOrder(row);
+          const dirty =
+            prev.customerName.trim() !== base.customerName.trim() ||
+            prev.email.trim() !== base.email.trim() ||
+            formatPhoneE164(prev.phone) !== formatPhoneE164(base.phone);
+          return dirty ? prev : base;
+        });
         if (row.refundRemaining > 0) {
           setRefundAmount(String(row.refundRemaining));
         } else if (
@@ -656,6 +709,16 @@ export function OrderDetailClient({
     }
   }
 
+  const contactDirty = useMemo(() => {
+    if (!order || !contact) return false;
+    const base = contactFromOrder(order);
+    return (
+      contact.customerName.trim() !== base.customerName.trim() ||
+      contact.email.trim() !== base.email.trim() ||
+      formatPhoneE164(contact.phone) !== formatPhoneE164(base.phone)
+    );
+  }, [order, contact]);
+
   if (loading && !order) {
     return <p className={styles.muted}>Загрузка заказа…</p>;
   }
@@ -753,6 +816,62 @@ export function OrderDetailClient({
   };
 
   const visibleEvents = historyOpen ? events : events.slice(0, HISTORY_PREVIEW);
+
+  const canEditContact = Boolean(order.actions.canEditContact);
+
+  function validateContact(form: ContactForm): ContactFieldErrors {
+    const next: ContactFieldErrors = {};
+    const email = form.email.trim();
+    if (!email) next.email = 'Укажите email';
+    else if (!isValidEmail(email)) next.email = 'Укажите корректный email';
+    if (!form.phone.trim()) next.phone = 'Укажите телефон';
+    else if (!isValidPhone(form.phone)) next.phone = 'Укажите корректный телефон';
+    return next;
+  }
+
+  async function onSaveContact() {
+    if (!contact || !canEditContact) return;
+    const fieldErrors = validateContact(contact);
+    setContactErrors(fieldErrors);
+    setContactError(null);
+    if (Object.keys(fieldErrors).length > 0) return;
+
+    setContactSaving(true);
+    setBusy(true);
+    try {
+      const row = await adminBackendJson<AdminOrderDetail>(
+        `orders/admin/${orderId}/contact`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({
+            email: contact.email.trim(),
+            phone: formatPhoneE164(contact.phone),
+            customerName: contact.customerName.trim() || null,
+          }),
+        },
+      );
+      setOrder(row);
+      setContact(contactFromOrder(row));
+      setContactErrors({});
+      showFlash('Контакты обновлены');
+    } catch (e) {
+      setContactError(
+        e instanceof AdminBackendRequestError
+          ? e.message
+          : 'Не удалось сохранить контакты',
+      );
+    } finally {
+      setContactSaving(false);
+      setBusy(false);
+    }
+  }
+
+  function onResetContact() {
+    if (!order) return;
+    setContact(contactFromOrder(order));
+    setContactErrors({});
+    setContactError(null);
+  }
 
   return (
     <>
@@ -878,12 +997,46 @@ export function OrderDetailClient({
             <dl className={`${styles.detailDl} ${styles.orderAccordionBodyFlush}`}>
               <div className={styles.detailDlRow}>
                 <dt>Имя</dt>
-                <dd>{order.customerName?.trim() || '—'}</dd>
+                <dd>
+                  {canEditContact ? (
+                    <AdminTextField
+                      value={contact?.customerName ?? ''}
+                      disabled={contactSaving || busy}
+                      autoComplete="name"
+                      onChange={(e) =>
+                        setContact((p) =>
+                          p ? { ...p, customerName: e.target.value } : p,
+                        )
+                      }
+                    />
+                  ) : (
+                    order.customerName?.trim() || '—'
+                  )}
+                </dd>
               </div>
               <div className={styles.detailDlRow}>
                 <dt>Email</dt>
                 <dd>
-                  {order.email ? (
+                  {canEditContact ? (
+                    <AdminTextField
+                      type="email"
+                      autoComplete="email"
+                      value={contact?.email ?? ''}
+                      disabled={contactSaving || busy}
+                      error={contactErrors.email}
+                      onChange={(e) => {
+                        setContact((p) =>
+                          p ? { ...p, email: e.target.value } : p,
+                        );
+                        if (contactErrors.email) {
+                          setContactErrors((prev) => ({
+                            ...prev,
+                            email: undefined,
+                          }));
+                        }
+                      }}
+                    />
+                  ) : order.email ? (
                     <a
                       className={styles.orderInlineLink}
                       href={`mailto:${encodeURIComponent(order.email)}`}
@@ -895,21 +1048,44 @@ export function OrderDetailClient({
                   )}
                 </dd>
               </div>
-              {order.pricingGroupName ? (
-                <div className={styles.detailDlRow}>
-                  <dt>Группа цен</dt>
-                  <dd>
-                    {order.pricingGroupName}
-                    {order.pricingContext ? (
-                      <span className={styles.muted}> ({order.pricingContext})</span>
-                    ) : null}
-                  </dd>
-                </div>
-              ) : null}
               <div className={styles.detailDlRow}>
                 <dt>Телефон</dt>
                 <dd>
-                  {order.phone ? (
+                  {canEditContact ? (
+                    <AdminTextField
+                      type="tel"
+                      inputMode="tel"
+                      autoComplete="tel"
+                      value={contact?.phone ?? ''}
+                      disabled={contactSaving || busy}
+                      error={contactErrors.phone}
+                      onChange={(e) =>
+                        setContact((p) =>
+                          p
+                            ? {
+                                ...p,
+                                phone: formatPhoneInputValue(e.target.value),
+                              }
+                            : p,
+                        )
+                      }
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Backspace' || !contact) return;
+                        const digits = ruPhoneDigits(contact.phone);
+                        if (digits.length <= 1) {
+                          e.preventDefault();
+                          setContact((p) => (p ? { ...p, phone: '' } : p));
+                        }
+                      }}
+                      onBlur={() => {
+                        if (!contact?.phone.trim()) return;
+                        const next = formatPhoneInputValue(contact.phone);
+                        if (next !== contact.phone) {
+                          setContact((p) => (p ? { ...p, phone: next } : p));
+                        }
+                      }}
+                    />
+                  ) : order.phone ? (
                     <a
                       className={styles.orderInlineLink}
                       href={`tel:${order.phone.replace(/[^\d+]/g, '')}`}
@@ -921,6 +1097,42 @@ export function OrderDetailClient({
                   )}
                 </dd>
               </div>
+              {canEditContact && (contactDirty || contactError) ? (
+                <div className={styles.detailFormActions}>
+                  <AdminCompactBtn
+                    type="button"
+                    variant="accent"
+                    disabled={contactSaving || busy || !contactDirty}
+                    onClick={() => void onSaveContact()}
+                  >
+                    {contactSaving ? 'Сохранение…' : 'Сохранить'}
+                  </AdminCompactBtn>
+                  <AdminCompactBtn
+                    type="button"
+                    variant="outline"
+                    disabled={contactSaving || busy || !contactDirty}
+                    onClick={onResetContact}
+                  >
+                    Отменить
+                  </AdminCompactBtn>
+                </div>
+              ) : null}
+              {contactError ? (
+                <p className={styles.error} role="alert">
+                  {contactError}
+                </p>
+              ) : null}
+              {order.pricingGroupName ? (
+                <div className={styles.detailDlRow}>
+                  <dt>Группа цен</dt>
+                  <dd>
+                    {order.pricingGroupName}
+                    {order.pricingContext ? (
+                      <span className={styles.muted}> ({order.pricingContext})</span>
+                    ) : null}
+                  </dd>
+                </div>
+              ) : null}
               <div className={styles.detailDlRow}>
                 <dt>Аккаунт</dt>
                 <dd>

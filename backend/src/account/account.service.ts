@@ -4,7 +4,7 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { OrderStatus, GiftCertificateSource } from '@prisma/client';
+import { OrderStatus, GiftCertificateSource, Prisma } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrderChatService } from '../order-chat/order-chat.service';
@@ -31,6 +31,22 @@ import { ReferralCodeService } from '../referral/referral-code.service';
 import { ReferralWalletService } from '../referral/referral-wallet.service';
 
 const BCRYPT_ROUNDS = 10;
+
+/** Заказы покупателя: по userId или «сироты» staff-create с тем же email. */
+async function buyerOrderAccessWhere(
+  prisma: PrismaService,
+  userId: string,
+): Promise<Prisma.OrderWhereInput> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { email: true },
+  });
+  const email = user?.email?.trim().toLowerCase();
+  if (!email) return { userId };
+  return {
+    OR: [{ userId }, { userId: null, email }],
+  };
+}
 
 const addressSelect = {
   id: true,
@@ -160,6 +176,8 @@ export class AccountService {
       referralEnabled: spendPolicy.enabled,
       /** Cap % от payable до wallet — для checkout preview. */
       referralSpendCapPercent: spendPolicy.spendCapPercent,
+      /** TTL attribution ?mf= (дни) — Front localStorage. */
+      referralLinkTtlDays: spendPolicy.linkTtlDays,
       hasGiftCertificates,
       pricing: {
         context: pricing.kind,
@@ -231,6 +249,7 @@ export class AccountService {
       available,
       pending,
       spendCapPercent: policy.spendCapPercent,
+      linkTtlDays: policy.linkTtlDays,
       inviteeBonusEnabled: share.inviteeBonusEnabled,
       inviteeBonusRub: share.inviteeBonusRub,
     };
@@ -238,7 +257,11 @@ export class AccountService {
 
   async listReferralLedger(
     userId: string,
-    opts: { limit?: number; cursor?: string | null },
+    opts: {
+      limit?: number;
+      cursor?: string | null;
+      filter?: 'all' | 'pending' | 'spend' | null;
+    },
   ) {
     return this.referralWallet.listLedgerHistory(userId, opts);
   }
@@ -595,8 +618,9 @@ export class AccountService {
   }
 
   async listOrders(userId: string) {
+    const accessWhere = await buyerOrderAccessWhere(this.prisma, userId);
     const orders = await this.prisma.order.findMany({
-      where: { userId },
+      where: accessWhere,
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
@@ -653,6 +677,14 @@ export class AccountService {
       },
     });
 
+    const orphanIds = orders.filter((o) => !o.userId).map((o) => o.id);
+    if (orphanIds.length > 0) {
+      await this.prisma.order.updateMany({
+        where: { id: { in: orphanIds }, userId: null },
+        data: { userId },
+      });
+    }
+
     const needGuestIds = orders.filter(
       (o) =>
         (o.status === OrderStatus.AWAITING_PAYMENT ||
@@ -703,10 +735,12 @@ export class AccountService {
   }
 
   async getOrder(userId: string, orderId: string) {
+    const accessWhere = await buyerOrderAccessWhere(this.prisma, userId);
     const order = await this.prisma.order.findFirst({
-      where: { id: orderId, userId },
+      where: { AND: [{ id: orderId }, accessWhere] },
       select: {
         id: true,
+        userId: true,
         number: true,
         status: true,
         email: true,
@@ -777,6 +811,13 @@ export class AccountService {
     });
     if (!order) throw new NotFoundException('Заказ не найден');
 
+    if (!order.userId) {
+      await this.prisma.order.update({
+        where: { id: order.id },
+        data: { userId },
+      });
+    }
+
     const snap = (order.shippingAddress ?? null) as ShippingAddressSnap | null;
     const awaitingUnpaid =
       order.status === OrderStatus.AWAITING_PAYMENT ||
@@ -845,10 +886,11 @@ export class AccountService {
 
   /** Покупатель отменяет неоплаченный заказ (AWAITING/NEW). */
   async cancelOrder(userId: string, orderId: string) {
+    const accessWhere = await buyerOrderAccessWhere(this.prisma, userId);
     const result = await this.prisma.$transaction(async (tx) => {
       await lockOrderForUpdate(tx, orderId);
       const order = await tx.order.findFirst({
-        where: { id: orderId, userId },
+        where: { AND: [{ id: orderId }, accessWhere] },
         include: { items: true },
       });
       if (!order) throw new NotFoundException('Заказ не найден');

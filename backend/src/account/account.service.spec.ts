@@ -28,6 +28,7 @@ function makePrisma(tx: ReturnType<typeof makeTx>) {
       findMany: vi.fn(),
       findFirst: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
     },
     $transaction: vi.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
   };
@@ -72,6 +73,7 @@ describe('AccountService', () => {
       getSpendPolicy: vi.fn(async () => ({
         enabled: true,
         spendCapPercent: 50,
+        linkTtlDays: 60,
       })),
       getBuyerShare: vi.fn(async () => ({
         shareTextTemplate: 'Закажи: {link}',
@@ -231,8 +233,10 @@ describe('AccountService', () => {
   });
 
   it('getOrder отдаёт payToken для AWAITING_PAYMENT', async () => {
+    prisma.user.findUnique.mockResolvedValue({ email: 'a@b.c' });
     prisma.order.findFirst.mockResolvedValue({
       id: 'o1',
+      userId: 'u1',
       number: 'J-1',
       status: 'AWAITING_PAYMENT',
       email: 'a@b.c',
@@ -263,7 +267,46 @@ describe('AccountService', () => {
     );
   });
 
+  it('listOrders: staff-заказ с тем же email виден и привязывается к userId', async () => {
+    prisma.user.findUnique.mockResolvedValue({ email: 'buyer@test.ru' });
+    prisma.order.findMany.mockResolvedValue([
+      {
+        id: 'o-staff',
+        number: 'JCOS-139',
+        status: 'AWAITING_PAYMENT',
+        total: 10_200,
+        subtotal: 10_200,
+        shippingCost: 0,
+        discountTotal: 0,
+        giftCertificateAmount: 0,
+        createdAt: new Date(),
+        userId: null,
+        guestId: 'admin-guest',
+        needsAddressClarification: false,
+        items: [],
+        shipments: [],
+      },
+    ]);
+    prisma.order.updateMany.mockResolvedValue({ count: 1 });
+
+    const res = await svc.listOrders('u1');
+    expect(prisma.order.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          OR: [{ userId: 'u1' }, { userId: null, email: 'buyer@test.ru' }],
+        },
+      }),
+    );
+    expect(prisma.order.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['o-staff'] }, userId: null },
+      data: { userId: 'u1' },
+    });
+    expect(res).toHaveLength(1);
+    expect(res[0].number).toBe('JCOS-139');
+  });
+
   it('listOrders синтезирует guestId и отдаёт payToken', async () => {
+    prisma.user.findUnique.mockResolvedValue({ email: 'a@b.c' });
     prisma.order.findMany.mockResolvedValue([
       {
         id: 'o1',
@@ -293,8 +336,10 @@ describe('AccountService', () => {
   });
 
   it('getOrder canPay после «TTL» (старший заказ) — без payExpiresAt cutoff', async () => {
+    prisma.user.findUnique.mockResolvedValue({ email: 'a@b.c' });
     prisma.order.findFirst.mockResolvedValue({
       id: 'o-old',
+      userId: 'u1',
       number: 'J-old',
       status: 'AWAITING_PAYMENT',
       email: 'a@b.c',
@@ -322,8 +367,10 @@ describe('AccountService', () => {
   });
 
   it('getOrder: needsAddressClarification → canPay=false, без payToken', async () => {
+    prisma.user.findUnique.mockResolvedValue({ email: 'a@b.c' });
     prisma.order.findFirst.mockResolvedValue({
       id: 'o-clar',
+      userId: 'u1',
       number: 'J-clar',
       status: 'AWAITING_PAYMENT',
       email: 'a@b.c',
@@ -353,6 +400,7 @@ describe('AccountService', () => {
   });
 
   it('getOrder → NotFound если заказ не найден', async () => {
+    prisma.user.findUnique.mockResolvedValue({ email: 'a@b.c' });
     prisma.order.findFirst.mockResolvedValue(null);
     await expect(svc.getOrder('u1', 'missing')).rejects.toBeInstanceOf(
       NotFoundException,
@@ -370,6 +418,7 @@ describe('AccountService', () => {
       referralWallet.getSpendPolicy.mockResolvedValue({
         enabled: true,
         spendCapPercent: 40,
+        linkTtlDays: 45,
       });
       referralWallet.getBuyerShare.mockResolvedValue({
         shareTextTemplate: 'Ссылка {link} код {code}',
@@ -393,6 +442,7 @@ describe('AccountService', () => {
         available: 1500,
         pending: 400,
         spendCapPercent: 40,
+        linkTtlDays: 45,
         inviteeBonusEnabled: true,
         inviteeBonusRub: 300,
       });

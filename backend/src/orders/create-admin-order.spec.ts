@@ -168,6 +168,21 @@ describe('createAdminOrder', () => {
     ).rejects.toThrow(/способ доставки/i);
   });
 
+  it('привязывает userId по email, если staff не указал userId', async () => {
+    await createAdminOrder(deps, baseDto(), { actorUserId: 'staff1' });
+
+    expect(deps.prisma.user.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { email: 'buyer@example.com' },
+      }),
+    );
+    expect(orderCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ userId: 'u1' }),
+      }),
+    );
+  });
+
   it('сохраняет shadeId из sync в позиции заказа', async () => {
     await createAdminOrder(
       deps,
@@ -179,7 +194,7 @@ describe('createAdminOrder', () => {
     );
     expect(syncCartLines).toHaveBeenCalledWith(
       [expect.objectContaining({ variantId: 'v1', shadeId: 'sh1', qty: 1 })],
-      null,
+      'u1',
       { bypassSamplePurchaseRules: true },
     );
     const data = orderCreate.mock.calls[0][0].data;

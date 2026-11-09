@@ -60,6 +60,9 @@ const orderEvent = {
 const promoCodeRedemption = {
   deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
 };
+const cartSettings = {
+  findUnique: vi.fn().mockResolvedValue({ freeShippingThresholdRub: 10_000 }),
+};
 const productVariant = {
   update: vi.fn(),
   findUnique: vi.fn(),
@@ -75,6 +78,7 @@ const tx = {
   promoCodeRedemption,
   productVariant,
   giftCertificate,
+  cartSettings,
   $executeRaw,
   $queryRaw,
 };
@@ -656,6 +660,139 @@ describe('OrdersAdminService.updateShippingAddress', () => {
   });
 });
 
+describe('OrdersAdminService.updateContact', () => {
+  let service: OrdersAdminService;
+
+  beforeEach(() => {
+    order.findUnique.mockReset();
+    order.update.mockReset();
+    $queryRaw.mockReset();
+    $queryRaw.mockResolvedValue([{ id: 'o1' }]);
+    lifecycle.addEvent.mockClear();
+    prisma.$transaction.mockClear();
+    prisma.order.findUnique.mockResolvedValue({
+      ...detailOrder,
+      status: OrderStatus.PAID,
+      shipments: [],
+      payments: [],
+      events: [],
+      checklistMarks: [],
+    });
+    service = new OrdersAdminService(
+      prisma as never,
+      lifecycle as never,
+      yookassa as never,
+      {
+        isCdekConfigured: () => false,
+        register: vi.fn(),
+      } as never,
+      { get: vi.fn().mockReturnValue('http://localhost:5173') } as never,
+      {
+        applyRetentionForOrder: vi.fn(),
+        seedCustomerNoteFromOrder: vi.fn(),
+      } as never,
+      { createAdmin: vi.fn() } as never,
+      {
+        isConfigured: () => false,
+        cancelOrdersBestEffort: async () => undefined,
+        createRefund: vi.fn(),
+      } as never,
+    );
+  });
+
+  it('обновляет email/phone/имя и синхронизирует тел. в shippingAddress', async () => {
+    order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.PAID,
+      email: 'old@x.co',
+      phone: '+79001112233',
+      customerName: 'Анна',
+      shippingAddress: {
+        city: 'Москва',
+        address: 'Тверская 1',
+        phone: '+79001112233',
+        recipientName: 'Анна',
+      },
+    });
+
+    await service.updateContact('o1', 'admin1', {
+      email: 'New@x.co',
+      phone: '8 (999) 123-45-67',
+      customerName: 'Мария',
+    });
+
+    expect(order.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          email: 'new@x.co',
+          phone: '+79991234567',
+          customerName: 'Мария',
+          shippingAddress: expect.objectContaining({
+            phone: '+79991234567',
+            recipientName: 'Мария',
+          }),
+        }),
+      }),
+    );
+    expect(lifecycle.addEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ type: 'CONTACT_UPDATED' }),
+    );
+  });
+
+  it('не перезаписывает другого получателя в адресе', async () => {
+    order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.PAID,
+      email: 'a@b.com',
+      phone: '+79001112233',
+      customerName: 'Анна',
+      shippingAddress: {
+        city: 'Москва',
+        address: 'Тверская 1',
+        phone: '+79001112233',
+        recipientName: 'Курьер Иван',
+      },
+    });
+
+    await service.updateContact('o1', 'admin1', {
+      email: 'a@b.com',
+      phone: '+79991234567',
+      customerName: 'Мария',
+    });
+
+    expect(order.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          customerName: 'Мария',
+          shippingAddress: expect.objectContaining({
+            phone: '+79991234567',
+            recipientName: 'Курьер Иван',
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('блокирует SHIPPED', async () => {
+    order.findUnique.mockResolvedValue({
+      id: 'o1',
+      status: OrderStatus.SHIPPED,
+      email: 'a@b.com',
+      phone: '+79001112233',
+      customerName: 'Анна',
+      shippingAddress: null,
+    });
+    await expect(
+      service.updateContact('o1', 'admin1', {
+        email: 'a@b.com',
+        phone: '+79991234567',
+        customerName: 'Анна',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
 describe('OrdersAdminService.updateItems', () => {
   let service: OrdersAdminService;
 
@@ -1221,6 +1358,51 @@ describe('OrdersAdminService.removePromo', () => {
         to: 'a@b.com',
         orderNumber: 'JCOS-1',
         changesSummary: expect.stringMatching(/SALE|промо/i),
+      }),
+    );
+  });
+
+  it('пересчитывает доставку при снятии промо (free PVZ по порогу)', async () => {
+    const pvzComment =
+      '__VSP:carrier=cdek|lon=|lat=|pvz=MSK45|dropoff=pvz__\nТип доставки: СДЭК ПВЗ. Детали: x';
+    order.findUnique.mockResolvedValue({
+      id: 'o1',
+      number: 'JCOS-138',
+      status: OrderStatus.PAID,
+      email: 'a@b.com',
+      giftPurchaseDenominationId: null,
+      giftCertificateId: null,
+      giftCertificateCode: null,
+      giftCertificateAmount: 0,
+      shippingCost: 708,
+      subtotal: 10_200,
+      discountTotal: 708,
+      promoCode: 'PROMO',
+      total: 10_200,
+      shippingAddress: {
+        comment: pvzComment,
+        carrierQuote: { cost: 708, freePvz: false },
+      },
+      payments: [],
+      promoRedemption: { id: 'r1', promoCodeId: 'p1' },
+    });
+
+    await service.removePromo('o1', 'admin1', { notifyCustomer: false });
+
+    expect(order.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          discountTotal: 0,
+          shippingCost: 0,
+          // 10200 - 0 - 0 + 0
+          total: 10_200,
+        }),
+      }),
+    );
+    expect(lifecycle.addEvent).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        message: expect.stringMatching(/Доставка 708 → 0/),
       }),
     );
   });

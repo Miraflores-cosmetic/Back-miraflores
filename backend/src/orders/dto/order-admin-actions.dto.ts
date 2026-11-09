@@ -1,9 +1,11 @@
 import {
   IsArray,
   IsBoolean,
+  IsEmail,
   IsInt,
   IsOptional,
   IsString,
+  Matches,
   Max,
   MaxLength,
   Min,
@@ -71,6 +73,27 @@ export class OrderRefundDto {
   @IsOptional()
   @IsBoolean()
   providerRefund?: boolean;
+}
+
+/** Контакты заказа (блок «Клиент» в админке). Не трогает User. */
+export class OrderContactUpdateDto {
+  @IsEmail()
+  @MaxLength(320)
+  email!: string;
+
+  /** RU / E.164. */
+  @IsString()
+  @MinLength(10)
+  @MaxLength(40)
+  @Matches(/^\+?[\d\s()\-]{10,40}$/, {
+    message: 'Некорректный телефон',
+  })
+  phone!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  customerName?: string | null;
 }
 
 export class OrderShippingAddressUpdateDto {

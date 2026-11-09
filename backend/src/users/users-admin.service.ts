@@ -1,15 +1,41 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
+import { formatPhoneE164, isValidPhone } from '../common/phone.util';
 import { QUIZ_FUNNEL_STEPS } from '../quiz/quiz-events.constants';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferralCodeService } from '../referral/referral-code.service';
 import { UserGroupsAdminService } from '../user-groups/user-groups-admin.service';
+import type { UpdateRetailUserProfileDto } from './dto/update-retail-user-profile.dto';
+
+/** Пустая строка → null; иначе E.164 или BadRequest. */
+function normalizeOptionalPhone(raw: string | null | undefined): string | null {
+  const t = raw?.trim() || '';
+  if (!t) return null;
+  if (!isValidPhone(t)) {
+    throw new BadRequestException('Некорректный телефон');
+  }
+  return formatPhoneE164(t);
+}
+
+function normalizeOptionalBirthday(raw: string | null | undefined): Date | null {
+  const t = raw?.trim() || '';
+  if (!t) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) {
+    throw new BadRequestException('Некорректная дата рождения');
+  }
+  const d = new Date(`${t}T12:00:00.000Z`);
+  if (Number.isNaN(d.getTime())) {
+    throw new BadRequestException('Некорректная дата рождения');
+  }
+  return d;
+}
 
 const LIST_MAX = 100;
 const LIST_DEFAULT = 20;
@@ -237,6 +263,91 @@ export class UsersAdminService {
 
   async updateUserGroup(userId: string, groupId: string | null) {
     return this.userGroups.updateUserGroup(userId, groupId);
+  }
+
+  async updateRetailUserProfile(userId: string, dto: UpdateRetailUserProfileDto) {
+    const existing = await this.prisma.user.findFirst({
+      where: { id: userId, role: UserRole.USER, isActive: true },
+      select: { id: true, email: true },
+    });
+    if (!existing) throw new NotFoundException('Пользователь не найден');
+
+    const email = dto.email.trim().toLowerCase();
+    if (!email) {
+      throw new BadRequestException('Email обязателен');
+    }
+
+    if (email !== existing.email.toLowerCase()) {
+      const taken = await this.prisma.user.findUnique({
+        where: { email },
+        select: { id: true },
+      });
+      if (taken && taken.id !== userId) {
+        throw new ConflictException('Пользователь с таким email уже есть');
+      }
+    }
+
+    const displayName =
+      dto.displayName !== undefined
+        ? dto.displayName?.trim() || null
+        : undefined;
+    const phone =
+      dto.phone !== undefined ? normalizeOptionalPhone(dto.phone) : undefined;
+    const birthday =
+      dto.birthday !== undefined
+        ? normalizeOptionalBirthday(dto.birthday)
+        : undefined;
+
+    const data: Prisma.UserUpdateInput = { email };
+    if (displayName !== undefined) data.displayName = displayName;
+    if (phone !== undefined) data.phone = phone;
+    if (birthday !== undefined) data.birthday = birthday;
+
+    const row = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.user.update({
+        where: { id: userId },
+        data,
+        select: {
+          id: true,
+          email: true,
+          displayName: true,
+          phone: true,
+          birthday: true,
+          updatedAt: true,
+        },
+      });
+
+      const prevEmail = existing.email.toLowerCase();
+      if (email !== prevEmail) {
+        const oldSub = await tx.newsletterSubscriber.findUnique({
+          where: { email: prevEmail },
+          select: { id: true },
+        });
+        if (oldSub) {
+          const clash = await tx.newsletterSubscriber.findUnique({
+            where: { email },
+            select: { id: true },
+          });
+          if (!clash) {
+            await tx.newsletterSubscriber.update({
+              where: { id: oldSub.id },
+              data: { email, userId },
+            });
+          }
+        }
+      }
+
+      return updated;
+    });
+
+    return {
+      id: row.id,
+      email: row.email,
+      displayName: row.displayName,
+      phone: row.phone,
+      birthday: row.birthday ? row.birthday.toISOString().slice(0, 10) : null,
+      updatedAt: row.updatedAt,
+    };
   }
 
   /** Выдать код, если нет (кнопка в карточке клиента). */

@@ -20,6 +20,7 @@ import {
 import { parseOptionalPositiveInt } from '../common/parse-positive-int';
 import {
   OrderChecklistMarkDto,
+  OrderContactUpdateDto,
   OrderItemsUpdateDto,
   OrderNoteDto,
   OrderRefundDto,
@@ -191,6 +192,15 @@ export class OrdersAdminController {
     @Body() dto: OrderRefundDto,
   ) {
     return this.orders.refund(id, actorUserId, dto);
+  }
+
+  @Patch(':id/contact')
+  updateContact(
+    @Param('id') id: string,
+    @CurrentUser('sub') actorUserId: string,
+    @Body() dto: OrderContactUpdateDto,
+  ) {
+    return this.orders.updateContact(id, actorUserId, dto);
   }
 
   @Patch(':id/shipping-address')

@@ -6,7 +6,11 @@ import { BadRequestException } from '@nestjs/common';
 import { OrderStatus, PaymentStatus } from '@prisma/client';
 import { OrdersPublicService } from '../orders/orders.public.service';
 import { OrderPayTokenService } from '../orders/order-pay-token.service';
-import { ShippingQuoteService } from '../orders/shipping-quote.service';
+import {
+  hashCartLines,
+  hashShippingAddress,
+  ShippingQuoteService,
+} from '../orders/shipping-quote.service';
 import { OrdersAdminService } from '../orders/orders-admin.service';
 import { cancelUnpaidOrderInTx } from '../orders/cancel-unpaid-order';
 
@@ -58,12 +62,18 @@ describe('referral spend flow', () => {
   const cartSettings = {
     findUnique: vi.fn().mockResolvedValue({ freeShippingThresholdRub: 10_000 }),
   };
+  const productVariant = {
+    findFirst: vi.fn(),
+    findMany: vi.fn().mockResolvedValue([]),
+    update: vi.fn(),
+  };
   const tx = {
     order,
     payment,
     promoCodeRedemption,
     orderEvent,
     orderAffiliateLead,
+    productVariant,
     $executeRaw: vi.fn().mockResolvedValue(undefined),
     $queryRaw: vi.fn().mockResolvedValue([{ max_n: 1 }]),
   };
@@ -73,10 +83,7 @@ describe('referral spend flow', () => {
     promoCodeRedemption,
     orderEvent,
     cartSettings,
-    productVariant: {
-      findFirst: vi.fn(),
-      findMany: vi.fn().mockResolvedValue([]),
-    },
+    productVariant,
     $transaction: vi.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
     runInRlsTransaction: vi.fn(async (_ctx: unknown, fn: () => unknown) => fn()),
     runIsolatedRlsTransaction: vi.fn(
@@ -254,6 +261,71 @@ describe('referral spend flow', () => {
       ).rejects.toMatchObject({
         message: expect.stringMatching(/войдите/i),
       });
+    });
+
+    it('create + useReferralWallet → holdSpendInTx', async () => {
+      const lines = [{ variantId: 'v1', shadeId: null as string | null, qty: 1 }];
+      const shippingAddress = {
+        city: 'Москва',
+        address: 'Тверская 1',
+        comment:
+          '__VSP:carrier=cdek|lon=|lat=|pvz=MSK45|dropoff=pvz__\nТип доставки: СДЭК ПВЗ.',
+        pvzCode: 'MSK45',
+      };
+      const shippingQuotes = new ShippingQuoteService(config as never);
+      const { quote } = shippingQuotes.issue({
+        cost: 350,
+        method: 'CDEK',
+        addrHash: hashShippingAddress(shippingAddress, 'CDEK'),
+        linesHash: hashCartLines(lines),
+        goodsSubtotal: 2000,
+        freePvz: false,
+      });
+
+      order.create.mockImplementation(
+        async ({ data }: { data: { items: { create: unknown[] } } }) => ({
+          id: 'ord-hold-1',
+          number: 'MF-HOLD-1',
+          status: OrderStatus.AWAITING_PAYMENT,
+          email: 'a@b.co',
+          phone: '+79001234567',
+          subtotal: 2000,
+          discountTotal: 0,
+          giftCertificateAmount: 0,
+          giftCertificateCode: null,
+          referralWalletAmount: 1000,
+          total: 1000,
+          promoCode: null,
+          guestId: 'guest-123456',
+          items: data.items.create,
+        }),
+      );
+
+      await publicService.create(
+        {
+          email: 'a@b.co',
+          phone: '+79001234567',
+          customerName: 'Иван',
+          guestId: 'guest-123456',
+          idempotencyKey: 'idem-wallet-hold',
+          useReferralWallet: true,
+          lines,
+          shippingMethod: 'CDEK',
+          shippingAddress,
+          shippingQuote: quote,
+        } as never,
+        'user-1',
+      );
+
+      expect(referralWallet.quoteSpend).toHaveBeenCalledWith('user-1', expect.any(Number));
+      expect(referralWallet.holdSpendInTx).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          userId: 'user-1',
+          orderId: 'ord-hold-1',
+          amount: 1000,
+        }),
+      );
     });
   });
 

@@ -36,7 +36,7 @@ API: `GET|PUT /settings/admin/referral` (ACL `settings`).
 | `enabled` / `enabledAt` | Программа вкл; `enabledAt` stamp при false→true | Attribution до `enabledAt` не earn |
 | `earnPercent` | % от commission base | Только новые EARN (snapshot в note) |
 | `earnMode` | `EVERY` \| `FIRST_GOODS_ORDER` | Новые заказы |
-| `linkTtlDays` | TTL cookie / attribution window | — |
+| `linkTtlDays` | TTL attribution в **localStorage** (`miraflores.mf.ref.v1`); публично `GET /settings/referral`, также `/account/me` → `referralLinkTtlDays` | Новые клики `?mf=` |
 | `minOrderRub` | Мин. заказ для create earn | Только create |
 | `quarantineMode` / `quarantineDays` | `DELIVERED` или N дней после PAID | Snapshot на EARN; live settings не двигают старые |
 | `inviteeBonusEnabled` / `inviteeBonusRub` | Бонус приглашённому (auth only) | Новые |
@@ -55,7 +55,7 @@ API: `GET|PUT /settings/admin/referral` (ACL `settings`).
 | `SPEND_HOLD` | − | Checkout hold (**≡ capture**): available↓ сразу при create |
 | `SPEND_RELEASE` | + | Отмена unpaid / полный refund wallet |
 | `ADJUST` | ± | Ручная корректировка админом (Idempotency-Key) |
-| `SPEND_CAPTURE` | — | **Dead.** В enum оставлен (PG enum drop дорогой); **не писать**. Hold≡capture → только `SPEND_HOLD`. Фильтр `kind ≠ SPEND_CAPTURE` в ЛК/order summary |
+| `SPEND_CAPTURE` | — | **Dead.** В enum оставлен (PG enum drop дорогой); **не писать**. Hold≡capture → только `SPEND_HOLD`. Фильтр `kind ≠ SPEND_CAPTURE` в ЛК/order summary. **Миграция удаления enum — позже** (не в текущем релизе). |
 
 ### Earn note + quarantine snapshot
 
@@ -64,7 +64,7 @@ API: `GET|PUT /settings/admin/referral` (ACL `settings`).
 | Note | Поведение |
 |------|-----------|
 | Полный snapshot (`qMode`+`qDays`) | Карантин **только** из note; live settings не двигают |
-| **Legacy** `base=…;pct=…` без `q*` | `resolveQuarantine` подставляет **live** `quarantineMode`/`quarantineDays` (единственный fallback). Shrink PENDING **не** дописывает live q* в note |
+| **Legacy** `base=…;pct=…` без `q*` | `resolveQuarantine` подставляет **live** `quarantineMode`/`quarantineDays` (единственный fallback). Shrink PENDING **не** дописывает live q* в note. **Оставить как есть** — не вычищать legacy rows / не форсить rewrite note. |
 
 ЛК labels (Front `ReferralContent`): CLAWBACK = «Списание начисления», ADJUST = «Корректировка» (не смешивать).
 
@@ -78,7 +78,9 @@ API: `GET|PUT /settings/admin/referral` (ACL `settings`).
 | PUT | `settings/admin/referral/users/:id/active` | Вкл/выкл кода (ACL **settings**) |
 | POST | `settings/admin/referral/users/:id/regenerate` | Новый код (ACL **settings**; страница рефералки) |
 | POST | `users/admin/:id/referral/regenerate` | Тот же regenerate (ACL **users**; карточка покупателя) |
-| GET | `account/me/referral` + ledger | ЛК dual balance / история |
+| GET | `settings/referral` | Public: `{ linkTtlDays }` для витрины |
+| GET | `account/me` | `referralLinkTtlDays` (+ wallet / cap) |
+| GET | `account/me/referral` + ledger | ЛК dual balance / история (`?filter=all\|pending\|spend`) |
 
 **Dual ACL:** disable + regenerate на `/admin/settings/referral` идут через `settings/admin/referral/*` — staff с секцией `settings` без `users` может менять код. Карточка `/admin/users/:id` по-прежнему зовёт `users/admin/.../regenerate` (нужен grant `users`).
 

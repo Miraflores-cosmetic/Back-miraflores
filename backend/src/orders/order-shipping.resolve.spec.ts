@@ -5,6 +5,7 @@ import {
   buildQuoteCost,
   computeFreePvzShipping,
   goodsSubtotalForFreePvzThreshold,
+  resolveStoredOrderShippingCost,
   isPvzShippingComment,
   requireCheckoutShipmentProvider,
   resolveShippingFromQuote,
@@ -99,6 +100,36 @@ describe('isPvzShippingComment / computeFreePvzShipping', () => {
         freeShippingThresholdRub: 10_000,
       }),
     ).toBe(false);
+  });
+});
+
+describe('resolveStoredOrderShippingCost', () => {
+  const pvzComment =
+    '__VSP:carrier=cdek|lon=|lat=|pvz=MSK45|dropoff=pvz__\nТип доставки: СДЭК ПВЗ. Детали: x';
+
+  it('после снятия промо — бесплатно по порогу (кейс 00138)', () => {
+    expect(
+      resolveStoredOrderShippingCost({
+        subtotal: 10_200,
+        discountTotal: 0,
+        shippingComment: pvzComment,
+        quotedTariffCost: 708,
+        fallbackPaidShippingCost: 708,
+        freeShippingThresholdRub: 10_000,
+      }),
+    ).toEqual({ cost: 0, freePvz: true });
+  });
+
+  it('с промо ниже порога — платная доставка по quote', () => {
+    expect(
+      resolveStoredOrderShippingCost({
+        subtotal: 10_200,
+        discountTotal: 708,
+        shippingComment: pvzComment,
+        quotedTariffCost: 708,
+        freeShippingThresholdRub: 10_000,
+      }),
+    ).toEqual({ cost: 708, freePvz: false });
   });
 });
 

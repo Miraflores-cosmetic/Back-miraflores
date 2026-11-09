@@ -112,13 +112,19 @@ export async function computeAdminCreateQuote(
   const customerName = dto.customerName.trim();
   if (!customerName) throw new BadRequestException('Укажите имя');
 
-  const userId = dto.userId?.trim() || null;
+  let userId = dto.userId?.trim() || null;
   if (userId) {
     const user = await deps.prisma.user.findUnique({
       where: { id: userId },
       select: { id: true },
     });
     if (!user) throw new BadRequestException('Пользователь не найден');
+  } else {
+    const byEmail = await deps.prisma.user.findUnique({
+      where: { email },
+      select: { id: true },
+    });
+    if (byEmail) userId = byEmail.id;
   }
 
   const guestId = opts.guestId;

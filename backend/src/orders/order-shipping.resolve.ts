@@ -270,6 +270,42 @@ export function computeFreePvzShipping(opts: {
   );
 }
 
+/**
+ * Пересчёт стоимости доставки по сохранённому заказу (админ: снятие промо и т.п.).
+ * Порог free PVZ — по сумме товаров после промо; тариф — из snapshot carrierQuote.
+ */
+export function resolveStoredOrderShippingCost(opts: {
+  subtotal: number;
+  discountTotal: number;
+  shippingComment?: string | null;
+  quotedTariffCost?: number | null;
+  /** Если в snapshot нет тарифа — текущая платная доставка заказа */
+  fallbackPaidShippingCost?: number;
+  freeShippingThresholdRub: number;
+}): { cost: number; freePvz: boolean } {
+  const goods = goodsSubtotalForFreePvzThreshold(
+    opts.subtotal,
+    opts.discountTotal,
+  );
+  const freePvz = computeFreePvzShipping({
+    shippingComment: opts.shippingComment,
+    goodsSubtotal: goods,
+    freeShippingThresholdRub: opts.freeShippingThresholdRub,
+  });
+  if (freePvz) {
+    return { cost: 0, freePvz: true };
+  }
+  const quoted = opts.quotedTariffCost;
+  if (quoted != null && Number.isFinite(quoted) && Math.floor(quoted) >= 1) {
+    return { cost: Math.floor(quoted), freePvz: false };
+  }
+  const fallback = Math.max(0, Math.floor(opts.fallbackPaidShippingCost ?? 0));
+  if (fallback >= 1) {
+    return { cost: fallback, freePvz: false };
+  }
+  return { cost: 0, freePvz: false };
+}
+
 /** Стоимость из signed quote + сверка с текущей корзиной/адресом. */
 export function resolveShippingFromQuote(opts: {
   quote: ShippingQuotePayload;

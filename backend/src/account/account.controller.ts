@@ -64,17 +64,23 @@ export class AccountController {
     return this.account.getReferralDashboard(user.sub);
   }
 
-  /** ЛК: история ledger (без PII приглашённого). */
+  /** ЛК: история ledger (без PII приглашённого). ?filter=all|pending|spend */
   @Get('me/referral/ledger')
   listReferralLedger(
     @CurrentUser() user: JwtPayload,
     @Query('limit') limitRaw?: string,
     @Query('cursor') cursor?: string,
+    @Query('filter') filterRaw?: string,
   ) {
     const limit = Math.min(50, Math.max(1, Math.floor(Number(limitRaw) || 20)));
+    const filter =
+      filterRaw === 'pending' || filterRaw === 'spend' || filterRaw === 'all'
+        ? filterRaw
+        : 'all';
     return this.account.listReferralLedger(user.sub, {
       limit,
       cursor: cursor ?? null,
+      filter,
     });
   }
 

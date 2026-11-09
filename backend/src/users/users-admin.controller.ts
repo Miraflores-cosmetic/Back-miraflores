@@ -15,6 +15,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { parseOptionalPositiveInt } from '../common/parse-positive-int';
 import { UpdateUserGroupAssignmentDto } from '../user-groups/dto/user-groups-admin.dto';
 import { SetReferralActiveDto } from './dto/referral-admin.dto';
+import { UpdateRetailUserProfileDto } from './dto/update-retail-user-profile.dto';
 import { UsersAdminService } from './users-admin.service';
 
 /** Покупатели с аккаунтом — как Win-Win /admin/clients, без партнёров и групп. */
@@ -51,6 +52,11 @@ export class UsersAdminController {
   @Patch(':id/group')
   updateGroup(@Param('id') id: string, @Body() dto: UpdateUserGroupAssignmentDto) {
     return this.users.updateUserGroup(id, dto.groupId ?? null);
+  }
+
+  @Patch(':id/profile')
+  updateProfile(@Param('id') id: string, @Body() dto: UpdateRetailUserProfileDto) {
+    return this.users.updateRetailUserProfile(id, dto);
   }
 
   /** Выдать referralCode, если ещё нет. */

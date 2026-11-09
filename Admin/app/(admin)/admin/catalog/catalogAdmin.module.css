@@ -975,6 +975,14 @@
   color: var(--color-black);
 }
 
+.detailFormActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 16px;
+  max-width: 480px;
+}
+
 .tabPanel {
   margin-top: 16px;
 }

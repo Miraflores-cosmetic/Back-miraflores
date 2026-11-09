@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { UsersAdminService } from './users-admin.service';
 
 vi.mock('bcrypt', () => ({
@@ -12,6 +16,7 @@ function makePrisma() {
       count: vi.fn(),
       findMany: vi.fn(),
       findFirst: vi.fn(),
+      findUnique: vi.fn(),
       update: vi.fn(),
     },
     userAddress: {
@@ -28,7 +33,17 @@ function makePrisma() {
       count: vi.fn().mockResolvedValue(0),
       findMany: vi.fn().mockResolvedValue([]),
     },
-    $transaction: vi.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
+    newsletterSubscriber: {
+      findMany: vi.fn().mockResolvedValue([]),
+      findUnique: vi.fn().mockResolvedValue(null),
+      update: vi.fn(),
+    },
+    $transaction: vi.fn(async (arg: unknown) => {
+      if (typeof arg === 'function') {
+        return (arg as (tx: unknown) => Promise<unknown>)(makePrisma());
+      }
+      return Promise.all(arg as Promise<unknown>[]);
+    }),
   };
 }
 
@@ -38,7 +53,11 @@ describe('UsersAdminService', () => {
 
   beforeEach(() => {
     prisma = makePrisma();
-    svc = new UsersAdminService(prisma as never);
+    svc = new UsersAdminService(
+      prisma as never,
+      { updateUserGroup: vi.fn() } as never,
+      { ensureForUser: vi.fn() } as never,
+    );
   });
 
   it('listRetailUsers возвращает page/limit и orderCount', async () => {
@@ -162,5 +181,56 @@ describe('UsersAdminService', () => {
   it('deleteRetailUser отклоняет уже удалённого', async () => {
     prisma.user.findFirst.mockResolvedValue({ id: 'u1', isActive: false });
     await expect(svc.deleteRetailUser('u1')).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('updateRetailUserProfile обновляет поля и нормализует телефон', async () => {
+    prisma.user.findFirst.mockResolvedValue({ id: 'u1', email: 'old@x.co' });
+    const updatedAt = new Date('2026-11-09T10:00:00.000Z');
+    prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+      const tx = {
+        user: {
+          update: vi.fn().mockResolvedValue({
+            id: 'u1',
+            email: 'new@x.co',
+            displayName: 'Анна',
+            phone: '+79991234567',
+            birthday: new Date('1990-05-01T12:00:00.000Z'),
+            updatedAt,
+          }),
+        },
+        newsletterSubscriber: {
+          findUnique: vi.fn().mockResolvedValue(null),
+          update: vi.fn(),
+        },
+      };
+      return fn(tx);
+    });
+
+    const res = await svc.updateRetailUserProfile('u1', {
+      email: 'New@x.co',
+      displayName: 'Анна',
+      phone: '8 (999) 123-45-67',
+      birthday: '1990-05-01',
+    });
+
+    expect(res).toMatchObject({
+      email: 'new@x.co',
+      displayName: 'Анна',
+      phone: '+79991234567',
+      birthday: '1990-05-01',
+    });
+  });
+
+  it('updateRetailUserProfile → Conflict при занятом email', async () => {
+    prisma.user.findFirst.mockResolvedValue({ id: 'u1', email: 'old@x.co' });
+    prisma.user.findUnique.mockResolvedValue({ id: 'u2' });
+    await expect(
+      svc.updateRetailUserProfile('u1', {
+        email: 'taken@x.co',
+        displayName: null,
+        phone: null,
+        birthday: null,
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
   });
 });
