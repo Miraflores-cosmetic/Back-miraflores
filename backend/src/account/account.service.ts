@@ -624,6 +624,7 @@ export class AccountService {
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
+        userId: true,
         number: true,
         status: true,
         total: true,
