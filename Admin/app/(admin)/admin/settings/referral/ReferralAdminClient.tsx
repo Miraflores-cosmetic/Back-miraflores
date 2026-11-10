@@ -362,12 +362,11 @@ export function ReferralAdminClient() {
           `settings/admin/referral/touches/${orderId}/requeue`,
           { method: 'POST' },
         );
-        showToast('Touch поставлен в очередь', 'success');
+        showToast('Touch поставлен в очередь');
         await loadDeadTouches();
       } catch (e) {
         showToast(
           e instanceof AdminBackendRequestError ? e.message : 'Ошибка retry',
-          'error',
         );
       } finally {
         setDeadBusyId(null);
@@ -387,7 +386,6 @@ export function ReferralAdminClient() {
         );
         showToast(
           action === 'approve' ? 'Начисление разрешено' : 'Начисление отклонено',
-          'success',
         );
         await Promise.all([loadAddressMatches(), loadLiability()]);
       } catch (e) {
@@ -397,7 +395,6 @@ export function ReferralAdminClient() {
             : action === 'approve'
               ? 'Не удалось разрешить'
               : 'Не удалось отклонить',
-          'error',
         );
       } finally {
         setAddressBusyId(null);
