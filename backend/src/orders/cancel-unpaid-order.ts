@@ -1,5 +1,6 @@
 import { OrderStatus, PaymentStatus, Prisma } from '@prisma/client';
 import { releaseGiftCertificateForOrder } from '../gift-certificates/gift-certificate-hold.util';
+import { enqueueReferralTouchInTx } from '../referral/referral-touch';
 import type { ReferralWalletService } from '../referral/referral-wallet.service';
 import { releaseStockReserve } from './order-stock';
 
@@ -94,6 +95,7 @@ export async function cancelUnpaidOrderInTx(
       },
     },
   });
+  await enqueueReferralTouchInTx(tx, opts.referralWallet, opts.orderId);
   return {
     id: updated.id,
     status: updated.status,

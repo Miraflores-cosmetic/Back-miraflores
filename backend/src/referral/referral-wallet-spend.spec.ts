@@ -27,7 +27,14 @@ describe('ReferralWalletService spend', () => {
         findUnique: vi.fn(),
         findMany: vi.fn().mockResolvedValue([]),
         count: vi.fn().mockResolvedValue(0),
-        aggregate: vi.fn().mockResolvedValue({ _sum: { amount: 2000 } }),
+        aggregate: vi.fn().mockImplementation(
+          (args: { where?: { kind?: unknown } }) => {
+            if (args?.where?.kind === ReferralLedgerKind.DEBT) {
+              return Promise.resolve({ _sum: { amount: 0 } });
+            }
+            return Promise.resolve({ _sum: { amount: 2000 } });
+          },
+        ),
       },
       $executeRaw: vi.fn().mockResolvedValue(undefined),
     };
@@ -78,19 +85,29 @@ describe('ReferralWalletService spend', () => {
   });
 
   it('releaseSpendInTx восстанавливает net hold', async () => {
-    prisma.referralWalletLedger.findMany = vi.fn().mockResolvedValue([
-      {
-        userId: 'u1',
-        kind: ReferralLedgerKind.SPEND_HOLD,
-        amount: -500,
+    prisma.referralWalletLedger.findMany = vi.fn().mockImplementation(
+      async (args: { where?: { kind?: unknown } }) => {
+        if (args?.where?.kind === ReferralLedgerKind.DEBT) return [];
+        return [
+          {
+            userId: 'u1',
+            kind: ReferralLedgerKind.SPEND_HOLD,
+            amount: -500,
+          },
+        ];
       },
-    ]);
-    prisma.referralWalletLedger.aggregate.mockResolvedValue({
-      _sum: { amount: 1500 },
-    });
+    );
+    prisma.referralWalletLedger.aggregate.mockImplementation(
+      async (args: { where?: { kind?: unknown } }) => {
+        if (args?.where?.kind === ReferralLedgerKind.DEBT) {
+          return { _sum: { amount: 0 } };
+        }
+        return { _sum: { amount: 1500 } };
+      },
+    );
 
     const ok = await svc.releaseSpendInTx(prisma as never, 'ord1');
-    expect(ok).toBe(true);
+    expect(ok).toBe(500);
     expect(prisma.referralWalletLedger.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -103,14 +120,45 @@ describe('ReferralWalletService spend', () => {
     );
   });
 
-  it('quoteSpend учитывает enabled + cap', async () => {
+  it('quoteSpend учитывает cap; enabled=false не блокирует amount', async () => {
     const q = await svc.quoteSpend('u1', 4000);
     expect(q).toEqual({
       enabled: true,
       available: 2000,
       spendCapPercent: 50,
       amount: 2000,
+      debt: 0,
     });
+
+    settings.ensureDefaults.mockResolvedValue({
+      enabled: false,
+      spendCapPercent: 50,
+    });
+    const off = await svc.quoteSpend('u1', 4000);
+    expect(off.enabled).toBe(false);
+    expect(off.amount).toBe(2000);
+  });
+
+  it('quoteSpend / hold: debt > 0 блокирует spend', async () => {
+    prisma.referralWalletLedger.aggregate.mockImplementation(
+      (args: { where?: { kind?: unknown } }) => {
+        if (args?.where?.kind === ReferralLedgerKind.DEBT) {
+          return Promise.resolve({ _sum: { amount: 400 } });
+        }
+        return Promise.resolve({ _sum: { amount: 2000 } });
+      },
+    );
+    const q = await svc.quoteSpend('u1', 4000);
+    expect(q.amount).toBe(0);
+    expect(q.debt).toBe(400);
+
+    await expect(
+      svc.holdSpendInTx(prisma as never, {
+        userId: 'u1',
+        orderId: 'ord-debt',
+        amount: 100,
+      }),
+    ).rejects.toThrow(/долг/i);
   });
 
   it('hold P2002: silent return если |amount| совпадает', async () => {

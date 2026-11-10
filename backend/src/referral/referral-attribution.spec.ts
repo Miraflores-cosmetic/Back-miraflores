@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  detectShippingOverlap,
   phonesOverlap,
   resolveReferralAttribution,
 } from './referral-attribution';
@@ -33,6 +34,35 @@ describe('phonesOverlap', () => {
   });
 });
 
+describe('detectShippingOverlap', () => {
+  it('совпадение ПВЗ', () => {
+    expect(
+      detectShippingOverlap(
+        { pvzCode: 'msk45', city: 'Москва', address: 'ул. А' },
+        [{ pvzCode: 'MSK45', city: 'Казань', address: 'ул. Б' }],
+      ),
+    ).toEqual({ suspect: true, reason: 'pvz:MSK45' });
+  });
+
+  it('совпадение city+address', () => {
+    expect(
+      detectShippingOverlap(
+        { city: 'Москва', address: 'Тверская 1', pvzCode: null },
+        [{ city: 'москва', address: 'тверская 1', pvzCode: null }],
+      ).suspect,
+    ).toBe(true);
+  });
+
+  it('разные адреса — без флага', () => {
+    expect(
+      detectShippingOverlap(
+        { city: 'Москва', address: 'Тверская 1', pvzCode: 'A1' },
+        [{ city: 'Москва', address: 'Арбат 2', pvzCode: 'B2' }],
+      ),
+    ).toEqual({ suspect: false, reason: null });
+  });
+});
+
 describe('resolveReferralAttribution', () => {
   it('ok для чужого покупателя', () => {
     expect(
@@ -44,7 +74,12 @@ describe('resolveReferralAttribution', () => {
         buyerPhones: ['+79009998877'],
         referrerPhones: ['+79001112233'],
       }),
-    ).toEqual({ code: 'ANNA1', referrerUserId: 'u-ref' });
+    ).toEqual({
+      code: 'ANNA1',
+      referrerUserId: 'u-ref',
+      addressMatchSuspect: false,
+      addressMatchReason: null,
+    });
   });
 
   it('self: тот же userId', () => {
@@ -97,6 +132,45 @@ describe('resolveReferralAttribution', () => {
         referrerPhones: ['+79001112233', '+79005554433'],
       }),
     ).toBeNull();
+  });
+
+  it('адрес/ПВЗ совпал — attribution ok + suspect flag', () => {
+    expect(
+      resolveReferralAttribution({
+        codeRaw: 'ANNA1',
+        referrer,
+        buyerUserId: 'u-buyer',
+        buyerEmail: 'buyer@example.com',
+        buyerPhones: ['+79009998877'],
+        referrerPhones: ['+79001112233'],
+        buyerShipping: { pvzCode: 'MSK45', city: 'Москва', address: 'x' },
+        referrerShipments: [{ pvzCode: 'MSK45', city: 'Москва', address: 'y' }],
+      }),
+    ).toEqual({
+      code: 'ANNA1',
+      referrerUserId: 'u-ref',
+      addressMatchSuspect: true,
+      addressMatchReason: 'pvz:MSK45',
+    });
+  });
+
+  it('shippingFingerprintFromJson читает pvz из заказа', async () => {
+    const { shippingFingerprintFromJson } = await import(
+      './referral-attribution'
+    );
+    expect(
+      shippingFingerprintFromJson({
+        city: 'Москва',
+        address: 'ул. Тверская 1',
+        postalCode: '125009',
+        pvzCode: 'MSK45',
+      }),
+    ).toEqual({
+      city: 'Москва',
+      address: 'ул. Тверская 1',
+      postalCode: '125009',
+      pvzCode: 'MSK45',
+    });
   });
 
   it('неактивный код / юзер', () => {

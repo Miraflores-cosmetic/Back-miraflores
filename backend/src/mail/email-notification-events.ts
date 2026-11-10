@@ -8,7 +8,7 @@ import {
 /**
  * Реестр editable transactional email (admin/settings).
  *
- * В скоупе: заказы + подарочные сертификаты (commerce).
+ * В скоупе: заказы + подарочные сертификаты + реф. кошелёк (commerce).
  * ВНЕ скоупа навсегда (только код / MailService builders):
  *   - registration OTP
  *   - password reset (buyer)
@@ -35,6 +35,9 @@ export const EMAIL_NOTIFICATION_EVENT_KEYS = [
   'gift_buyer_copy',
   'order_chat_reply',
   'order_chat_support_reply',
+  'referral_earn_created',
+  'referral_earn_posted',
+  'referral_clawback',
 ] as const;
 
 export type EmailNotificationEventKey =
@@ -516,6 +519,92 @@ export const EMAIL_NOTIFICATION_EVENTS: readonly EmailNotificationEventDef[] = [
       '{{chat.snippet}}',
       '',
       'Откройте сайт и чат в личном кабинете, чтобы продолжить диалог.',
+      '',
+      '{{cta.site}}',
+    ].join('\n'),
+  },
+  {
+    key: 'referral_earn_created',
+    label: 'Рефералка: начисление в карантине',
+    description: 'Рефереру / invitee: создан PENDING EARN или INVITEE_BONUS.',
+    variables: [
+      { key: 'site.url', label: 'URL витрины' },
+      { key: 'site.name', label: 'Название бренда' },
+      { key: 'referral.amount_label', label: 'Сумма (с ₽)' },
+      { key: 'referral.kind_label', label: 'Тип: начисление / бонус' },
+      { key: 'order.number', label: 'Номер заказа (если есть)' },
+      { key: 'referral.url', label: 'Ссылка на раздел бонусов в ЛК' },
+      { key: 'customer.greeting', label: 'Обращение' },
+      SNIPPET_CTA_SITE,
+    ],
+    defaultSubject: `Начисление {{referral.amount_label}} ожидает зачисления — ${MAIL_BRAND.name}`,
+    defaultBody: [
+      '{{customer.greeting}}на ваш реферальный баланс начислено {{referral.amount_label}} ({{referral.kind_label}}).',
+      '',
+      '{{#if order.number}}',
+      'Заказ: {{order.number}}',
+      '',
+      '{{/if}}',
+      'Сумма пока в статусе «Ожидает» — станет доступна после карантина (доставка / срок в настройках программы).',
+      '',
+      'Раздел бонусов: {{referral.url}}',
+      '',
+      '{{cta.site}}',
+    ].join('\n'),
+  },
+  {
+    key: 'referral_earn_posted',
+    label: 'Рефералка: баланс доступен',
+    description: 'PENDING → POSTED: сумма доступна для оплаты заказов.',
+    variables: [
+      { key: 'site.url', label: 'URL витрины' },
+      { key: 'site.name', label: 'Название бренда' },
+      { key: 'referral.amount_label', label: 'Сумма (с ₽)' },
+      { key: 'referral.kind_label', label: 'Тип: начисление / бонус' },
+      { key: 'order.number', label: 'Номер заказа (если есть)' },
+      { key: 'referral.url', label: 'Ссылка на раздел бонусов в ЛК' },
+      { key: 'customer.greeting', label: 'Обращение' },
+      SNIPPET_CTA_SITE,
+    ],
+    defaultSubject: `{{referral.amount_label}} доступны на реферальном балансе — ${MAIL_BRAND.name}`,
+    defaultBody: [
+      '{{customer.greeting}}{{referral.amount_label}} зачислены на доступный реферальный баланс ({{referral.kind_label}}).',
+      '',
+      '{{#if order.number}}',
+      'Заказ: {{order.number}}',
+      '',
+      '{{/if}}',
+      'Их можно списать при оформлении заказа вместо промокода или сертификата.',
+      '',
+      'Раздел бонусов: {{referral.url}}',
+      '',
+      '{{cta.site}}',
+    ].join('\n'),
+  },
+  {
+    key: 'referral_clawback',
+    label: 'Рефералка: списание начисления',
+    description: 'CLAWBACK после возврата/отмены заказа друга (или invitee bonus).',
+    variables: [
+      { key: 'site.url', label: 'URL витрины' },
+      { key: 'site.name', label: 'Название бренда' },
+      { key: 'referral.amount_label', label: 'Сумма списания (с ₽)' },
+      { key: 'order.number', label: 'Номер заказа (если есть)' },
+      { key: 'referral.url', label: 'Ссылка на раздел бонусов в ЛК' },
+      { key: 'customer.greeting', label: 'Обращение' },
+      SNIPPET_CTA_SITE,
+    ],
+    defaultSubject: `Списание {{referral.amount_label}} с реферального баланса — ${MAIL_BRAND.name}`,
+    defaultBody: [
+      '{{customer.greeting}}с реферального баланса списано {{referral.amount_label}} (возврат или отмена заказа по вашей ссылке).',
+      '',
+      '{{#if order.number}}',
+      'Заказ: {{order.number}}',
+      '',
+      '{{/if}}',
+      'Подробности — в истории бонусов личного кабинета.',
+      '',
+      'Раздел бонусов: {{referral.url}}',
       '',
       '{{cta.site}}',
     ].join('\n'),

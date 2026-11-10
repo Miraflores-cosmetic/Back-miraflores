@@ -27,7 +27,11 @@ export function scheduleAfterRlsCommit(fn: () => void | Promise<void>): void {
   store.afterCommit.push(fn);
 }
 
-/** Не блокирует HTTP-ответ: side effects (WS, SMTP) после commit. */
+/**
+ * Не блокирует HTTP-ответ: side effects (WS, SMTP) после commit.
+ * Ошибки только в warn — для критичных DB-эффектов (referral touch)
+ * caller сам пишет outbox/retry (см. ReferralWalletService.runScheduledTouch).
+ */
 export function flushAfterRlsCommit(jobs: Array<() => void | Promise<void>>): void {
   for (const job of jobs) {
     setImmediate(() => {

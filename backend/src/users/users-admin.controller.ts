@@ -65,10 +65,15 @@ export class UsersAdminController {
     return this.users.ensureReferralCode(id);
   }
 
-  /** Сменить код (инвалидирует старые ?mf=). */
+  /** Сменить код. Body `{ grace?: boolean }` — default false (отозвать aliases). */
   @Post(':id/referral/regenerate')
-  regenerateReferral(@Param('id') id: string) {
-    return this.users.regenerateReferralCode(id);
+  regenerateReferral(
+    @Param('id') id: string,
+    @Body() body?: { grace?: boolean },
+  ) {
+    return this.users.regenerateReferralCode(id, {
+      grace: body?.grace === true,
+    });
   }
 
   @Put(':id/referral/active')

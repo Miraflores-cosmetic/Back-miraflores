@@ -76,9 +76,17 @@ import { shouldSyncOrderToYourich } from '../yourich/yourich-lead';
 import { YourichSyncService } from '../yourich/yourich-sync.service';
 import { YourichClient } from '../yourich/yourich.client';
 import { normalizeReferralCode } from '../referral/referral-code';
-import { resolveReferralAttribution } from '../referral/referral-attribution';
-import { scheduleReferralTouch } from '../referral/referral-touch';
+import {
+  resolveReferralAttribution,
+  shippingFingerprintFromJson,
+} from '../referral/referral-attribution';
+import {
+  enqueueReferralTouchInTx,
+  scheduleReferralTouch,
+} from '../referral/referral-touch';
+import { ReferralCodeService } from '../referral/referral-code.service';
 import { ReferralWalletService } from '../referral/referral-wallet.service';
+import { ReferralStickyService } from '../referral/referral-sticky.service';
 
 type SyncedCartItem = {
   variantId: string;
@@ -138,6 +146,8 @@ export class OrdersPublicService {
     @Optional() private readonly yourichSync?: YourichSyncService,
     @Optional() private readonly yourichClient?: YourichClient,
     @Optional() private readonly referralWallet?: ReferralWalletService,
+    @Optional() private readonly referralSticky?: ReferralStickyService,
+    @Optional() private readonly referralCodes?: ReferralCodeService,
   ) {}
 
   private scheduleReferralTouch(orderId: string) {
@@ -648,10 +658,18 @@ export class OrdersPublicService {
       });
 
     /** MF referral (?mf=) — независимо от Yourich; earn в фазе 2. */
-    let referralAttribution: { code: string; referrerUserId: string } | null =
-      null;
+    let referralAttribution: {
+      code: string;
+      referrerUserId: string;
+      addressMatchSuspect: boolean;
+      addressMatchReason: string | null;
+    } | null = null;
     if (!giftOnly) {
-      const codeNorm = normalizeReferralCode(dto.referral?.code);
+      let codeNorm = normalizeReferralCode(dto.referral?.code);
+      // Sticky: другое устройство / очистка LS — код с User.referredBy* в пределах TTL.
+      if (!codeNorm && userId && this.referralSticky) {
+        codeNorm = await this.referralSticky.resolveCodeForUser(userId);
+      }
       if (codeNorm) {
         const buyerPhones: Array<string | null> = [
           phone,
@@ -670,22 +688,85 @@ export class OrdersPublicService {
             if (a.phone) buyerPhones.push(a.phone);
           }
         }
-        const referrer = await this.prisma.user.findFirst({
-          where: { referralCode: codeNorm },
-          select: {
-            id: true,
-            email: true,
-            phone: true,
-            referralCode: true,
-            referralCodeActive: true,
-            isActive: true,
-            addresses: { select: { phone: true } },
-          },
-        });
+        const resolved = this.referralCodes
+          ? await this.referralCodes.resolveByCode(codeNorm)
+          : null;
+        const referrerRow = resolved
+          ? await this.prisma.user.findUnique({
+              where: { id: resolved.userId },
+              select: {
+                id: true,
+                email: true,
+                phone: true,
+                referralCode: true,
+                referralCodeActive: true,
+                isActive: true,
+                addresses: {
+                  select: {
+                    phone: true,
+                    city: true,
+                    address: true,
+                    postalCode: true,
+                  },
+                },
+              },
+            })
+          : await this.prisma.user.findFirst({
+              where: { referralCode: codeNorm },
+              select: {
+                id: true,
+                email: true,
+                phone: true,
+                referralCode: true,
+                referralCodeActive: true,
+                isActive: true,
+                addresses: {
+                  select: {
+                    phone: true,
+                    city: true,
+                    address: true,
+                    postalCode: true,
+                  },
+                },
+              },
+            });
+        const referrer = referrerRow
+          ? {
+              ...referrerRow,
+              matchedByCodeAlias: resolved?.matchedByCodeAlias === true,
+            }
+          : null;
         const referrerPhones: Array<string | null> = [
           referrer?.phone ?? null,
           ...(referrer?.addresses.map((a) => a.phone) ?? []),
         ];
+        const buyerPvz =
+          resolvePvzCode(
+            dto.shippingAddress?.comment,
+            dto.shippingAddress?.pvzCode,
+          ) || null;
+        const profileShipments = (referrer?.addresses ?? []).map((a) => ({
+          city: a.city,
+          address: a.address,
+          postalCode: a.postalCode,
+          pvzCode: null as string | null,
+        }));
+        // Профиль без pvzCode → ПВЗ почти никогда не матчился. Берём прошлые заказы.
+        const orderShipments = referrer
+          ? (
+              await this.prisma.order.findMany({
+                where: {
+                  userId: referrer.id,
+                  shippingAddress: { not: Prisma.DbNull },
+                },
+                orderBy: { createdAt: 'desc' },
+                take: 40,
+                select: { shippingAddress: true },
+              })
+            )
+              .map((o) => shippingFingerprintFromJson(o.shippingAddress))
+              .filter((s): s is NonNullable<typeof s> => s != null)
+          : [];
         referralAttribution = resolveReferralAttribution({
           codeRaw: codeNorm,
           referrer,
@@ -693,6 +774,13 @@ export class OrdersPublicService {
           buyerEmail: email,
           buyerPhones,
           referrerPhones,
+          buyerShipping: {
+            city: dto.shippingAddress?.city,
+            address: dto.shippingAddress?.address,
+            postalCode: dto.shippingAddress?.postalCode,
+            pvzCode: buyerPvz,
+          },
+          referrerShipments: [...profileShipments, ...orderShipments],
         });
       }
     }
@@ -767,13 +855,13 @@ export class OrdersPublicService {
         throw new BadRequestException('Реферальный кошелёк временно недоступен');
       }
       const quote = await this.referralWallet.quoteSpend(userId, payableForGift);
-      if (!quote.enabled) {
-        throw new BadRequestException('Реферальная программа выключена');
-      }
+      // enabled=false гейтит earn, не spend — баланс можно списать.
       referralWalletAmount = quote.amount;
       if (referralWalletAmount < 1) {
         throw new BadRequestException(
-          'Недостаточно реферального баланса для списания',
+          quote.debt > 0
+            ? 'Реферальный баланс заблокирован: есть долг по clawback'
+            : 'Недостаточно реферального баланса для списания',
         );
       }
     }
@@ -1091,12 +1179,21 @@ export class OrdersPublicService {
             orderId: created.id,
             code: referralAttribution.code,
             referrerUserId: referralAttribution.referrerUserId,
+            addressMatchSuspect: referralAttribution.addressMatchSuspect,
+            addressMatchReason: referralAttribution.addressMatchReason,
           },
         });
       }
 
       return created;
     });
+
+    if (referralAttribution && userId && this.referralSticky) {
+      await this.referralSticky.stampIfEmpty(
+        userId,
+        referralAttribution.referrerUserId,
+      );
+    }
 
     this.assertIdempotentGuest(order, guestId);
 
@@ -1600,7 +1697,7 @@ export class OrdersPublicService {
     },
   ): Promise<MarkPaidOutcome> {
     const txResult = await this.prisma.$transaction(async (tx) => {
-      return applyPaidInTx(tx, this.lifecycle, orderId, {
+      const paid = await applyPaidInTx(tx, this.lifecycle, orderId, {
         kind: 'yandexpay',
         remote: {
           id: remote.id,
@@ -1608,6 +1705,10 @@ export class OrdersPublicService {
           status: remote.status,
         },
       });
+      if (paid.kind === 'paid') {
+        await enqueueReferralTouchInTx(tx, this.referralWallet, orderId);
+      }
+      return paid;
     });
 
     if (txResult.kind === 'already') return 'already';
@@ -2341,10 +2442,14 @@ export class OrdersPublicService {
     }
 
     const txResult = await this.prisma.$transaction(async (tx) => {
-      return applyPaidInTx(tx, this.lifecycle, orderId, {
+      const paid = await applyPaidInTx(tx, this.lifecycle, orderId, {
         kind: 'yookassa',
         remote,
       });
+      if (paid.kind === 'paid') {
+        await enqueueReferralTouchInTx(tx, this.referralWallet, orderId);
+      }
+      return paid;
     });
 
     if (txResult.kind === 'already') return 'already';

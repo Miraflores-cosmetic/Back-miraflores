@@ -84,7 +84,10 @@ import {
   type RemindMailByStage,
 } from './order-awaiting-payment-schedule';
 import { YourichSyncService } from '../yourich/yourich-sync.service';
-import { scheduleReferralTouch } from '../referral/referral-touch';
+import {
+  enqueueReferralTouchInTx,
+  scheduleReferralTouch,
+} from '../referral/referral-touch';
 import { ReferralWalletService } from '../referral/referral-wallet.service';
 import { OrdersPublicService } from './orders.public.service';
 
@@ -810,10 +813,14 @@ export class OrdersAdminService {
       );
     }
     const result = await this.prisma.$transaction(async (tx) => {
-      return applyPaidInTx(tx, this.lifecycle, id, {
+      const paid = await applyPaidInTx(tx, this.lifecycle, id, {
         kind: 'admin',
         actorUserId,
       });
+      if (paid.kind === 'paid') {
+        await enqueueReferralTouchInTx(tx, this.referralWallet, id);
+      }
+      return paid;
     });
 
     if (result.kind !== 'paid') {
@@ -1664,9 +1671,11 @@ export class OrdersAdminService {
    * Возврат: при providerRefund ЮKassa вызывается внутри tx до записи БД —
    * ошибка PSP откатывает транзакцию (нет «в системе возвращено / на карте нет»).
    *
-   * Политика gift/wallet: при redeem/purchase/wallet spend частичный card
-   * refund запрещён. RELEASE / revoke — только на полный возврат (нет
-   * proportional RELEASE). Ручная правка gift — в admin «Сертификаты».
+   * Политика gift/purchase: частичный card refund запрещён (нет proportional
+   * gift RELEASE / revoke кодов). Wallet: пропорциональный SPEND_RELEASE +
+   * уменьшение order.referralWalletAmount + рост referralWalletReleasedAmount
+   * (иначе вернувшийся credit снова попадает в commission-base).
+   * Ручная правка gift — в admin «Сертификаты».
    */
   async refund(
     id: string,
@@ -1702,7 +1711,8 @@ export class OrdersAdminService {
           ),
         );
         const giftApplied = (order.giftCertificateAmount ?? 0) > 0;
-        const walletApplied = (order.referralWalletAmount ?? 0) > 0;
+        const walletAmount = Math.max(0, Math.floor(order.referralWalletAmount ?? 0));
+        const walletApplied = walletAmount > 0;
         const isGiftPurchase = Boolean(order.giftPurchaseDenominationId);
         // Карта уже вся возвращена, но ещё можно открутить redeem / wallet / отозвать purchase-коды.
         if (
@@ -1737,18 +1747,12 @@ export class OrdersAdminService {
               `Сумма возврата должна быть от 1 до ${remainingCard} ₽`,
             );
           }
-          // Политика: gift / wallet / purchase — только полный card refund
-          // (нет proportional RELEASE; иначе hold остаётся в подвешенном состоянии).
-          if (
-            amount < remainingCard &&
-            (giftApplied || isGiftPurchase || walletApplied)
-          ) {
+          // Gift / purchase — только полный card refund. Wallet — proportional RELEASE ниже.
+          if (amount < remainingCard && (giftApplied || isGiftPurchase)) {
             throw new BadRequestException(
               giftApplied
                 ? 'Заказ с подарочным сертификатом: доступен только полный возврат. Частичный возврат картой не трогает резерв сертификата — оформите полный refund или скорректируйте баланс вручную в «Сертификаты».'
-                : walletApplied
-                  ? 'Заказ с реферальным балансом: доступен только полный возврат. Частичный возврат картой не делает RELEASE кошелька — оформите полный refund.'
-                  : 'Покупка сертификата: доступен только полный возврат (иначе выданные коды не отзовутся). Частичный возврат запрещён.',
+                : 'Покупка сертификата: доступен только полный возврат (иначе выданные коды не отзовутся). Частичный возврат запрещён.',
             );
           }
         }
@@ -1857,15 +1861,33 @@ export class OrdersAdminService {
 
         let giftReleased = false;
         let purchaseCodesRevoked = 0;
+        let walletReleased = 0;
         if (full && giftApplied) {
           giftReleased = await releaseGiftCertificateForOrder(tx, id, {
             note: 'Возврат при полном refund заказа',
           });
         }
-        if (full && this.referralWallet) {
-          await this.referralWallet.releaseSpendInTx(tx, id, {
-            note: 'Возврат реф. баланса при полном refund заказа',
-          });
+        if (this.referralWallet && walletAmount > 0) {
+          if (full) {
+            walletReleased = await this.referralWallet.releaseSpendInTx(tx, id, {
+              note: 'Возврат реф. баланса при полном refund заказа',
+            });
+          } else if (amount > 0 && remainingCard > 0) {
+            // Доля card-refund от ещё не возвращённой карты → та же доля wallet.
+            const proportional = Math.floor(
+              (walletAmount * amount) / remainingCard,
+            );
+            if (proportional >= 1) {
+              walletReleased = await this.referralWallet.releaseSpendInTx(
+                tx,
+                id,
+                {
+                  amount: proportional,
+                  note: `Пропорциональный RELEASE реф. баланса при частичном refund (${amount} ₽)`,
+                },
+              );
+            }
+          }
         }
         if (full && isGiftPurchase) {
           purchaseCodesRevoked = await revokeGiftCertificatesIssuedByPurchaseOrder(
@@ -1878,11 +1900,27 @@ export class OrdersAdminService {
           );
         }
 
+        const nextWalletAmount = full
+          ? 0
+          : Math.max(0, walletAmount - walletReleased);
+        const prevReleased = Math.max(
+          0,
+          Math.floor(order.referralWalletReleasedAmount ?? 0),
+        );
+        const nextWalletReleased =
+          walletReleased > 0 ? prevReleased + walletReleased : prevReleased;
+
         await tx.order.update({
           where: { id },
           data: {
             refundedAmount: newRefunded,
             status: nextStatus,
+            ...(walletAmount > 0 || walletReleased > 0
+              ? {
+                  referralWalletAmount: nextWalletAmount,
+                  referralWalletReleasedAmount: nextWalletReleased,
+                }
+              : {}),
           },
         });
 
@@ -1923,6 +1961,8 @@ export class OrdersAdminService {
             providerStatus: providerRefundStatus,
           },
         });
+
+        await enqueueReferralTouchInTx(tx, this.referralWallet, id);
 
         return {
           amount,
@@ -2038,6 +2078,8 @@ export class OrdersAdminService {
         actorUserId,
         meta: { before, after },
       });
+      // In-tx outbox: иначе crash между commit и after-commit → stale PENDING earn.
+      await enqueueReferralTouchInTx(tx, this.referralWallet, id);
     });
 
     this.scheduleYourichTouch(id);
@@ -2244,6 +2286,8 @@ export class OrdersAdminService {
         mailPayload.number = order.number;
         mailPayload.summary = summary;
       }
+      // In-tx outbox: иначе crash между commit и after-commit → stale PENDING earn.
+      await enqueueReferralTouchInTx(tx, this.referralWallet, id);
     });
 
     if (pendingExternalIds.length) {
@@ -2482,6 +2526,8 @@ export class OrdersAdminService {
         mailPayload.number = order.number;
         mailPayload.summary = summary;
       }
+      // In-tx outbox: иначе crash между commit и after-commit → stale PENDING earn.
+      await enqueueReferralTouchInTx(tx, this.referralWallet, id);
     });
 
     if (pendingExternalIds.length) {
@@ -2719,6 +2765,8 @@ export class OrdersAdminService {
         mailPayload.number = order.number;
         mailPayload.summary = summary;
       }
+      // In-tx outbox: иначе crash между commit и after-commit → stale PENDING earn.
+      await enqueueReferralTouchInTx(tx, this.referralWallet, id);
     });
 
     if (pendingExternalIds.length) {
@@ -3108,6 +3156,7 @@ export class OrdersAdminService {
         actorUserId,
         meta: { from: order.status, to },
       });
+      await enqueueReferralTouchInTx(tx, this.referralWallet, id);
     });
 
     scheduleAfterRlsCommitWithBypass(this.prisma, () =>

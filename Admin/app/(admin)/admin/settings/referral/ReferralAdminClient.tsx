@@ -34,17 +34,57 @@ const SETTINGS_FORM_ID = 'referral-settings-form';
 const SHARE_PREVIEW_LINK = 'https://miraflores-shop.com/?mf=ABCD2345';
 const SHARE_PREVIEW_CODE = 'ABCD2345';
 
-type ReferralTabId = 'settings' | 'adjust' | 'referrers';
+type ReferralTabId = 'settings' | 'funnel' | 'adjust' | 'referrers';
 
 const REFERRAL_TABS: Array<{ id: ReferralTabId; label: string }> = [
   { id: 'settings', label: 'Настройки программы' },
+  { id: 'funnel', label: 'Воронка' },
   { id: 'adjust', label: 'Корректировки' },
   { id: 'referrers', label: 'Рефереры' },
 ];
 
 function parseReferralTab(raw: string | null): ReferralTabId {
-  if (raw === 'adjust' || raw === 'referrers' || raw === 'settings') return raw;
+  if (
+    raw === 'adjust' ||
+    raw === 'referrers' ||
+    raw === 'settings' ||
+    raw === 'funnel'
+  ) {
+    return raw;
+  }
   return 'settings';
+}
+
+type FunnelApi = {
+  period: { kind: string; fromDate: string; toDate: string };
+  totals: { visits: number; sticky: number; orders: number; paid: number };
+  rates: {
+    visitToSticky: number | null;
+    stickyToOrder: number | null;
+    orderToPaid: number | null;
+    visitToPaid: number | null;
+  };
+  topCodes: Array<{
+    code: string;
+    referrerUserId: string | null;
+    referrerEmail: string | null;
+    visits: number;
+    sticky: number;
+    orders: number;
+    paid: number;
+  }>;
+  series: Array<{
+    day: string;
+    visits: number;
+    sticky: number;
+    orders: number;
+    paid: number;
+  }>;
+};
+
+function formatRate(v: number | null): string {
+  if (v == null) return '—';
+  return `${v.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}%`;
 }
 
 type ReferralSettingsApi = {
@@ -52,13 +92,16 @@ type ReferralSettingsApi = {
   enabledAt: string | null;
   earnPercent: number;
   earnMode: 'EVERY' | 'FIRST_GOODS_ORDER';
+  earnWindowMaxOrders: number;
+  earnWindowDays: number;
   linkTtlDays: number;
   minOrderRub: number;
-  quarantineMode: 'DELIVERED' | 'DAYS_AFTER_PAID';
+  quarantineMode: 'DELIVERED' | 'DAYS_AFTER_PAID' | 'DELIVERED_PLUS_DAYS';
   quarantineDays: number;
   inviteeBonusEnabled: boolean;
   inviteeBonusRub: number;
   spendCapPercent: number;
+  monthlyEarnCapRub: number;
   shareText: string;
   updatedAt: string;
 };
@@ -77,6 +120,46 @@ type ReferrerRow = {
   earnedNet: number;
   /** |invitee CLAWBACK| — отдельно от Net. */
   inviteeClawback?: number;
+  invitees: number;
+  gmv: number;
+};
+
+type ReferrerSort = 'earned' | 'invitees' | 'gmv' | 'id';
+
+type LiabilityApi = {
+  available: number;
+  pending: number;
+  liability: number;
+  debt: number;
+};
+
+type DeadTouchRow = {
+  orderId: string;
+  orderNumber: string | null;
+  attempts: number;
+  lastError: string | null;
+  updatedAt: string;
+};
+
+type AddressMatchRow = {
+  orderId: string;
+  orderNumber: string | null;
+  orderStatus: string;
+  code: string;
+  referrerUserId: string;
+  referrerEmail: string | null;
+  addressMatchReason: string | null;
+  pendingEarn: number;
+  pendingInviteeBonus: number;
+  createdAt: string;
+};
+
+type SettingsRevisionRow = {
+  id: string;
+  createdAt: string;
+  actorUserId: string | null;
+  actorEmail: string | null;
+  snapshot: ReferralSettingsApi;
 };
 
 function newAdjustIdempotencyKey() {
@@ -124,25 +207,56 @@ export function ReferralAdminClient() {
   const [enabled, setEnabled] = useState(false);
   const [enabledAt, setEnabledAt] = useState<string | null>(null);
   const [earnPercent, setEarnPercent] = useState('5');
-  const [earnMode, setEarnMode] = useState<'EVERY' | 'FIRST_GOODS_ORDER'>('EVERY');
+  const [earnMode, setEarnMode] = useState<'EVERY' | 'FIRST_GOODS_ORDER'>(
+    'FIRST_GOODS_ORDER',
+  );
+  const [earnWindowMaxOrders, setEarnWindowMaxOrders] = useState('0');
+  const [earnWindowDays, setEarnWindowDays] = useState('90');
   const [linkTtlDays, setLinkTtlDays] = useState('60');
   const [minOrderRub, setMinOrderRub] = useState('0');
   const [quarantineMode, setQuarantineMode] = useState<
-    'DELIVERED' | 'DAYS_AFTER_PAID'
+    'DELIVERED' | 'DAYS_AFTER_PAID' | 'DELIVERED_PLUS_DAYS'
   >('DELIVERED');
   const [quarantineDays, setQuarantineDays] = useState('7');
   const [inviteeBonusEnabled, setInviteeBonusEnabled] = useState(false);
   const [inviteeBonusRub, setInviteeBonusRub] = useState('0');
   const [spendCapPercent, setSpendCapPercent] = useState('100');
+  const [monthlyEarnCapRub, setMonthlyEarnCapRub] = useState('0');
   const [shareText, setShareText] = useState('');
 
   const [referrers, setReferrers] = useState<ReferrerRow[]>([]);
   const [refQ, setRefQ] = useState('');
   /** Применённый q (только после «Найти»); «Ещё» пагинирует по нему. */
   const [appliedQ, setAppliedQ] = useState('');
-  const [refCursor, setRefCursor] = useState<string | null>(null);
+  const [refOffset, setRefOffset] = useState(0);
+  const [refNextOffset, setRefNextOffset] = useState<number | null>(null);
+  const [refSort, setRefSort] = useState<ReferrerSort>('earned');
+  const [refDir, setRefDir] = useState<'asc' | 'desc'>('desc');
   const [refLoading, setRefLoading] = useState(false);
+  const [liability, setLiability] = useState<LiabilityApi | null>(null);
+  const [deadTouches, setDeadTouches] = useState<{
+    count: number;
+    items: DeadTouchRow[];
+  } | null>(null);
+  const [deadBusyId, setDeadBusyId] = useState<string | null>(null);
+  const [addressMatches, setAddressMatches] = useState<{
+    count: number;
+    items: AddressMatchRow[];
+  } | null>(null);
+  const [addressBusyId, setAddressBusyId] = useState<string | null>(null);
+  const [revisions, setRevisions] = useState<SettingsRevisionRow[]>([]);
+
+  const [funnel, setFunnel] = useState<FunnelApi | null>(null);
+  const [funnelPeriod, setFunnelPeriod] = useState<
+    'today' | 'last_7' | 'month' | 'custom'
+  >('last_7');
+  const [funnelFrom, setFunnelFrom] = useState('');
+  const [funnelTo, setFunnelTo] = useState('');
+  const [funnelLoading, setFunnelLoading] = useState(false);
+  const [funnelError, setFunnelError] = useState<string | null>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
+  /** При regenerate: true = оставить старые ?mf= на TTL (grace). */
+  const [regenKeepGrace, setRegenKeepGrace] = useState(false);
   const [confirm, setConfirm] = useState<
     | { type: 'disable'; row: ReferrerRow }
     | { type: 'regenerate'; row: ReferrerRow }
@@ -170,6 +284,8 @@ export function ReferralAdminClient() {
     setEnabledAt(data.enabledAt);
     setEarnPercent(String(data.earnPercent));
     setEarnMode(data.earnMode);
+    setEarnWindowMaxOrders(String(data.earnWindowMaxOrders ?? 0));
+    setEarnWindowDays(String(data.earnWindowDays ?? 90));
     setLinkTtlDays(String(data.linkTtlDays));
     setMinOrderRub(String(data.minOrderRub));
     setQuarantineMode(data.quarantineMode);
@@ -177,6 +293,7 @@ export function ReferralAdminClient() {
     setInviteeBonusEnabled(data.inviteeBonusEnabled);
     setInviteeBonusRub(String(data.inviteeBonusRub));
     setSpendCapPercent(String(data.spendCapPercent));
+    setMonthlyEarnCapRub(String(data.monthlyEarnCapRub ?? 0));
     setShareText(data.shareText ?? '');
   }, []);
 
@@ -201,23 +318,138 @@ export function ReferralAdminClient() {
     }
   }, [applySettings]);
 
+  const loadLiability = useCallback(async () => {
+    try {
+      const data = await adminBackendJson<LiabilityApi>(
+        'settings/admin/referral/liability',
+      );
+      setLiability(data);
+    } catch {
+      setLiability(null);
+    }
+  }, []);
+
+  const loadDeadTouches = useCallback(async () => {
+    try {
+      const data = await adminBackendJson<{
+        count: number;
+        items: DeadTouchRow[];
+      }>('settings/admin/referral/touches/dead?limit=20');
+      setDeadTouches(data);
+    } catch {
+      setDeadTouches(null);
+    }
+  }, []);
+
+  const loadAddressMatches = useCallback(async () => {
+    try {
+      const data = await adminBackendJson<{
+        count: number;
+        items: AddressMatchRow[];
+      }>('settings/admin/referral/address-matches?limit=30');
+      setAddressMatches(data);
+    } catch {
+      setAddressMatches(null);
+    }
+  }, []);
+
+  const requeueDead = useCallback(
+    async (orderId: string) => {
+      if (deadBusyId) return;
+      setDeadBusyId(orderId);
+      try {
+        await adminBackendJson(
+          `settings/admin/referral/touches/${orderId}/requeue`,
+          { method: 'POST' },
+        );
+        showToast('Touch поставлен в очередь', 'success');
+        await loadDeadTouches();
+      } catch (e) {
+        showToast(
+          e instanceof AdminBackendRequestError ? e.message : 'Ошибка retry',
+          'error',
+        );
+      } finally {
+        setDeadBusyId(null);
+      }
+    },
+    [deadBusyId, loadDeadTouches, showToast],
+  );
+
+  const resolveAddressMatch = useCallback(
+    async (orderId: string, action: 'approve' | 'reject') => {
+      if (addressBusyId) return;
+      setAddressBusyId(orderId);
+      try {
+        await adminBackendJson(
+          `settings/admin/referral/orders/${orderId}/${action}-address`,
+          { method: 'POST' },
+        );
+        showToast(
+          action === 'approve' ? 'Начисление разрешено' : 'Начисление отклонено',
+          'success',
+        );
+        await Promise.all([loadAddressMatches(), loadLiability()]);
+      } catch (e) {
+        showToast(
+          e instanceof AdminBackendRequestError
+            ? e.message
+            : action === 'approve'
+              ? 'Не удалось разрешить'
+              : 'Не удалось отклонить',
+          'error',
+        );
+      } finally {
+        setAddressBusyId(null);
+      }
+    },
+    [addressBusyId, loadAddressMatches, loadLiability, showToast],
+  );
+
+  const loadRevisions = useCallback(async () => {
+    try {
+      const data = await adminBackendJson<{ items: SettingsRevisionRow[] }>(
+        'settings/admin/referral/revisions?limit=15',
+      );
+      setRevisions(data.items);
+    } catch {
+      setRevisions([]);
+    }
+  }, []);
+
   const loadReferrers = useCallback(
-    async (opts?: { append?: boolean; cursor?: string | null; q?: string }) => {
+    async (opts?: {
+      append?: boolean;
+      offset?: number;
+      q?: string;
+      sort?: ReferrerSort;
+      dir?: 'asc' | 'desc';
+    }) => {
       setRefLoading(true);
       try {
         const sp = new URLSearchParams();
         sp.set('limit', '20');
         const q = opts?.q ?? appliedQ;
+        const sort = opts?.sort ?? refSort;
+        const dir = opts?.dir ?? refDir;
+        const offset = opts?.append
+          ? (opts.offset ?? refNextOffset ?? 0)
+          : (opts?.offset ?? 0);
         if (q.trim()) sp.set('q', q.trim());
-        if (opts?.append && opts.cursor) sp.set('cursor', opts.cursor);
+        sp.set('sort', sort);
+        sp.set('dir', dir);
+        if (offset > 0) sp.set('offset', String(offset));
         const page = await adminBackendJson<{
           items: ReferrerRow[];
-          nextCursor: string | null;
+          nextOffset: number | null;
+          sort: ReferrerSort;
+          dir: 'asc' | 'desc';
         }>(`settings/admin/referral/referrers?${sp}`);
         setReferrers((prev) =>
           opts?.append ? [...prev, ...page.items] : page.items,
         );
-        setRefCursor(page.nextCursor);
+        setRefOffset(offset);
+        setRefNextOffset(page.nextOffset);
       } catch (e) {
         showToast(
           e instanceof AdminBackendRequestError
@@ -228,14 +460,49 @@ export function ReferralAdminClient() {
         setRefLoading(false);
       }
     },
-    [appliedQ, showToast],
+    [appliedQ, refDir, refNextOffset, refSort, showToast],
   );
+
+  const loadFunnel = useCallback(async () => {
+    setFunnelLoading(true);
+    setFunnelError(null);
+    try {
+      const sp = new URLSearchParams();
+      sp.set('period', funnelPeriod);
+      if (funnelPeriod === 'custom') {
+        if (funnelFrom.trim()) sp.set('from', funnelFrom.trim());
+        if (funnelTo.trim()) sp.set('to', funnelTo.trim());
+      }
+      sp.set('topLimit', '20');
+      const data = await adminBackendJson<FunnelApi>(
+        `settings/admin/referral/funnel?${sp}`,
+      );
+      setFunnel(data);
+    } catch (e) {
+      setFunnel(null);
+      setFunnelError(
+        e instanceof AdminBackendRequestError
+          ? e.message
+          : 'Не удалось загрузить воронку',
+      );
+    } finally {
+      setFunnelLoading(false);
+    }
+  }, [funnelPeriod, funnelFrom, funnelTo]);
 
   useEffect(() => {
     void loadSettings();
+    void loadLiability();
+    void loadDeadTouches();
+    void loadAddressMatches();
+    void loadRevisions();
     void loadReferrers();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- initial mount
   }, []);
+
+  useEffect(() => {
+    if (tab === 'funnel') void loadFunnel();
+  }, [tab, loadFunnel]);
 
   function markDirty() {
     setDirty(true);
@@ -255,6 +522,8 @@ export function ReferralAdminClient() {
             enabled,
             earnPercent: Math.floor(Number(earnPercent) || 0),
             earnMode,
+            earnWindowMaxOrders: Math.floor(Number(earnWindowMaxOrders) || 0),
+            earnWindowDays: Math.floor(Number(earnWindowDays) || 0),
             linkTtlDays: Math.floor(Number(linkTtlDays) || 1),
             minOrderRub: Math.floor(Number(minOrderRub) || 0),
             quarantineMode,
@@ -265,6 +534,7 @@ export function ReferralAdminClient() {
               100,
               Math.max(1, Math.floor(Number(spendCapPercent) || 1)),
             ),
+            monthlyEarnCapRub: Math.floor(Number(monthlyEarnCapRub) || 0),
             shareText,
           }),
         },
@@ -272,6 +542,8 @@ export function ReferralAdminClient() {
       applySettings(data);
       setDirty(false);
       showToast('Настройки сохранены');
+      void loadRevisions();
+      void loadLiability();
     } catch (err) {
       showToast(
         err instanceof AdminBackendRequestError
@@ -311,6 +583,7 @@ export function ReferralAdminClient() {
   }
 
   function requestRegenerate(row: ReferrerRow) {
+    setRegenKeepGrace(false);
     setConfirm({ type: 'regenerate', row });
   }
 
@@ -321,10 +594,15 @@ export function ReferralAdminClient() {
       if (confirm.type === 'disable') {
         await setActive(confirm.row, false);
       } else {
-        const res = await adminBackendJson<{ code: string; active: boolean }>(
-          `settings/admin/referral/users/${confirm.row.userId}/regenerate`,
-          { method: 'POST' },
-        );
+        const res = await adminBackendJson<{
+          code: string;
+          active: boolean;
+          grace: boolean;
+        }>(`settings/admin/referral/users/${confirm.row.userId}/regenerate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ grace: regenKeepGrace }),
+        });
         setReferrers((prev) =>
           prev.map((r) =>
             r.userId === confirm.row.userId
@@ -332,7 +610,11 @@ export function ReferralAdminClient() {
               : r,
           ),
         );
-        showToast(`Новый код: ${res.code}`);
+        showToast(
+          res.grace
+            ? `Новый код: ${res.code} (старые ссылки ещё в grace)`
+            : `Новый код: ${res.code} (старые ссылки отозваны)`,
+        );
       }
       setConfirm(null);
     } catch (e) {
@@ -444,6 +726,122 @@ export function ReferralAdminClient() {
         </div>
       ) : null}
 
+      {liability ? (
+        <div className={styles.kpiGrid} style={{ marginBottom: 16 }}>
+          <div className={styles.kpi}>
+            <div className={styles.kpiValue}>
+              {formatAdminMoney(liability.liability)}
+            </div>
+            <div>Обязательства (available + pending)</div>
+          </div>
+          <div className={styles.kpi}>
+            <div className={styles.kpiValue}>
+              {formatAdminMoney(liability.available)}
+            </div>
+            <div>Доступно к списанию</div>
+          </div>
+          <div className={styles.kpi}>
+            <div className={styles.kpiValue}>
+              {formatAdminMoney(liability.pending)}
+            </div>
+            <div>В карантине</div>
+          </div>
+          <div className={styles.kpi}>
+            <div className={styles.kpiValue}>
+              {formatAdminMoney(liability.debt)}
+            </div>
+            <div>Долг clawback</div>
+          </div>
+          {deadTouches && deadTouches.count > 0 ? (
+            <div className={styles.kpi}>
+              <div className={styles.kpiValue}>{deadTouches.count}</div>
+              <div>Touch DEAD (лимит попыток)</div>
+            </div>
+          ) : null}
+          {addressMatches && addressMatches.count > 0 ? (
+            <div className={styles.kpi}>
+              <div className={styles.kpiValue}>{addressMatches.count}</div>
+              <div>Подозрение self-ref</div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {addressMatches && addressMatches.count > 0 ? (
+        <section className={styles.faqCard} style={{ marginBottom: 16 }}>
+          <h2 className={pn.placementHeading}>
+            Подозрительные заказы ({addressMatches.count})
+          </h2>
+          <p className={styles.enabledAtMeta} style={{ marginTop: 0 }}>
+            Совпадение адреса/ПВЗ с реферером — начисления удерживаются до
+            решения.
+          </p>
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {addressMatches.items.map((row) => (
+              <li key={row.orderId} style={{ marginBottom: 10 }}>
+                <Link href={`/admin/orders/${row.orderId}`}>
+                  {row.orderNumber || shortUserId(row.orderId)}
+                </Link>
+                {' · '}
+                {row.referrerEmail || shortUserId(row.referrerUserId)}
+                {row.addressMatchReason ? ` · ${row.addressMatchReason}` : ''}
+                {' · earn '}
+                {formatAdminMoney(row.pendingEarn)}
+                {row.pendingInviteeBonus > 0
+                  ? ` · invitee ${formatAdminMoney(row.pendingInviteeBonus)}`
+                  : ''}
+                {' '}
+                <AdminCompactBtn
+                  type="button"
+                  variant="outline"
+                  disabled={addressBusyId === row.orderId}
+                  onClick={() => void resolveAddressMatch(row.orderId, 'approve')}
+                >
+                  {addressBusyId === row.orderId ? '…' : 'Разрешить'}
+                </AdminCompactBtn>{' '}
+                <AdminCompactBtn
+                  type="button"
+                  variant="outline"
+                  disabled={addressBusyId === row.orderId}
+                  onClick={() => void resolveAddressMatch(row.orderId, 'reject')}
+                >
+                  Отклонить
+                </AdminCompactBtn>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {deadTouches && deadTouches.count > 0 ? (
+        <section className={styles.faqCard} style={{ marginBottom: 16 }}>
+          <h2 className={pn.placementHeading}>
+            Зависшие touch ({deadTouches.count})
+          </h2>
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {deadTouches.items.map((row) => (
+              <li key={row.orderId} style={{ marginBottom: 8 }}>
+                <Link href={`/admin/orders/${row.orderId}`}>
+                  {row.orderNumber || shortUserId(row.orderId)}
+                </Link>
+                {' · '}
+                {row.attempts} попыток
+                {row.lastError ? ` — ${row.lastError.slice(0, 120)}` : ''}
+                {' '}
+                <AdminCompactBtn
+                  type="button"
+                  variant="outline"
+                  disabled={deadBusyId === row.orderId}
+                  onClick={() => void requeueDead(row.orderId)}
+                >
+                  {deadBusyId === row.orderId ? '…' : 'Retry'}
+                </AdminCompactBtn>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       <AdminTabs
         ariaLabel="Разделы реферальной программы"
         items={REFERRAL_TABS}
@@ -497,11 +895,33 @@ export function ReferralAdminClient() {
                     markDirty();
                   }}
                 >
-                  <option value="EVERY">Каждый оплаченный товарный заказ</option>
                   <option value="FIRST_GOODS_ORDER">
                     Только первый товарный заказ покупателя
                   </option>
+                  <option value="EVERY">
+                    Каждый оплаченный товарный заказ (+ окно ниже)
+                  </option>
                 </AdminSelect>
+                <AdminTextField
+                  label="EVERY: макс. заказов в окне (0 = без лимита)"
+                  value={earnWindowMaxOrders}
+                  onChange={(e) => {
+                    setEarnWindowMaxOrders(e.target.value.replace(/\D/g, ''));
+                    markDirty();
+                  }}
+                  inputMode="numeric"
+                  disabled={earnMode !== 'EVERY'}
+                />
+                <AdminTextField
+                  label="EVERY: окно от первой покупки, дни (0 = lifetime)"
+                  value={earnWindowDays}
+                  onChange={(e) => {
+                    setEarnWindowDays(e.target.value.replace(/\D/g, ''));
+                    markDirty();
+                  }}
+                  inputMode="numeric"
+                  disabled={earnMode !== 'EVERY'}
+                />
                 <AdminTextField
                   label="Мин. сумма заказа для начисления ₽"
                   value={minOrderRub}
@@ -520,6 +940,15 @@ export function ReferralAdminClient() {
                   }}
                   inputMode="numeric"
                 />
+                <AdminTextField
+                  label="Месячный cap начислений рефереру ₽ (0 = без лимита)"
+                  value={monthlyEarnCapRub}
+                  onChange={(e) => {
+                    setMonthlyEarnCapRub(e.target.value.replace(/\D/g, ''));
+                    markDirty();
+                  }}
+                  inputMode="numeric"
+                />
               </div>
             </section>
 
@@ -531,25 +960,38 @@ export function ReferralAdminClient() {
                   value={quarantineMode}
                   onChange={(e) => {
                     setQuarantineMode(
-                      e.target.value as 'DELIVERED' | 'DAYS_AFTER_PAID',
+                      e.target.value as
+                        | 'DELIVERED'
+                        | 'DAYS_AFTER_PAID'
+                        | 'DELIVERED_PLUS_DAYS',
                     );
                     markDirty();
                   }}
                 >
                   <option value="DELIVERED">Когда заказ «Доставлен»</option>
+                  <option value="DELIVERED_PLUS_DAYS">
+                    Через N дней после «Доставлен» (окно возврата)
+                  </option>
                   <option value="DAYS_AFTER_PAID">
                     Через N дней после статуса «Оплачен»
                   </option>
                 </AdminSelect>
                 <AdminTextField
-                  label="Дней после «Оплачен»"
+                  label={
+                    quarantineMode === 'DELIVERED_PLUS_DAYS'
+                      ? 'Дней после «Доставлен»'
+                      : 'Дней после «Оплачен»'
+                  }
                   value={quarantineDays}
                   onChange={(e) => {
                     setQuarantineDays(e.target.value.replace(/\D/g, ''));
                     markDirty();
                   }}
                   inputMode="numeric"
-                  disabled={quarantineMode !== 'DAYS_AFTER_PAID'}
+                  disabled={
+                    quarantineMode !== 'DAYS_AFTER_PAID' &&
+                    quarantineMode !== 'DELIVERED_PLUS_DAYS'
+                  }
                 />
               </div>
             </section>
@@ -609,7 +1051,204 @@ export function ReferralAdminClient() {
               <p className={styles.sharePreviewLabel}>Превью</p>
               <p className={styles.sharePreview}>{sharePreview}</p>
             </section>
+
+            <section className={styles.faqCard}>
+              <h2 className={pn.placementHeading}>История изменений</h2>
+              <AdminTabsLead>
+                Снимок настроек до правки (% / режим / карантин и т.д.).
+              </AdminTabsLead>
+              {revisions.length === 0 ? (
+                <p className={catalogStyles.lead}>Пока нет записей аудита.</p>
+              ) : (
+                <div className={catalogStyles.tableWrap}>
+                  <table className={catalogStyles.table}>
+                    <thead>
+                      <tr>
+                        <th>Когда</th>
+                        <th>Кто</th>
+                        <th>Было</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {revisions.map((r) => (
+                        <tr key={r.id}>
+                          <td>{formatAdminDateTime(r.createdAt)}</td>
+                          <td>{r.actorEmail || r.actorUserId || '—'}</td>
+                          <td className={catalogStyles.muted}>
+                            {r.snapshot.enabled ? 'вкл' : 'выкл'} ·{' '}
+                            {r.snapshot.earnPercent}% · {r.snapshot.earnMode} ·{' '}
+                            {r.snapshot.quarantineMode}
+                            {r.snapshot.quarantineMode !== 'DELIVERED'
+                              ? `/${r.snapshot.quarantineDays}д`
+                              : ''}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
           </form>
+        </AdminTabsPanel>
+      ) : null}
+
+      {tab === 'funnel' ? (
+        <AdminTabsPanel>
+          <section className={styles.faqCard}>
+            <h2 className={pn.placementHeading}>Воронка ?mf=</h2>
+            <AdminTabsLead>
+              Клик (beacon) → sticky/регистрация → заказ с attribution → оплата.
+              Дни — календарь Europe/Moscow.
+            </AdminTabsLead>
+            <div className={styles.heroImages}>
+              <AdminSelect
+                label="Период"
+                value={funnelPeriod}
+                onChange={(e) =>
+                  setFunnelPeriod(
+                    e.target.value as 'today' | 'last_7' | 'month' | 'custom',
+                  )
+                }
+              >
+                <option value="today">Сегодня</option>
+                <option value="last_7">7 дней</option>
+                <option value="month">Этот месяц</option>
+                <option value="custom">Свой период</option>
+              </AdminSelect>
+              {funnelPeriod === 'custom' ? (
+                <>
+                  <AdminTextField
+                    label="С (YYYY-MM-DD)"
+                    value={funnelFrom}
+                    onChange={(e) => setFunnelFrom(e.target.value)}
+                  />
+                  <AdminTextField
+                    label="По (YYYY-MM-DD)"
+                    value={funnelTo}
+                    onChange={(e) => setFunnelTo(e.target.value)}
+                  />
+                </>
+              ) : null}
+              <div className={styles.formActionsEnd}>
+                <AdminCompactBtn
+                  type="button"
+                  variant="outline"
+                  disabled={funnelLoading}
+                  onClick={() => void loadFunnel()}
+                >
+                  {funnelLoading ? 'Загрузка…' : 'Обновить'}
+                </AdminCompactBtn>
+              </div>
+            </div>
+            {funnelError ? (
+              <p className={catalogStyles.lead} role="alert">
+                {funnelError}
+              </p>
+            ) : null}
+            {funnel ? (
+              <>
+                <p className={styles.enabledAtMeta}>
+                  {funnel.period.fromDate}
+                  {funnel.period.fromDate !== funnel.period.toDate
+                    ? ` — ${funnel.period.toDate}`
+                    : ''}
+                </p>
+                <div className={styles.kpiGrid}>
+                  <div className={styles.kpi}>
+                    <div className={styles.kpiValue}>
+                      {funnel.totals.visits.toLocaleString('ru-RU')}
+                    </div>
+                    <div>Клики</div>
+                  </div>
+                  <div className={styles.kpi}>
+                    <div className={styles.kpiValue}>
+                      {funnel.totals.sticky.toLocaleString('ru-RU')}
+                    </div>
+                    <div>
+                      Sticky{' '}
+                      <span className={styles.kpiBadge}>
+                        {formatRate(funnel.rates.visitToSticky)}
+                      </span>
+                    </div>
+                  </div>
+                  <div className={styles.kpi}>
+                    <div className={styles.kpiValue}>
+                      {funnel.totals.orders.toLocaleString('ru-RU')}
+                    </div>
+                    <div>
+                      Заказы{' '}
+                      <span className={styles.kpiBadge}>
+                        {formatRate(funnel.rates.stickyToOrder)}
+                      </span>
+                    </div>
+                  </div>
+                  <div className={styles.kpi}>
+                    <div className={styles.kpiValue}>
+                      {funnel.totals.paid.toLocaleString('ru-RU')}
+                    </div>
+                    <div>
+                      Оплачено{' '}
+                      <span className={styles.kpiBadge}>
+                        {formatRate(funnel.rates.orderToPaid)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <p className={styles.enabledAtMeta}>
+                  Клик → оплата: {formatRate(funnel.rates.visitToPaid)}
+                </p>
+
+                <h3 className={pn.placementHeading}>Топ кодов</h3>
+                {funnel.topCodes.length === 0 ? (
+                  <p className={catalogStyles.lead}>
+                    Пока нет кликов за период. Откройте витрину с ?mf=CODE.
+                  </p>
+                ) : (
+                  <div className={catalogStyles.tableWrap}>
+                    <table className={catalogStyles.table}>
+                      <thead>
+                        <tr>
+                          <th>Код</th>
+                          <th>Реферер</th>
+                          <th>Клики</th>
+                          <th>Sticky</th>
+                          <th>Заказы</th>
+                          <th>Оплачено</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {funnel.topCodes.map((row) => (
+                          <tr key={row.code}>
+                            <td>
+                              <code>{row.code}</code>
+                            </td>
+                            <td>
+                              {row.referrerUserId ? (
+                                <Link
+                                  href={`/admin/users/${row.referrerUserId}`}
+                                >
+                                  {row.referrerEmail ?? shortUserId(row.referrerUserId)}
+                                </Link>
+                              ) : (
+                                '—'
+                              )}
+                            </td>
+                            <td>{row.visits.toLocaleString('ru-RU')}</td>
+                            <td>{row.sticky.toLocaleString('ru-RU')}</td>
+                            <td>{row.orders.toLocaleString('ru-RU')}</td>
+                            <td>{row.paid.toLocaleString('ru-RU')}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            ) : funnelLoading ? (
+              <p className={catalogStyles.lead}>Загрузка воронки…</p>
+            ) : null}
+          </section>
         </AdminTabsPanel>
       ) : null}
 
@@ -664,17 +1303,47 @@ export function ReferralAdminClient() {
                 value={refQ}
                 onChange={(e) => {
                   setRefQ(e.target.value);
-                  setRefCursor(null);
                 }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
                     setAppliedQ(refQ);
-                    setRefCursor(null);
-                    void loadReferrers({ q: refQ });
+                    setRefOffset(0);
+                    setRefNextOffset(null);
+                    void loadReferrers({ q: refQ, offset: 0 });
                   }
                 }}
               />
+              <AdminSelect
+                label="Сортировка"
+                value={refSort}
+                onChange={(e) => {
+                  const next = e.target.value as ReferrerSort;
+                  setRefSort(next);
+                  setRefOffset(0);
+                  setRefNextOffset(null);
+                  void loadReferrers({ sort: next, offset: 0 });
+                }}
+              >
+                <option value="earned">Earned</option>
+                <option value="invitees">Приглашённые</option>
+                <option value="gmv">GMV</option>
+                <option value="id">ID</option>
+              </AdminSelect>
+              <AdminSelect
+                label="Направление"
+                value={refDir}
+                onChange={(e) => {
+                  const next = e.target.value as 'asc' | 'desc';
+                  setRefDir(next);
+                  setRefOffset(0);
+                  setRefNextOffset(null);
+                  void loadReferrers({ dir: next, offset: 0 });
+                }}
+              >
+                <option value="desc">По убыванию</option>
+                <option value="asc">По возрастанию</option>
+              </AdminSelect>
               <div className={styles.formActionsEnd}>
                 <AdminCompactBtn
                   type="button"
@@ -682,8 +1351,9 @@ export function ReferralAdminClient() {
                   disabled={refLoading}
                   onClick={() => {
                     setAppliedQ(refQ);
-                    setRefCursor(null);
-                    void loadReferrers({ q: refQ });
+                    setRefOffset(0);
+                    setRefNextOffset(null);
+                    void loadReferrers({ q: refQ, offset: 0 });
                   }}
                 >
                   Найти
@@ -706,6 +1376,8 @@ export function ReferralAdminClient() {
                       <th>Ожидает</th>
                       <th>Earned</th>
                       <th>Net</th>
+                      <th>Пригл.</th>
+                      <th>GMV</th>
                       <th>Статус / код</th>
                       <th />
                     </tr>
@@ -772,6 +1444,8 @@ export function ReferralAdminClient() {
                       <th>Ожидает</th>
                       <th>Earned</th>
                       <th>Net</th>
+                      <th>Пригл.</th>
+                      <th>GMV</th>
                       <th>Статус / код</th>
                       <th />
                     </tr>
@@ -812,6 +1486,8 @@ export function ReferralAdminClient() {
                             </div>
                           ) : null}
                         </td>
+                        <td>{(r.invitees ?? 0).toLocaleString('ru-RU')}</td>
+                        <td>{formatAdminMoney(r.gmv ?? 0)}</td>
                         <td>
                           {r.referralCodeActive ? 'активна' : 'отключена'}
                           <div className={styles.codeActionsRow}>
@@ -849,13 +1525,16 @@ export function ReferralAdminClient() {
                 </table>
               </div>
             )}
-            {refCursor && !searchDirty && referrers.length > 0 ? (
+            {refNextOffset != null && !searchDirty && referrers.length > 0 ? (
               <AdminCompactBtn
                 type="button"
                 variant="outline"
                 disabled={refLoading}
                 onClick={() =>
-                  void loadReferrers({ append: true, cursor: refCursor })
+                  void loadReferrers({
+                    append: true,
+                    offset: refNextOffset,
+                  })
                 }
               >
                 Ещё
@@ -874,7 +1553,7 @@ export function ReferralAdminClient() {
         }
         message={
           confirm?.type === 'regenerate'
-            ? `Код ${confirm.row.referralCode} станет недействительным. Старые ?mf= перестанут атрибутировать.`
+            ? `Код ${confirm.row.referralCode} будет заменён.`
             : `Ссылка ${confirm?.row.referralCode ?? ''} перестанет работать, пока не включите снова.`
         }
         confirmLabel={
@@ -886,7 +1565,18 @@ export function ReferralAdminClient() {
           if (!confirmBusy) setConfirm(null);
         }}
         onConfirm={() => void runConfirm()}
-      />
+      >
+        {confirm?.type === 'regenerate' ? (
+          <label className={styles.activeLabel}>
+            <AdminCheckbox
+              checked={regenKeepGrace}
+              onChange={(e) => setRegenKeepGrace(e.target.checked)}
+            />
+            Оставить старые ?mf= на срок TTL (grace). Снимите галочку при
+            утечке на агрегатор — aliases отзываются сразу.
+          </label>
+        ) : null}
+      </AdminConfirmDialog>
     </div>
   );
 }

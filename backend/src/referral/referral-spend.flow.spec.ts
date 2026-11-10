@@ -34,7 +34,9 @@ describe('referral spend flow', () => {
     holdSpendInTx: vi.fn(async () => undefined),
     releaseSpendInTx: vi.fn(async () => true),
     replaceSpendHoldInTx: vi.fn(async () => undefined),
+    enqueueTouchInTx: vi.fn(async () => undefined),
     touch: vi.fn(async () => undefined),
+    runScheduledTouch: vi.fn(async () => undefined),
   };
 
   const order = {
@@ -190,6 +192,7 @@ describe('referral spend flow', () => {
       available: 1500,
       spendCapPercent: 50,
       amount: 1000,
+      debt: 0,
     });
     publicService = makePublicService();
   });
@@ -438,7 +441,7 @@ describe('referral spend flow', () => {
       referralWallet.releaseSpendInTx.mockResolvedValue(true);
     });
 
-    it('частичный card refund при wallet → запрет', async () => {
+    it('частичный card refund при wallet → proportional RELEASE', async () => {
       adminOrder.findUnique.mockResolvedValue({
         id: 'o1',
         number: 'MF-1',
@@ -459,17 +462,34 @@ describe('referral spend flow', () => {
           },
         ],
       });
+      referralWallet.releaseSpendInTx.mockResolvedValue(250);
 
       const admin = makeAdmin();
-      await expect(
-        admin.refund('o1', 'admin1', { amount: 500 }),
-      ).rejects.toMatchObject({
-        message: expect.stringMatching(/реферальн|только полный/i),
-      });
-      expect(referralWallet.releaseSpendInTx).not.toHaveBeenCalled();
+      vi.spyOn(admin, 'getById').mockResolvedValue({ id: 'o1' } as never);
+
+      await admin.refund('o1', 'admin1', { amount: 500 });
+
+      // 1000 * 500 / 2000 = 250
+      expect(referralWallet.releaseSpendInTx).toHaveBeenCalledWith(
+        adminTx,
+        'o1',
+        expect.objectContaining({
+          amount: 250,
+          note: expect.stringMatching(/пропорциональн|частичн/i),
+        }),
+      );
+      expect(adminOrder.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            refundedAmount: 500,
+            referralWalletAmount: 750,
+            referralWalletReleasedAmount: 250,
+          }),
+        }),
+      );
     });
 
-    it('полный refund → RELEASE wallet', async () => {
+    it('полный refund → RELEASE wallet + referralWalletAmount=0', async () => {
       adminOrder.findUnique.mockResolvedValue({
         id: 'o1',
         number: 'MF-1',
@@ -490,6 +510,7 @@ describe('referral spend flow', () => {
           },
         ],
       });
+      referralWallet.releaseSpendInTx.mockResolvedValue(1000);
 
       const admin = makeAdmin();
       // getById after refund — slim mock ok for this assert
@@ -501,6 +522,14 @@ describe('referral spend flow', () => {
         adminTx,
         'o1',
         expect.objectContaining({ note: expect.stringMatching(/refund|возврат/i) }),
+      );
+      expect(adminOrder.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            referralWalletAmount: 0,
+            referralWalletReleasedAmount: 1000,
+          }),
+        }),
       );
     });
   });

@@ -89,6 +89,12 @@ export function accountOrdersUrl(siteUrl: string): string {
   return `${site}/profile?tab=orders`;
 }
 
+/** Deep-link реф. бонусов в ЛК. */
+export function accountReferralUrl(siteUrl: string): string {
+  const site = siteUrl.replace(/\/+$/, '') || 'https://miraflores-shop.com';
+  return `${site}/profile?tab=referral`;
+}
+
 /** Deep-link чата по заказу в ЛК (Front открывает модалку по `chatOrder`). */
 export function accountOrderChatUrl(siteUrl: string, orderId: string): string {
   const site = siteUrl.replace(/\/+$/, '') || 'https://miraflores-shop.com';

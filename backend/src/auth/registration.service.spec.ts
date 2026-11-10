@@ -90,6 +90,7 @@ describe('RegistrationService', () => {
       mail as never,
       jwt as never,
       config as never,
+      { bindByCode: vi.fn(async () => ({ bound: false, referrerUserId: null })) } as never,
     );
   });
 
@@ -177,6 +178,7 @@ describe('RegistrationService', () => {
       mail as never,
       jwt as never,
       config as never,
+      { bindByCode: vi.fn(async () => ({ bound: false, referrerUserId: null })) } as never,
     );
 
     await expect(

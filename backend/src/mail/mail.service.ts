@@ -20,6 +20,7 @@ import {
 import {
   accountOrderChatUrl,
   accountOrdersUrl,
+  accountReferralUrl,
   accountSupportChatUrl,
   baseOrderVars,
   customerEmailGreeting,
@@ -51,6 +52,9 @@ import {
   buildOrderChatReplyEmail,
   buildOrderChatSupportReplyEmail,
   buildPasswordResetEmail,
+  buildReferralClawbackEmail,
+  buildReferralEarnCreatedEmail,
+  buildReferralEarnPostedEmail,
   buildRegistrationOtpEmail,
   buildStaffAdminPasswordResetEmail,
   buildStaffAdminWelcomeEmail,
@@ -737,5 +741,104 @@ export class MailService {
       }),
     );
     this.logger.log(`Staff admin password reset email sent to ${params.to}`);
+  }
+
+  async sendReferralEarnCreated(params: {
+    to: string;
+    amount: number;
+    kindLabel: string;
+    orderNumber?: string | null;
+    displayName?: string | null;
+  }): Promise<void> {
+    const site = this.frontendPublicUrl();
+    const greeting = customerEmailGreeting(params.displayName);
+    const amountLabel = rubLabel(Math.abs(params.amount));
+    await this.sendNotification(
+      params.to,
+      'referral_earn_created',
+      {
+        'site.url': site,
+        'site.name': MAIL_BRAND.name,
+        'referral.amount_label': amountLabel,
+        'referral.kind_label': params.kindLabel,
+        'order.number': params.orderNumber?.trim() || '',
+        'referral.url': accountReferralUrl(site),
+        'customer.greeting': greeting,
+      },
+      `amount=${params.amount}`,
+      () =>
+        buildReferralEarnCreatedEmail({
+          amount: params.amount,
+          kindLabel: params.kindLabel,
+          orderNumber: params.orderNumber,
+          customerGreeting: greeting,
+          siteUrl: site,
+        }),
+    );
+  }
+
+  async sendReferralEarnPosted(params: {
+    to: string;
+    amount: number;
+    kindLabel: string;
+    orderNumber?: string | null;
+    displayName?: string | null;
+  }): Promise<void> {
+    const site = this.frontendPublicUrl();
+    const greeting = customerEmailGreeting(params.displayName);
+    const amountLabel = rubLabel(Math.abs(params.amount));
+    await this.sendNotification(
+      params.to,
+      'referral_earn_posted',
+      {
+        'site.url': site,
+        'site.name': MAIL_BRAND.name,
+        'referral.amount_label': amountLabel,
+        'referral.kind_label': params.kindLabel,
+        'order.number': params.orderNumber?.trim() || '',
+        'referral.url': accountReferralUrl(site),
+        'customer.greeting': greeting,
+      },
+      `amount=${params.amount}`,
+      () =>
+        buildReferralEarnPostedEmail({
+          amount: params.amount,
+          kindLabel: params.kindLabel,
+          orderNumber: params.orderNumber,
+          customerGreeting: greeting,
+          siteUrl: site,
+        }),
+    );
+  }
+
+  async sendReferralClawback(params: {
+    to: string;
+    amount: number;
+    orderNumber?: string | null;
+    displayName?: string | null;
+  }): Promise<void> {
+    const site = this.frontendPublicUrl();
+    const greeting = customerEmailGreeting(params.displayName);
+    const amountLabel = rubLabel(Math.abs(params.amount));
+    await this.sendNotification(
+      params.to,
+      'referral_clawback',
+      {
+        'site.url': site,
+        'site.name': MAIL_BRAND.name,
+        'referral.amount_label': amountLabel,
+        'order.number': params.orderNumber?.trim() || '',
+        'referral.url': accountReferralUrl(site),
+        'customer.greeting': greeting,
+      },
+      `amount=${params.amount}`,
+      () =>
+        buildReferralClawbackEmail({
+          amount: params.amount,
+          orderNumber: params.orderNumber,
+          customerGreeting: greeting,
+          siteUrl: site,
+        }),
+    );
   }
 }

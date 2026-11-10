@@ -80,6 +80,12 @@ export class RegisterCompleteDto {
   @IsString()
   @MaxLength(80)
   guestId?: string | null;
+
+  /** ?mf= из localStorage — sticky referredByUserId. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  referralCode?: string | null;
 }
 
 export class PasswordResetRequestDto {

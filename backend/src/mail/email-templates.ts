@@ -957,3 +957,145 @@ export function buildOrderChatSupportReplyEmail(params: {
     }),
   };
 }
+
+function referralAmountLabel(amount: number): string {
+  const n = Number.isFinite(amount) ? Math.round(Math.abs(amount)) : 0;
+  return `${n.toLocaleString('ru-RU')} ₽`;
+}
+
+function referralCabinetUrl(site: string): string {
+  return profileUrl(site, '/profile?tab=referral');
+}
+
+/** PENDING EARN / INVITEE_BONUS создан. */
+export function buildReferralEarnCreatedEmail(params: {
+  amount: number;
+  kindLabel: string;
+  orderNumber?: string | null;
+  customerGreeting?: string | null;
+  siteUrl?: string | null;
+}): BuiltEmail {
+  const site = siteUrl(params.siteUrl);
+  const amount = referralAmountLabel(params.amount);
+  const kind = (params.kindLabel || 'начисление').trim();
+  const hello = (params.customerGreeting || '').trim();
+  const orderNumber = params.orderNumber?.trim() || '';
+  const refUrl = referralCabinetUrl(site);
+  const subject = `Начисление ${amount} ожидает зачисления — ${MAIL_BRAND.name}`;
+  const text = [
+    `${hello}на ваш реферальный баланс начислено ${amount} (${kind}).`,
+    '',
+    ...(orderNumber ? [`Заказ: ${orderNumber}`, ''] : []),
+    'Сумма пока в статусе «Ожидает» — станет доступна после карантина.',
+    '',
+    `Раздел бонусов: ${refUrl}`,
+    site,
+  ].join('\n');
+  const bodyHtml = [
+    eyebrow('Реферальная программа'),
+    title('Начисление ожидает зачисления'),
+    `<p style="margin:0 0 12px;">${escapeHtml(hello)}на ваш реферальный баланс начислено <strong>${escapeHtml(amount)}</strong> (${escapeHtml(kind)}).</p>`,
+    orderNumber
+      ? `<p style="margin:0 0 12px;">Заказ: <strong>${escapeHtml(orderNumber)}</strong></p>`
+      : '',
+    `<p style="margin:0 0 16px;">Сумма пока в статусе «Ожидает» — станет доступна после карантина.</p>`,
+    mailCtaButton(refUrl, 'Открыть бонусы'),
+  ].join('');
+  return {
+    subject,
+    text,
+    html: renderMirafloresEmailLayout({
+      preheader: `${amount} ожидают зачисления`,
+      bodyHtml,
+      siteUrl: site,
+    }),
+  };
+}
+
+/** PENDING → POSTED. */
+export function buildReferralEarnPostedEmail(params: {
+  amount: number;
+  kindLabel: string;
+  orderNumber?: string | null;
+  customerGreeting?: string | null;
+  siteUrl?: string | null;
+}): BuiltEmail {
+  const site = siteUrl(params.siteUrl);
+  const amount = referralAmountLabel(params.amount);
+  const kind = (params.kindLabel || 'начисление').trim();
+  const hello = (params.customerGreeting || '').trim();
+  const orderNumber = params.orderNumber?.trim() || '';
+  const refUrl = referralCabinetUrl(site);
+  const subject = `${amount} доступны на реферальном балансе — ${MAIL_BRAND.name}`;
+  const text = [
+    `${hello}${amount} зачислены на доступный реферальный баланс (${kind}).`,
+    '',
+    ...(orderNumber ? [`Заказ: ${orderNumber}`, ''] : []),
+    'Их можно списать при оформлении заказа вместо промокода или сертификата.',
+    '',
+    `Раздел бонусов: ${refUrl}`,
+    site,
+  ].join('\n');
+  const bodyHtml = [
+    eyebrow('Реферальная программа'),
+    title('Баланс доступен'),
+    `<p style="margin:0 0 12px;">${escapeHtml(hello)}<strong>${escapeHtml(amount)}</strong> зачислены на доступный реферальный баланс (${escapeHtml(kind)}).</p>`,
+    orderNumber
+      ? `<p style="margin:0 0 12px;">Заказ: <strong>${escapeHtml(orderNumber)}</strong></p>`
+      : '',
+    `<p style="margin:0 0 16px;">Их можно списать при оформлении заказа вместо промокода или сертификата.</p>`,
+    mailCtaButton(refUrl, 'Открыть бонусы'),
+  ].join('');
+  return {
+    subject,
+    text,
+    html: renderMirafloresEmailLayout({
+      preheader: `${amount} доступны на балансе`,
+      bodyHtml,
+      siteUrl: site,
+    }),
+  };
+}
+
+/** CLAWBACK списан с баланса. */
+export function buildReferralClawbackEmail(params: {
+  amount: number;
+  orderNumber?: string | null;
+  customerGreeting?: string | null;
+  siteUrl?: string | null;
+}): BuiltEmail {
+  const site = siteUrl(params.siteUrl);
+  const amount = referralAmountLabel(params.amount);
+  const hello = (params.customerGreeting || '').trim();
+  const orderNumber = params.orderNumber?.trim() || '';
+  const refUrl = referralCabinetUrl(site);
+  const subject = `Списание ${amount} с реферального баланса — ${MAIL_BRAND.name}`;
+  const text = [
+    `${hello}с реферального баланса списано ${amount} (возврат или отмена заказа по вашей ссылке).`,
+    '',
+    ...(orderNumber ? [`Заказ: ${orderNumber}`, ''] : []),
+    'Подробности — в истории бонусов личного кабинета.',
+    '',
+    `Раздел бонусов: ${refUrl}`,
+    site,
+  ].join('\n');
+  const bodyHtml = [
+    eyebrow('Реферальная программа'),
+    title('Списание начисления'),
+    `<p style="margin:0 0 12px;">${escapeHtml(hello)}с реферального баланса списано <strong>${escapeHtml(amount)}</strong> (возврат или отмена заказа по вашей ссылке).</p>`,
+    orderNumber
+      ? `<p style="margin:0 0 12px;">Заказ: <strong>${escapeHtml(orderNumber)}</strong></p>`
+      : '',
+    `<p style="margin:0 0 16px;">Подробности — в истории бонусов личного кабинета.</p>`,
+    mailCtaButton(refUrl, 'Открыть бонусы'),
+  ].join('');
+  return {
+    subject,
+    text,
+    html: renderMirafloresEmailLayout({
+      preheader: `Списание ${amount}`,
+      bodyHtml,
+      siteUrl: site,
+    }),
+  };
+}

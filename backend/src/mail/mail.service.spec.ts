@@ -226,4 +226,67 @@ describe('MailService templated customer mail', () => {
       expect.objectContaining({ 'gift.items_text': expect.stringContaining('ABC') }),
     );
   });
+
+  it('sendReferralEarnCreated → referral_earn_created', async () => {
+    emailNotifications.buildForEvent.mockResolvedValue({
+      subject: 'Earn',
+      text: 'e',
+      html: '<p>e</p>',
+    });
+    await svc.sendReferralEarnCreated({
+      to: 'a@b.c',
+      amount: 500,
+      kindLabel: 'реферальное начисление',
+      orderNumber: 'AA-1',
+      displayName: 'Анна',
+    });
+    expect(emailNotifications.buildForEvent).toHaveBeenCalledWith(
+      'referral_earn_created',
+      expect.objectContaining({
+        'referral.amount_label': expect.stringContaining('500'),
+        'referral.kind_label': 'реферальное начисление',
+        'order.number': 'AA-1',
+        'referral.url': expect.stringContaining('/profile?tab=referral'),
+      }),
+    );
+  });
+
+  it('sendReferralEarnPosted → referral_earn_posted', async () => {
+    emailNotifications.buildForEvent.mockResolvedValue({
+      subject: 'Posted',
+      text: 'p',
+      html: '<p>p</p>',
+    });
+    await svc.sendReferralEarnPosted({
+      to: 'a@b.c',
+      amount: 300,
+      kindLabel: 'бонус приглашённому',
+    });
+    expect(emailNotifications.buildForEvent).toHaveBeenCalledWith(
+      'referral_earn_posted',
+      expect.objectContaining({
+        'referral.kind_label': 'бонус приглашённому',
+      }),
+    );
+  });
+
+  it('sendReferralClawback → referral_clawback', async () => {
+    emailNotifications.buildForEvent.mockResolvedValue({
+      subject: 'Claw',
+      text: 'c',
+      html: '<p>c</p>',
+    });
+    await svc.sendReferralClawback({
+      to: 'a@b.c',
+      amount: 200,
+      orderNumber: 'AA-9',
+    });
+    expect(emailNotifications.buildForEvent).toHaveBeenCalledWith(
+      'referral_clawback',
+      expect.objectContaining({
+        'order.number': 'AA-9',
+        'referral.amount_label': expect.stringContaining('200'),
+      }),
+    );
+  });
 });

@@ -10,6 +10,7 @@ export type YourichLeadOrderInput = {
   discountTotal: number;
   giftCertificateAmount: number;
   referralWalletAmount?: number;
+  referralWalletReleasedAmount?: number;
   refundedAmount: number;
   customerName: string | null;
   /** Покупка только сертификата — в YouRich не отправляем */

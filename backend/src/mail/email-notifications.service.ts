@@ -16,6 +16,7 @@ import {
 import {
   accountOrderChatUrl,
   accountOrdersUrl,
+  accountReferralUrl,
   accountSupportChatUrl,
   baseOrderVars,
   formatGiftItemsHtml,
@@ -683,6 +684,35 @@ function sampleVarsForEvent(
         'site.name': MAIL_BRAND.name,
         'chat.snippet': sparse ? '' : 'Здравствуйте! Подскажите артикул или ссылку на товар.',
         'chat.url': accountSupportChatUrl(site),
+        'customer.greeting': sparse ? '' : 'Анна, ',
+      };
+    case 'referral_earn_created':
+      return {
+        'site.url': site,
+        'site.name': MAIL_BRAND.name,
+        'referral.amount_label': sparse ? '' : rubLabel(500),
+        'referral.kind_label': sparse ? '' : 'начисление',
+        'order.number': sparse ? '' : 'MF-10001',
+        'referral.url': accountReferralUrl(site),
+        'customer.greeting': sparse ? '' : 'Анна, ',
+      };
+    case 'referral_earn_posted':
+      return {
+        'site.url': site,
+        'site.name': MAIL_BRAND.name,
+        'referral.amount_label': sparse ? '' : rubLabel(500),
+        'referral.kind_label': sparse ? '' : 'начисление',
+        'order.number': sparse ? '' : 'MF-10001',
+        'referral.url': accountReferralUrl(site),
+        'customer.greeting': sparse ? '' : 'Анна, ',
+      };
+    case 'referral_clawback':
+      return {
+        'site.url': site,
+        'site.name': MAIL_BRAND.name,
+        'referral.amount_label': sparse ? '' : rubLabel(500),
+        'order.number': sparse ? '' : 'MF-10001',
+        'referral.url': accountReferralUrl(site),
         'customer.greeting': sparse ? '' : 'Анна, ',
       };
     default: {

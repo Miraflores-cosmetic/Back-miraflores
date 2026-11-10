@@ -93,6 +93,7 @@ export class YourichSyncService {
                 discountTotal: true,
                 giftCertificateAmount: true,
                 referralWalletAmount: true,
+                referralWalletReleasedAmount: true,
                 refundedAmount: true,
                 customerName: true,
                 giftPurchaseDenominationId: true,

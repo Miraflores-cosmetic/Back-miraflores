@@ -56,4 +56,43 @@ describe('computeCommissionBase', () => {
       }),
     ).toBe(0);
   });
+
+  it('refund режет только card-covered (не двойнит с wallet)', () => {
+    // goods 5000, wallet 1000 → card 4000; refund 2000 → base 2000.
+    expect(
+      computeCommissionBase({
+        subtotal: 5000,
+        discountTotal: 0,
+        giftCertificateAmount: 0,
+        referralWalletAmount: 1000,
+        refundedAmount: 2000,
+      }),
+    ).toBe(2000);
+  });
+
+  it('после proportional RELEASE remaining+released = исходный wallet', () => {
+    // goods 10000, wallet 3000, card 7000; refund card 3500 → RELEASE 1500.
+    // Без released: 10000−1500−3500=5000 (баг). С released: 10000−3000−3500=3500.
+    expect(
+      computeCommissionBase({
+        subtotal: 10000,
+        discountTotal: 0,
+        giftCertificateAmount: 0,
+        referralWalletAmount: 1500,
+        referralWalletReleasedAmount: 1500,
+        refundedAmount: 3500,
+      }),
+    ).toBe(3500);
+    // goods 5000, wallet 1000; refund 2000 → RELEASE 500 → base остаётся 2000.
+    expect(
+      computeCommissionBase({
+        subtotal: 5000,
+        discountTotal: 0,
+        giftCertificateAmount: 0,
+        referralWalletAmount: 500,
+        referralWalletReleasedAmount: 500,
+        refundedAmount: 2000,
+      }),
+    ).toBe(2000);
+  });
 });

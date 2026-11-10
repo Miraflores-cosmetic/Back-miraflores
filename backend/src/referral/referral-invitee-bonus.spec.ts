@@ -29,12 +29,15 @@ describe('ReferralWalletService invitee bonus + ledger history', () => {
     enabledAt: new Date('2026-01-01'),
     earnPercent: 5,
     earnMode: 'EVERY',
+    earnWindowMaxOrders: 0,
+    earnWindowDays: 90,
     minOrderRub: 0,
     quarantineMode: ReferralQuarantineMode.DELIVERED,
     quarantineDays: 7,
     inviteeBonusEnabled: true,
     inviteeBonusRub: 300,
     spendCapPercent: 100,
+    monthlyEarnCapRub: 0,
     shareText: 'Hi {link}',
   };
 
@@ -61,7 +64,7 @@ describe('ReferralWalletService invitee bonus + ledger history', () => {
     svc = new ReferralWalletService(prisma as never, settings as never);
   });
 
-  it('listLedgerHistory отдаёт order.number без PII', async () => {
+  it('listLedgerHistory: EARN без номера заказа друга; SPEND — свой номер', async () => {
     prisma.referralWalletLedger.findMany.mockResolvedValue([
       {
         id: 'l1',
@@ -70,6 +73,14 @@ describe('ReferralWalletService invitee bonus + ledger history', () => {
         status: ReferralLedgerStatus.POSTED,
         amount: 250,
         order: { number: 'AA-000123' },
+      },
+      {
+        id: 'l2',
+        createdAt: new Date('2026-06-01T11:00:00.000Z'),
+        kind: ReferralLedgerKind.SPEND_HOLD,
+        status: ReferralLedgerStatus.POSTED,
+        amount: -100,
+        order: { number: 'AA-OWN-1' },
       },
     ]);
     const page = await svc.listLedgerHistory('u1', { limit: 10 });
@@ -80,7 +91,15 @@ describe('ReferralWalletService invitee bonus + ledger history', () => {
         kind: ReferralLedgerKind.EARN,
         status: ReferralLedgerStatus.POSTED,
         amount: 250,
-        orderNumber: 'AA-000123',
+        orderNumber: null,
+      },
+      {
+        id: 'l2',
+        createdAt: '2026-06-01T11:00:00.000Z',
+        kind: ReferralLedgerKind.SPEND_HOLD,
+        status: ReferralLedgerStatus.POSTED,
+        amount: -100,
+        orderNumber: 'AA-OWN-1',
       },
     ]);
     expect(page.nextCursor).toBeNull();
@@ -103,6 +122,7 @@ describe('ReferralWalletService invitee bonus + ledger history', () => {
       referralAttribution: {
         code: 'ABCD',
         referrerUserId: 'ref-1',
+        addressMatchSuspect: false,
         createdAt: new Date('2026-02-01'),
       },
     });
@@ -177,6 +197,7 @@ describe('ReferralWalletService invitee bonus + ledger history', () => {
       referralAttribution: {
         code: 'ABCD',
         referrerUserId: 'ref-1',
+        addressMatchSuspect: false,
         createdAt: new Date('2026-02-01'),
       },
     });
@@ -240,6 +261,7 @@ describe('ReferralWalletService invitee bonus + ledger history', () => {
       referralAttribution: {
         code: 'ABCD',
         referrerUserId: 'ref-1',
+        addressMatchSuspect: false,
         createdAt: new Date('2026-02-01'),
       },
     });
@@ -265,6 +287,7 @@ describe('ReferralWalletService invitee bonus + ledger history', () => {
       referralAttribution: {
         code: 'ABCD',
         referrerUserId: 'ref-1',
+        addressMatchSuspect: false,
         createdAt: new Date('2026-02-01'),
       },
     });
@@ -297,6 +320,7 @@ describe('ReferralWalletService invitee bonus + ledger history', () => {
       referralAttribution: {
         code: 'ABCD',
         referrerUserId: 'ref-1',
+        addressMatchSuspect: false,
         createdAt: new Date('2026-02-01'),
       },
     });
@@ -323,7 +347,7 @@ describe('ReferralWalletService invitee bonus + ledger history', () => {
 
     expect(prisma.referralWalletLedger.update).toHaveBeenCalledWith({
       where: { id: 'bon-pend' },
-      data: { status: ReferralLedgerStatus.VOIDED },
+      data: { status: ReferralLedgerStatus.VOIDED, availableAt: null },
     });
     expect(prisma.referralWalletLedger.create).not.toHaveBeenCalled();
   });
@@ -345,6 +369,7 @@ describe('ReferralWalletService invitee bonus + ledger history', () => {
       referralAttribution: {
         code: 'ABCD',
         referrerUserId: 'ref-1',
+        addressMatchSuspect: false,
         createdAt: new Date('2026-02-01'),
       },
     });

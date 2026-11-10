@@ -30,6 +30,12 @@ function makePrisma(tx: ReturnType<typeof makeTx>) {
       update: vi.fn(),
       updateMany: vi.fn(),
     },
+    orderReferralAttribution: {
+      count: vi.fn(async () => 0),
+    },
+    referralWalletLedger: {
+      count: vi.fn(async () => 0),
+    },
     $transaction: vi.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
   };
 }
@@ -74,6 +80,9 @@ describe('AccountService', () => {
         enabled: true,
         spendCapPercent: 50,
         linkTtlDays: 60,
+        earnPercent: 5,
+        quarantineMode: 'DELIVERED',
+        quarantineDays: 7,
       })),
       getBuyerShare: vi.fn(async () => ({
         shareTextTemplate: 'Закажи: {link}',
@@ -103,6 +112,7 @@ describe('AccountService', () => {
       { applyRetentionForOrder: vi.fn() } as never,
       referralCodes as never,
       referralWallet as never,
+      { bindByCode: vi.fn(async () => ({ bound: false, referrerUserId: null })) } as never,
     );
   });
 
@@ -419,12 +429,17 @@ describe('AccountService', () => {
         enabled: true,
         spendCapPercent: 40,
         linkTtlDays: 45,
+        earnPercent: 7,
+        quarantineMode: 'DELIVERED_PLUS_DAYS',
+        quarantineDays: 14,
       });
       referralWallet.getBuyerShare.mockResolvedValue({
         shareTextTemplate: 'Ссылка {link} код {code}',
         inviteeBonusEnabled: true,
         inviteeBonusRub: 300,
       });
+      prisma.orderReferralAttribution.count.mockResolvedValue(3);
+      prisma.referralWalletLedger.count.mockResolvedValue(2);
 
       const dash = await svc.getReferralDashboard('u1');
 
@@ -443,8 +458,13 @@ describe('AccountService', () => {
         pending: 400,
         spendCapPercent: 40,
         linkTtlDays: 45,
+        earnPercent: 7,
+        quarantineMode: 'DELIVERED_PLUS_DAYS',
+        quarantineDays: 14,
         inviteeBonusEnabled: true,
         inviteeBonusRub: 300,
+        friendsInvited: 3,
+        friendsWithEarn: 2,
       });
     });
 
@@ -501,7 +521,7 @@ describe('AccountService', () => {
             kind: 'EARN',
             status: 'POSTED',
             amount: 250,
-            orderNumber: 'AA-000123',
+            orderNumber: null,
           },
         ],
         nextCursor: 'c1',
@@ -517,7 +537,7 @@ describe('AccountService', () => {
         cursor: 'prev',
       });
       expect(page.items).toHaveLength(1);
-      expect(page.items[0].orderNumber).toBe('AA-000123');
+      expect(page.items[0].orderNumber).toBeNull();
       expect(page.nextCursor).toBe('c1');
     });
 

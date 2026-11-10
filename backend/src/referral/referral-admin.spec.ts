@@ -73,6 +73,7 @@ describe('ReferralWalletService admin (Phase 5)', () => {
     order: { findUnique: ReturnType<typeof vi.fn> };
     orderReferralAttribution: { findUnique: ReturnType<typeof vi.fn> };
     $executeRaw: ReturnType<typeof vi.fn>;
+    $queryRaw: ReturnType<typeof vi.fn>;
     runInRlsTransaction: ReturnType<typeof vi.fn>;
   };
   let svc: ReferralWalletService;
@@ -93,6 +94,7 @@ describe('ReferralWalletService admin (Phase 5)', () => {
       order: { findUnique: vi.fn().mockResolvedValue({ referralWalletAmount: 0 }) },
       orderReferralAttribution: { findUnique: vi.fn().mockResolvedValue(null) },
       $executeRaw: vi.fn().mockResolvedValue(undefined),
+      $queryRaw: vi.fn().mockResolvedValue([]),
       runInRlsTransaction: vi.fn(async (_ctx: unknown, fn: () => unknown) => fn()),
     };
     svc = new ReferralWalletService(prisma as never, {
@@ -100,7 +102,7 @@ describe('ReferralWalletService admin (Phase 5)', () => {
     } as never);
   });
 
-  it('listReferrers: earnedNet только earn clawback; invitee отдельно', async () => {
+  it('listReferrers: earnedNet + invitees/GMV; sort by earned', async () => {
     prisma.user.findMany.mockResolvedValue([
       {
         id: 'u1',
@@ -109,37 +111,72 @@ describe('ReferralWalletService admin (Phase 5)', () => {
         referralCode: 'ABCD2345',
         referralCodeActive: true,
       },
+      {
+        id: 'u2',
+        email: 'b@c.d',
+        displayName: 'Bob',
+        referralCode: 'BOB12345',
+        referralCodeActive: true,
+      },
     ]);
     prisma.referralWalletLedger.groupBy
-      .mockResolvedValueOnce([{ userId: 'u1', _sum: { amount: 800 } }]) // posted
+      .mockResolvedValueOnce([
+        { userId: 'u1', _sum: { amount: 800 } },
+        { userId: 'u2', _sum: { amount: 100 } },
+      ]) // posted
       .mockResolvedValueOnce([{ userId: 'u1', _sum: { amount: 200 } }]) // pending
-      .mockResolvedValueOnce([{ userId: 'u1', _sum: { amount: 1200 } }]) // earned gross
+      .mockResolvedValueOnce([
+        { userId: 'u1', _sum: { amount: 1200 } },
+        { userId: 'u2', _sum: { amount: 500 } },
+      ]) // earned gross
       .mockResolvedValueOnce([{ userId: 'u1', _sum: { amount: -300 } }]) // earn clawback
       .mockResolvedValueOnce([{ userId: 'u1', _sum: { amount: -150 } }]); // invitee clawback
+    prisma.$queryRaw.mockResolvedValue([
+      { referrerUserId: 'u1', invitees: 4n, gmv: 50000n },
+      { referrerUserId: 'u2', invitees: 10n, gmv: 90000n },
+    ]);
 
-    const page = await svc.listReferrers({ limit: 10 });
-    expect(page.items).toEqual([
-      {
-        userId: 'u1',
-        email: 'a@b.c',
-        displayName: 'Ann',
-        referralCode: 'ABCD2345',
-        referralCodeActive: true,
-        available: 800,
-        pending: 200,
+    const page = await svc.listReferrers({ limit: 10, sort: 'earned', dir: 'desc' });
+    expect(page.items[0]?.userId).toBe('u1');
+    expect(page.items[0]).toEqual(
+      expect.objectContaining({
         earnedGross: 1200,
         earnedNet: 900,
         inviteeClawback: 150,
-      },
-    ]);
-    expect(page.nextCursor).toBeNull();
+        invitees: 4,
+        gmv: 50000,
+      }),
+    );
+    expect(page.items[1]?.userId).toBe('u2');
+    expect(page.nextOffset).toBeNull();
+
+    const byInvitees = await svc.listReferrers({
+      limit: 10,
+      sort: 'invitees',
+      dir: 'desc',
+    });
+    expect(byInvitees.items[0]?.userId).toBe('u2');
   });
 
+  it('getLiability: available + pending', async () => {
+    prisma.referralWalletLedger.aggregate
+      .mockResolvedValueOnce({ _sum: { amount: 3000 } })
+      .mockResolvedValueOnce({ _sum: { amount: 700 } })
+      .mockResolvedValueOnce({ _sum: { amount: 100 } });
+    await expect(svc.getLiability()).resolves.toEqual({
+      available: 3000,
+      pending: 700,
+      liability: 3700,
+      debt: 100,
+    });
+  });
   it('adminAdjust: +amount with stable idempotencyKey', async () => {
     prisma.user.findUnique.mockResolvedValue({ id: 'u1' });
-    prisma.referralWalletLedger.aggregate.mockResolvedValue({
-      _sum: { amount: 500 },
-    });
+    // sumPosted before → debt(0) in repay → sumPosted after
+    prisma.referralWalletLedger.aggregate
+      .mockResolvedValueOnce({ _sum: { amount: 500 } })
+      .mockResolvedValueOnce({ _sum: { amount: 0 } })
+      .mockResolvedValueOnce({ _sum: { amount: 600 } });
 
     const res = await svc.adminAdjust({
       userId: 'u1',
@@ -219,6 +256,8 @@ describe('ReferralWalletService admin (Phase 5)', () => {
       code: 'ABCD',
       referrerUserId: 'ref1',
       createdAt: new Date('2026-03-01T00:00:00.000Z'),
+      addressMatchSuspect: false,
+      addressMatchReason: null,
       referrer: { email: 'ref@x.co', referralCode: 'ABCD' },
     });
     prisma.referralWalletLedger.findMany.mockResolvedValue([
@@ -264,6 +303,7 @@ describe('ReferralWalletService admin (Phase 5)', () => {
 
     const s = await svc.getOrderReferralSummary('ord1');
     expect(s.attribution?.code).toBe('ABCD');
+    expect(s.attribution?.addressMatchSuspect).toBe(false);
     expect(s.walletSpent).toBe(700);
     expect(s.pending).toBe(250);
     expect(s.earned).toBe(0);

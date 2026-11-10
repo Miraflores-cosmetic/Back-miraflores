@@ -366,12 +366,16 @@ export class UsersAdminService {
     };
   }
 
-  /** Сменить код (старые ?mf= перестают резолвиться). */
-  async regenerateReferralCode(userId: string) {
-    const out = await this.referralCodes.regenerateForUser(userId);
+  /** Сменить код. `grace: false` — отозвать aliases сразу. */
+  async regenerateReferralCode(
+    userId: string,
+    opts?: { grace?: boolean },
+  ) {
+    const out = await this.referralCodes.regenerateForUser(userId, opts);
     return {
       code: out.code,
       active: out.active,
+      grace: out.grace,
       linkPath: `/?mf=${encodeURIComponent(out.code)}`,
     };
   }

@@ -45,6 +45,15 @@ export class AccountController {
     return this.account.ensureReferralCode(user.sub);
   }
 
+  /** Sticky: привязать referrer из ?mf= (login / resume LS). */
+  @Post('me/referral/bind')
+  bindReferral(
+    @CurrentUser() user: JwtPayload,
+    @Body() body: { code?: string | null },
+  ) {
+    return this.account.bindReferralCode(user.sub, body?.code);
+  }
+
   /**
    * Quote spend: ?payable= — ₽ к оплате до wallet (товары+доставка после промо).
    * Cap/enabled также в GET /me (referralSpendCapPercent, referralEnabled).

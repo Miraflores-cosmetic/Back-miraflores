@@ -13,6 +13,7 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { AuthService } from './auth.service';
+import { ReferralStickyService } from '../referral/referral-sticky.service';
 import {
   MARKETING_CONSENT_VERSION,
   PRIVACY_CONSENT_VERSION,
@@ -56,6 +57,7 @@ export class RegistrationService {
     private readonly mail: MailService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
+    private readonly referralSticky: ReferralStickyService,
   ) {
     // Fail-fast при старте приложения (prod без отдельного секрета не поднимется).
     resolveRegistrationTokenSecret(this.config);
@@ -404,6 +406,9 @@ export class RegistrationService {
       dto.guestId,
       outcome.user.email,
     );
+    if (dto.referralCode) {
+      await this.referralSticky.bindByCode(outcome.user.id, dto.referralCode);
+    }
     this.logger.log(
       `register complete: user=${outcome.user.id} email=${outcome.user.email}` +
         (dto.guestId ? ` guestId=${dto.guestId}` : ''),

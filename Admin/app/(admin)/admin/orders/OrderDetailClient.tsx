@@ -1363,6 +1363,90 @@ export function OrderDetailClient({
                             : ''}
                         </dd>
                       </div>
+                      {order.mfReferral.attribution.addressMatchSuspect ? (
+                        <div className={styles.detailDlRow}>
+                          <dt>Подозрение self-ref</dt>
+                          <dd>
+                            Совпадение адреса/ПВЗ с реферером
+                            {order.mfReferral.attribution.addressMatchReason
+                              ? ` (${order.mfReferral.attribution.addressMatchReason})`
+                              : ''}
+                            {' — начисление не POSTED до решения. '}
+                            <AdminCompactBtn
+                              type="button"
+                              variant="outline"
+                              disabled={busy}
+                              onClick={() =>
+                                askConfirm({
+                                  title: 'Разрешить реф. начисление?',
+                                  message:
+                                    'Снимем флаг совпадения адреса и переведём PENDING earn/бонус в доступный баланс (если карантин уже пройден).',
+                                  confirmLabel: 'Разрешить',
+                                  run: async () => {
+                                    setBusy(true);
+                                    setError(null);
+                                    try {
+                                      await adminBackendJson(
+                                        `orders/admin/${orderId}/referral/approve-address`,
+                                        { method: 'POST' },
+                                      );
+                                      await load();
+                                      showFlash('Начисление разрешено');
+                                    } catch (e) {
+                                      setError(
+                                        e instanceof AdminBackendRequestError
+                                          ? e.message
+                                          : 'Не удалось разрешить начисление',
+                                      );
+                                    } finally {
+                                      setBusy(false);
+                                      setConfirm(null);
+                                    }
+                                  },
+                                })
+                              }
+                            >
+                              Разрешить
+                            </AdminCompactBtn>{' '}
+                            <AdminCompactBtn
+                              type="button"
+                              variant="outline"
+                              disabled={busy}
+                              onClick={() =>
+                                askConfirm({
+                                  title: 'Отклонить реф. начисление?',
+                                  message:
+                                    'Аннулируем PENDING earn рефереру и бонус приглашённому. Повторно они не начислятся.',
+                                  confirmLabel: 'Отклонить',
+                                  run: async () => {
+                                    setBusy(true);
+                                    setError(null);
+                                    try {
+                                      await adminBackendJson(
+                                        `orders/admin/${orderId}/referral/reject-address`,
+                                        { method: 'POST' },
+                                      );
+                                      await load();
+                                      showFlash('Начисление отклонено');
+                                    } catch (e) {
+                                      setError(
+                                        e instanceof AdminBackendRequestError
+                                          ? e.message
+                                          : 'Не удалось отклонить начисление',
+                                      );
+                                    } finally {
+                                      setBusy(false);
+                                      setConfirm(null);
+                                    }
+                                  },
+                                })
+                              }
+                            >
+                              Отклонить
+                            </AdminCompactBtn>
+                          </dd>
+                        </div>
+                      ) : null}
                     </>
                   ) : null}
                   <div className={styles.detailDlRow}>

@@ -4,7 +4,13 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { OrderStatus, GiftCertificateSource, Prisma } from '@prisma/client';
+import {
+  GiftCertificateSource,
+  OrderStatus,
+  Prisma,
+  ReferralLedgerKind,
+  ReferralLedgerStatus,
+} from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrderChatService } from '../order-chat/order-chat.service';
@@ -28,6 +34,7 @@ import type {
   UpsertBuyerAddressDto,
 } from './dto/account.dto';
 import { ReferralCodeService } from '../referral/referral-code.service';
+import { ReferralStickyService } from '../referral/referral-sticky.service';
 import { ReferralWalletService } from '../referral/referral-wallet.service';
 
 const BCRYPT_ROUNDS = 10;
@@ -116,6 +123,7 @@ export class AccountService {
     private readonly orderChat: OrderChatService,
     private readonly referralCodes: ReferralCodeService,
     private readonly referralWallet: ReferralWalletService,
+    private readonly referralSticky: ReferralStickyService,
   ) {}
 
   async getProfile(userId: string) {
@@ -233,12 +241,25 @@ export class AccountService {
       codeActive = issued.active;
     }
 
-    const [available, pending, policy, share] = await Promise.all([
-      this.referralWallet.availableBalance(userId),
-      this.referralWallet.pendingBalance(userId),
-      this.referralWallet.getSpendPolicy(),
-      this.referralWallet.getBuyerShare(),
-    ]);
+    const [available, pending, policy, share, friendsInvited, friendsWithEarn] =
+      await Promise.all([
+        this.referralWallet.availableBalance(userId),
+        this.referralWallet.pendingBalance(userId),
+        this.referralWallet.getSpendPolicy(),
+        this.referralWallet.getBuyerShare(),
+        this.prisma.orderReferralAttribution.count({
+          where: { referrerUserId: userId },
+        }),
+        this.prisma.referralWalletLedger.count({
+          where: {
+            userId,
+            kind: ReferralLedgerKind.EARN,
+            status: {
+              in: [ReferralLedgerStatus.PENDING, ReferralLedgerStatus.POSTED],
+            },
+          },
+        }),
+      ]);
 
     return {
       enabled: policy.enabled,
@@ -250,9 +271,19 @@ export class AccountService {
       pending,
       spendCapPercent: policy.spendCapPercent,
       linkTtlDays: policy.linkTtlDays,
+      earnPercent: policy.earnPercent,
+      quarantineMode: policy.quarantineMode,
+      quarantineDays: policy.quarantineDays,
       inviteeBonusEnabled: share.inviteeBonusEnabled,
       inviteeBonusRub: share.inviteeBonusRub,
+      friendsInvited,
+      friendsWithEarn,
     };
+  }
+
+  /** Sticky bind после login, если LS ещё держит ?mf=. */
+  async bindReferralCode(userId: string, codeRaw: string | null | undefined) {
+    return this.referralSticky.bindByCode(userId, codeRaw);
   }
 
   async listReferralLedger(

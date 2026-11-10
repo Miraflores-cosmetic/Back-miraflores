@@ -114,6 +114,7 @@ describe('cancelUnpaidOrderInTx', () => {
     tx.payment.findMany.mockResolvedValue([]);
     const referralWallet = {
       releaseSpendInTx: vi.fn(async () => true),
+      enqueueTouchInTx: vi.fn(async () => undefined),
     };
 
     await cancelUnpaidOrderInTx(tx as never, {
@@ -127,6 +128,7 @@ describe('cancelUnpaidOrderInTx', () => {
     expect(referralWallet.releaseSpendInTx).toHaveBeenCalledWith(tx, orderId, {
       note: 'Возврат реф. баланса при отмене заказа',
     });
+    expect(referralWallet.enqueueTouchInTx).toHaveBeenCalledWith(tx, orderId);
   });
 
   it('integration: reserve → cancel освобождает stockReserve', async () => {

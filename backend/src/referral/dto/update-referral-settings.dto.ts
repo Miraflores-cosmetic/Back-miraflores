@@ -27,6 +27,22 @@ export class UpdateReferralSettingsDto {
   @IsEnum(ReferralEarnMode)
   earnMode?: ReferralEarnMode;
 
+  /** EVERY: макс. EARN на покупателя в окне; 0 = без лимита. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(100)
+  earnWindowMaxOrders?: number;
+
+  /** EVERY+maxOrders: дни от первой товарной покупки; 0 = lifetime. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(3650)
+  earnWindowDays?: number;
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()
@@ -69,6 +85,14 @@ export class UpdateReferralSettingsDto {
   @Min(1)
   @Max(100)
   spendCapPercent?: number;
+
+  /** Месячный cap Σ EARN на реферера; 0 = без лимита. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(10_000_000)
+  monthlyEarnCapRub?: number;
 
   @IsOptional()
   @IsString()

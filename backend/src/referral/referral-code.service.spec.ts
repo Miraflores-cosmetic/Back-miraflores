@@ -11,7 +11,16 @@ describe('ReferralCodeService', () => {
       update: ReturnType<typeof vi.fn>;
       updateMany: ReturnType<typeof vi.fn>;
     };
+    referralCodeAlias: {
+      findUnique: ReturnType<typeof vi.fn>;
+      findFirst: ReturnType<typeof vi.fn>;
+      upsert: ReturnType<typeof vi.fn>;
+      delete: ReturnType<typeof vi.fn>;
+      deleteMany: ReturnType<typeof vi.fn>;
+    };
+    $transaction: ReturnType<typeof vi.fn>;
   };
+  let settings: { ensureDefaults: ReturnType<typeof vi.fn> };
   let svc: ReferralCodeService;
 
   beforeEach(() => {
@@ -22,8 +31,19 @@ describe('ReferralCodeService', () => {
         update: vi.fn(),
         updateMany: vi.fn(),
       },
+      referralCodeAlias: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        findFirst: vi.fn().mockResolvedValue(null),
+        upsert: vi.fn(),
+        delete: vi.fn(),
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+      $transaction: vi.fn(async (fn: (t: typeof prisma) => unknown) => fn(prisma)),
     };
-    svc = new ReferralCodeService(prisma as never);
+    settings = {
+      ensureDefaults: vi.fn().mockResolvedValue({ linkTtlDays: 60 }),
+    };
+    svc = new ReferralCodeService(prisma as never, settings as never);
   });
 
   describe('setActive', () => {
@@ -45,24 +65,52 @@ describe('ReferralCodeService', () => {
   });
 
   describe('regenerateForUser', () => {
-    it('меняет код, сохраняет active', async () => {
-      // 1) user lookup  2) allocateUniqueCode collision check
+    it('меняет код и пишет alias со grace', async () => {
       prisma.user.findFirst
         .mockResolvedValueOnce({
           id: 'u1',
           isActive: true,
           referralCodeActive: false,
+          referralCode: 'OLDCODE1',
+        })
+        .mockResolvedValueOnce(null);
+      prisma.user.update.mockResolvedValue({});
+      prisma.referralCodeAlias.upsert.mockResolvedValue({});
+
+      const out = await svc.regenerateForUser('u1', { grace: true });
+      expect(out.active).toBe(false);
+      expect(out.grace).toBe(true);
+      expect(out.code).toMatch(/^[A-Z0-9]{8}$/);
+      expect(prisma.referralCodeAlias.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { code: 'OLDCODE1' },
+          create: expect.objectContaining({
+            userId: 'u1',
+            code: 'OLDCODE1',
+            expiresAt: expect.any(Date),
+          }),
+        }),
+      );
+      expect(prisma.referralCodeAlias.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('grace:false — без alias, deleteMany aliases пользователя', async () => {
+      prisma.user.findFirst
+        .mockResolvedValueOnce({
+          id: 'u1',
+          isActive: true,
+          referralCodeActive: true,
+          referralCode: 'OLDCODE1',
         })
         .mockResolvedValueOnce(null);
       prisma.user.update.mockResolvedValue({});
 
-      const out = await svc.regenerateForUser('u1');
-      expect(out.active).toBe(false);
-      expect(out.code).toMatch(/^[A-Z0-9]{8}$/);
-      expect(prisma.user.update).toHaveBeenCalledWith({
-        where: { id: 'u1' },
-        data: { referralCode: out.code },
+      const out = await svc.regenerateForUser('u1', { grace: false });
+      expect(out.grace).toBe(false);
+      expect(prisma.referralCodeAlias.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'u1' },
       });
+      expect(prisma.referralCodeAlias.upsert).not.toHaveBeenCalled();
     });
 
     it('404 для неактивного / не USER', async () => {
@@ -78,9 +126,10 @@ describe('ReferralCodeService', () => {
           id: 'u1',
           isActive: true,
           referralCodeActive: true,
+          referralCode: 'OLDCODE1',
         })
-        .mockResolvedValueOnce(null) // alloc 1 free
-        .mockResolvedValueOnce(null); // alloc 2 free
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null);
       prisma.user.update
         .mockRejectedValueOnce(
           new Prisma.PrismaClientKnownRequestError('dup', {
@@ -89,10 +138,38 @@ describe('ReferralCodeService', () => {
           }),
         )
         .mockResolvedValueOnce({});
+      prisma.referralCodeAlias.upsert.mockResolvedValue({});
 
-      const out = await svc.regenerateForUser('u1');
+      const out = await svc.regenerateForUser('u1', { grace: true });
       expect(out.code).toMatch(/^[A-Z0-9]{8}$/);
       expect(prisma.user.update).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('resolveByCode', () => {
+    it('live code', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'u1' });
+      await expect(svc.resolveByCode('anna1')).resolves.toEqual({
+        userId: 'u1',
+        code: 'ANNA1',
+        matchedByCodeAlias: false,
+      });
+    });
+
+    it('alias в grace', async () => {
+      prisma.user.findFirst.mockResolvedValue(null);
+      prisma.referralCodeAlias.findFirst.mockResolvedValue({ userId: 'u1' });
+      await expect(svc.resolveByCode('OLDCODE1')).resolves.toEqual({
+        userId: 'u1',
+        code: 'OLDCODE1',
+        matchedByCodeAlias: true,
+      });
+    });
+
+    it('истёкший / неизвестный → null', async () => {
+      prisma.user.findFirst.mockResolvedValue(null);
+      prisma.referralCodeAlias.findFirst.mockResolvedValue(null);
+      await expect(svc.resolveByCode('GONE1234')).resolves.toBeNull();
     });
   });
 

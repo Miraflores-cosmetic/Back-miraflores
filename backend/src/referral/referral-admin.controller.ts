@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -17,6 +18,7 @@ import { AdjustReferralBalanceDto } from './dto/adjust-referral-balance.dto';
 import { UpdateReferralSettingsDto } from './dto/update-referral-settings.dto';
 import { ReferralCodeService } from './referral-code.service';
 import { ReferralSettingsService } from './referral-settings.service';
+import { ReferralVisitService } from './referral-visit.service';
 import { ReferralWalletService } from './referral-wallet.service';
 import { SetReferralActiveDto } from '../users/dto/referral-admin.dto';
 
@@ -31,6 +33,7 @@ export class ReferralAdminController {
     private readonly settings: ReferralSettingsService,
     private readonly wallet: ReferralWalletService,
     private readonly codes: ReferralCodeService,
+    private readonly visits: ReferralVisitService,
   ) {}
 
   @Get()
@@ -39,19 +42,114 @@ export class ReferralAdminController {
   }
 
   @Put()
-  update(@Body() dto: UpdateReferralSettingsDto) {
-    return this.settings.update(dto);
+  update(
+    @Body() dto: UpdateReferralSettingsDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.settings.update(dto, {
+      userId: user.sub,
+      email: user.email ?? null,
+    });
   }
 
-  /** Рефереры: code, available, pending, earnedGross, earnedNet. */
+  /** Σ available + pending — обязательства перед реферерами. */
+  @Get('liability')
+  liability() {
+    return this.wallet.getLiability();
+  }
+
+  /** Touch outbox после MAX попыток (DEAD) — счётчик + список. */
+  @Get('touches/dead')
+  listDeadTouches(@Query('limit') limitRaw?: string) {
+    const limit = Math.min(50, Math.max(1, Math.floor(Number(limitRaw) || 20)));
+    return this.wallet.listDeadTouches({ limit });
+  }
+
+  /** Ручной retry DEAD outbox. */
+  @Post('touches/:orderId/requeue')
+  requeueDeadTouch(@Param('orderId') orderId: string) {
+    return this.wallet.requeueDeadTouch(orderId);
+  }
+
+  /** Очередь address-match hold (подозрение self-ref). */
+  @Get('address-matches')
+  listAddressMatches(@Query('limit') limitRaw?: string) {
+    const limit = Math.min(50, Math.max(1, Math.floor(Number(limitRaw) || 20)));
+    return this.wallet.listAddressMatchSuspects({ limit });
+  }
+
+  /**
+   * Снять addressMatchSuspect и POSTED earn/invitee (ручное подтверждение).
+   * Дубль: POST orders/admin/:id/referral/approve-address (ACL orders).
+   */
+  @Post('orders/:orderId/approve-address')
+  approveAddress(@Param('orderId') orderId: string) {
+    return this.wallet.approveAddressMatch(orderId);
+  }
+
+  /**
+   * Отклонить self-ref: VOID PENDING earn + invitee.
+   * Дубль: POST orders/admin/:id/referral/reject-address (ACL orders).
+   */
+  @Post('orders/:orderId/reject-address')
+  rejectAddress(@Param('orderId') orderId: string) {
+    return this.wallet.rejectAddressMatch(orderId);
+  }
+
+  /** История смен настроек (снимок до изменения). */
+  @Get('revisions')
+  listRevisions(@Query('limit') limitRaw?: string) {
+    const limit = Math.min(50, Math.max(1, Math.floor(Number(limitRaw) || 20)));
+    return this.settings.listRevisions({ limit });
+  }
+
+  /**
+   * Рефереры: earned / invitees / GMV + сортировка.
+   * sort=earned|invitees|gmv|id, dir=asc|desc, offset=.
+   */
   @Get('referrers')
   listReferrers(
     @Query('q') q?: string,
     @Query('limit') limitRaw?: string,
     @Query('cursor') cursor?: string,
+    @Query('offset') offsetRaw?: string,
+    @Query('sort') sort?: string,
+    @Query('dir') dir?: string,
   ) {
     const limit = Math.min(50, Math.max(1, Math.floor(Number(limitRaw) || 20)));
-    return this.wallet.listReferrers({ q, limit, cursor: cursor ?? null });
+    const offset = Math.max(0, Math.floor(Number(offsetRaw) || 0));
+    return this.wallet.listReferrers({
+      q,
+      limit,
+      cursor: cursor ?? null,
+      offset,
+      sort: sort as 'id' | 'earned' | 'invitees' | 'gmv' | undefined,
+      dir: dir as 'asc' | 'desc' | undefined,
+    });
+  }
+
+  /**
+   * Воронка ?mf=: клик → sticky → заказ → оплата.
+   * period=today|yesterday|last_7|week|month|custom (+ from/to YYYY-MM-DD).
+   */
+  @Get('funnel')
+  async funnel(
+    @Query('period') period?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('topLimit') topLimitRaw?: string,
+  ) {
+    try {
+      return await this.visits.getFunnel({
+        period,
+        from,
+        to,
+        topLimit: Math.floor(Number(topLimitRaw) || 20),
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new BadRequestException(msg);
+    }
   }
 
   /**
@@ -88,11 +186,17 @@ export class ReferralAdminController {
   }
 
   /**
-   * Новый код (старый ?mf= инвалиден). ACL: settings (тот же staff, что disable).
-   * Дубль: POST users/admin/:id/referral/regenerate (ACL users) — для карточки пользователя.
+   * Новый код. Body `{ grace?: boolean }`.
+   * Default `false` — отозвать aliases (утечка). `grace: true` — alias на linkTtlDays.
+   * Дубль: POST users/admin/:id/referral/regenerate (ACL users).
    */
   @Post('users/:userId/regenerate')
-  regenerate(@Param('userId') userId: string) {
-    return this.codes.regenerateForUser(userId);
+  regenerate(
+    @Param('userId') userId: string,
+    @Body() body?: { grace?: boolean },
+  ) {
+    return this.codes.regenerateForUser(userId, {
+      grace: body?.grace === true,
+    });
   }
 }

@@ -196,6 +196,8 @@ export type AdminOrderDetail = {
       referrerEmail: string | null;
       referrerCode: string | null;
       createdAt: string;
+      addressMatchSuspect?: boolean;
+      addressMatchReason?: string | null;
     } | null;
     walletSpent: number;
     /** Referrer EARN POSTED (без INVITEE_BONUS). */

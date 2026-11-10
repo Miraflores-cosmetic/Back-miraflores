@@ -35,12 +35,14 @@ import {
 import { AdminCreateOrderDto } from './dto/admin-create-order.dto';
 import { OrdersAdminService } from './orders-admin.service';
 import { StaffAccessService } from '../staff/staff-access.service';
+import { ReferralWalletService } from '../referral/referral-wallet.service';
 
 /**
  * ACL (AdminGuard + @miraflores/admin-sections):
  * list/detail/packing/ship/… → `orders`;
  * mark-paid / refund → `orders_finance` (суперадмин — всегда).
  * create + payMode=mark_paid — тот же grant, проверка в сервисе (path ACL тела не видит).
+ * referral approve/reject address — `orders` (кнопка в карточке заказа).
  */
 @Controller('orders/admin')
 @UseGuards(JwtAuthGuard, AdminGuard)
@@ -48,6 +50,7 @@ export class OrdersAdminController {
   constructor(
     private readonly orders: OrdersAdminService,
     private readonly staffAccess: StaffAccessService,
+    private readonly referralWallet: ReferralWalletService,
   ) {}
 
   @Get()
@@ -129,6 +132,24 @@ export class OrdersAdminController {
   async one(@Param('id') id: string) {
     await this.orders.markViewed(id);
     return this.orders.getById(id);
+  }
+
+  /**
+   * MF referral: снять addressMatchSuspect → POSTED (ACL orders).
+   * Дубль settings/admin/referral/orders/:id/approve-address.
+   */
+  @Post(':id/referral/approve-address')
+  approveReferralAddress(@Param('id') id: string) {
+    return this.referralWallet.approveAddressMatch(id);
+  }
+
+  /**
+   * MF referral: отклонить self-ref, VOID PENDING earn/invitee (ACL orders).
+   * Дубль settings/admin/referral/orders/:id/reject-address.
+   */
+  @Post(':id/referral/reject-address')
+  rejectReferralAddress(@Param('id') id: string) {
+    return this.referralWallet.rejectAddressMatch(id);
   }
 
   /** Ручная отметка оплаты (без провайдера). */

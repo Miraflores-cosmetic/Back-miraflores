@@ -116,11 +116,50 @@ model User {
   /// Публичный код реф. ссылки (?mf=CODE); null пока не выдан в ЛК
   referralCode       String?  @unique
   referralCodeActive Boolean  @default(true)
+  /// Sticky invitee→referrer (регистрация / первый заказ); подстановка кода в пределах linkTtlDays
+  referredByUserId   String?
+  referredBy         User?    @relation("UserReferredBy", fields: [referredByUserId], references: [id], onDelete: SetNull)
+  referees           User[]   @relation("UserReferredBy")
+  referredByAt       DateTime?
   referralLedger     ReferralWalletLedger[]
   referralAttributions OrderReferralAttribution[] @relation("ReferralReferrer")
+  /// Старые ?mf= после regenerate (grace = linkTtlDays)
+  referralCodeAliases ReferralCodeAlias[]
+  referralMfVisits    ReferralMfVisitDaily[]
 
   @@index([staffDeletedAt])
   @@index([groupId])
+  @@index([referredByUserId])
+}
+
+/// Alias прежнего User.referralCode после regenerate. Resolve пока expiresAt > now.
+model ReferralCodeAlias {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  code      String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/// Агрегат визитов ?mf= (день Москва × код). Beacon с витрины → POST settings/referral/visit.
+model ReferralMfVisitDaily {
+  id             String   @id @default(cuid())
+  /// Календарный день Europe/Moscow
+  day            DateTime @db.Date
+  code           String
+  referrerUserId String?
+  referrer       User?    @relation(fields: [referrerUserId], references: [id], onDelete: SetNull)
+  visits         Int      @default(0)
+  updatedAt      DateTime @updatedAt
+
+  @@unique([day, code])
+  @@index([day])
+  @@index([code])
+  @@index([referrerUserId, day])
 }
 
 /// Группа покупателей (цены, видимость, промо)
@@ -800,6 +839,8 @@ model Order {
   giftCertificateAmount Int           @default(0)
   /// Списание реф. кошелька (₽); XOR с promo/gift; hold SPEND_HOLD при create
   referralWalletAmount Int            @default(0)
+  /// Уже RELEASE при refund (₽). commission-base: amount + released = исходный credit.
+  referralWalletReleasedAmount Int    @default(0)
   /// Покупка сертификата на сайте (не товарный заказ)
   giftPurchaseDenominationId String?
   giftPurchaseDenomination   GiftCertificateDenomination? @relation(fields: [giftPurchaseDenominationId], references: [id], onDelete: SetNull)
@@ -815,6 +856,7 @@ model Order {
   promoRedemption PromoCodeRedemption?
   affiliateLead   OrderAffiliateLead?
   referralAttribution OrderReferralAttribution?
+  referralTouchOutbox ReferralTouchOutbox?
   /// Сумма уже возвращённых средств (₽)
   refundedAmount  Int           @default(0)
   /// Когда админ открыл карточку заказа (для badge в sidebar)
@@ -886,23 +928,25 @@ enum ReferralEarnMode {
 }
 
 enum ReferralQuarantineMode {
-  /// Available после DELIVERED
+  /// Available сразу после DELIVERED
   DELIVERED
   /// Available через N дней после PAID без полного refund
   DAYS_AFTER_PAID
+  /// Available через N дней после DELIVERED (окно возврата после доставки)
+  DELIVERED_PLUS_DAYS
 }
 
 enum ReferralLedgerKind {
   EARN
   /// Резерв при create ≡ gift CAPTURE: available↓ сразу. Для paid отдельный CAPTURE не нужен.
   SPEND_HOLD
-  /// Dead (hold≡capture = SPEND_HOLD). Оставлен в PG enum — не дропать; не писать новые строки.
-  SPEND_CAPTURE
   /// Отмена unpaid / full admin refund — возврат net HOLD.
   SPEND_RELEASE
   CLAWBACK
   ADJUST
   INVITEE_BONUS
+  /// Долг clawback при available=0; не входит в available. Погашение из будущих EARN.
+  DEBT
 }
 
 enum ReferralLedgerStatus {
@@ -922,20 +966,57 @@ model ReferralSettings {
   enabledAt            DateTime?
   /// Целый % от commission base (goods − promo − gift − refunds)
   earnPercent          Int                     @default(5)
-  earnMode             ReferralEarnMode        @default(EVERY)
+  /// Default FIRST — EVERY на купонном агрегаторе кормит % с существующей аудитории
+  earnMode             ReferralEarnMode        @default(FIRST_GOODS_ORDER)
+  /// При EVERY: макс. EARN на покупателя в окне; 0 = без лимита
+  earnWindowMaxOrders  Int                     @default(0)
+  /// При EVERY+maxOrders: окно от первой товарной покупки покупателя (дни); 0 = lifetime
+  earnWindowDays       Int                     @default(90)
   linkTtlDays          Int                     @default(60)
   /// Мин. leadSum (₽) для earn; 0 = без порога
   minOrderRub          Int                     @default(0)
   quarantineMode       ReferralQuarantineMode  @default(DELIVERED)
-  /// Для DAYS_AFTER_PAID
+  /// Для DAYS_AFTER_PAID / DELIVERED_PLUS_DAYS
   quarantineDays       Int                     @default(7)
   inviteeBonusEnabled  Boolean                 @default(false)
   inviteeBonusRub      Int                     @default(0)
   /// Max списание wallet за заказ: % от total (1–100)
   spendCapPercent      Int                     @default(100)
+  /// Месячный cap Σ EARN (PENDING|POSTED) на реферера; 0 = без лимита
+  monthlyEarnCapRub    Int                     @default(0)
   /// Шаблон шаринга; плейсхолдеры {link} {code}
   shareText            String                  @default("Закажи в Miraflores по моей ссылке: {link}") @db.Text
   updatedAt            DateTime                @updatedAt
+}
+
+/// Снимок ReferralSettings ДО изменения (кто/когда менял % / mode / …).
+model ReferralSettingsRevision {
+  id          String   @id @default(cuid())
+  /// Serialize(prev) — JSON snapshot публичных полей
+  snapshot    Json
+  actorUserId String?
+  actorEmail  String?
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+/// Outbox touch() после PAID/cancel/refund/DELIVERED (как OrderAffiliateLead у YouRich).
+/// enqueue в tx смены статуса; after-commit → touch; worker retries PENDING/ERROR; DEAD после MAX.
+model ReferralTouchOutbox {
+  id            String    @id @default(cuid())
+  orderId       String    @unique
+  order         Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  /// PENDING | DONE | ERROR | DEAD
+  state         String    @default("PENDING")
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now())
+  lastError     String?   @db.Text
+  doneAt        DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([state, nextAttemptAt])
 }
 
 /// Атрибуция заказа на реферера (?mf=code). Earn — отдельно в ledger (фаза 2).
@@ -947,10 +1028,14 @@ model OrderReferralAttribution {
   code           String
   referrerUserId String
   referrer       User     @relation("ReferralReferrer", fields: [referrerUserId], references: [id], onDelete: Restrict)
+  /// Совпадение адреса/ПВЗ с реферером — attribution ок, POSTED только после approve в админке
+  addressMatchSuspect Boolean @default(false)
+  addressMatchReason  String?
   createdAt      DateTime @default(now())
 
   @@index([referrerUserId, createdAt])
   @@index([code])
+  @@index([addressMatchSuspect])
 }
 
 /// Ledger кошелька реферера (и invitee bonus). Available = sum POSTED signed amounts.
@@ -963,7 +1048,7 @@ model ReferralWalletLedger {
   user           User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   kind           ReferralLedgerKind
   status         ReferralLedgerStatus @default(POSTED)
-  /// Знаковая сумма ₽: EARN/BONUS/RELEASE/ADJUST(+) > 0; HOLD/CAPTURE/CLAWBACK < 0
+  /// Знаковая сумма ₽: EARN/BONUS/RELEASE/ADJUST(+) > 0; HOLD/CLAWBACK < 0
   amount         Int
   /// Available после этой POSTED-строки (для аудита)
   balanceAfter   Int?
@@ -973,6 +1058,17 @@ model ReferralWalletLedger {
   idempotencyKey String
   actorUserId    String?
   note           String?
+  /// Snapshot quarantine (EARN/INVITEE); null у legacy / non-earn kinds.
+  qMode          ReferralQuarantineMode?
+  qDays          Int?
+  /// CLAWBACK/DEBT: earn | invitee | debt. Null у остальных kinds.
+  source         String?
+  /// Snapshot базы/% начисления (EARN/INVITEE); null у legacy.
+  earnBase       Int?
+  earnPct        Int?
+  /// Когда PENDING EARN/INVITEE с qMode=DAYS_AFTER_PAID можно POSTED (paidAt+qDays).
+  /// null = worker не трогает (DELIVERED-mode → release через touch).
+  availableAt    DateTime?
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
 
@@ -980,6 +1076,9 @@ model ReferralWalletLedger {
   @@index([userId, status, createdAt])
   @@index([orderId])
   @@index([kind, status])
+  @@index([status, availableAt])
+  @@index([source])
+  @@index([kind, source])
 }
 
 model ChatConversation {
