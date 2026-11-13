@@ -159,11 +159,25 @@ export function isOrderPayDeepLink(href: string): boolean {
   }
 }
 
+/** Deep-link checkout или hosted redirect ЮKassa (доплата). Не ЛК. */
+export function isBuyerPaymentHref(href: string): boolean {
+  const t = href.trim();
+  if (!t) return false;
+  if (isOrderPayDeepLink(t)) return true;
+  try {
+    const u = new URL(t);
+    const host = u.hostname.toLowerCase();
+    return host.includes('yoomoney.ru') || host.includes('yookassa.ru');
+  } catch {
+    return false;
+  }
+}
+
 function snippetTextFallback(key: string, vars: EmailTemplateVars): string {
   switch (key) {
     case 'cta.pay': {
       const href = String(vars['order.pay_url'] ?? '').trim();
-      return isOrderPayDeepLink(href) ? href : '';
+      return isBuyerPaymentHref(href) ? href : '';
     }
     case 'cta.order':
       return String(vars['order.url'] ?? '').trim();
@@ -248,7 +262,9 @@ function snippetHtml(key: EmailSnippetKey, vars: EmailTemplateVars): string {
   switch (key) {
     case 'cta.pay': {
       const href = String(vars['order.pay_url'] ?? '').trim();
-      return isOrderPayDeepLink(href) ? mailCtaButton(href, 'Оплатить') : '';
+      return isBuyerPaymentHref(href)
+        ? mailCtaButton(href, 'Оплатить доплату')
+        : '';
     }
     case 'cta.order': {
       const href = String(vars['order.url'] ?? '').trim();
@@ -283,8 +299,8 @@ function maybeAutoCtaHtml(plainBlock: string, vars: EmailTemplateVars): string |
   const pay = String(vars['order.pay_url'] ?? '').trim();
   const order = String(vars['order.url'] ?? '').trim();
   const site = String(vars['site.url'] ?? '').trim();
-  if (pay && t === pay && isOrderPayDeepLink(pay)) {
-    return mailCtaButton(pay, 'Оплатить');
+  if (pay && t === pay && isBuyerPaymentHref(pay)) {
+    return mailCtaButton(pay, 'Оплатить доплату');
   }
   if (order && t === order) return mailCtaButton(order, 'Смотреть заказ');
   if (site && t === site) return mailCtaButton(site, 'На сайт Miraflores');

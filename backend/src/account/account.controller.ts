@@ -212,4 +212,12 @@ export class AccountController {
   cancelOrder(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.account.cancelOrder(user.sub, id);
   }
+
+  @Post('orders/:id/balance-payment')
+  createOrderBalancePayment(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+  ) {
+    return this.account.createOrderBalancePayment(user.sub, id);
+  }
 }

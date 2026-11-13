@@ -20,7 +20,10 @@ import { scheduleAfterRlsCommitWithBypass } from '../rls/rls-after-commit';
 import { restoreStockOnPaidCancel } from './order-stock';
 import { adjustStockForItemEdit } from './order-item-stock-edit';
 import { lockOrderForUpdate } from './order-lock';
-import { isClarificationComment } from './address-clarification';
+import {
+  isClarificationComment,
+  stripAddressClarificationFromComment,
+} from './address-clarification';
 import { applyPaidInTx } from './mark-order-paid';
 import { cancelUnpaidOrderInTx } from './cancel-unpaid-order';
 import { cancelPendingAtProviders } from './cancel-pending-at-providers';
@@ -90,6 +93,7 @@ import {
 } from '../referral/referral-touch';
 import { ReferralWalletService } from '../referral/referral-wallet.service';
 import { OrdersPublicService } from './orders.public.service';
+import { ensureOrderSurchargePayLink } from './order-surcharge-pay';
 
 const LIST_MAX = 100;
 const LIST_DEFAULT = 20;
@@ -2159,6 +2163,10 @@ export class OrdersAdminService {
           ? parseShipmentProvider(dto.shippingMethod)
           : order.shippingMethod;
 
+      if (addressTouched && shippingMethod) {
+        after.comment = stripAddressClarificationFromComment(after.comment);
+      }
+
       if (addressTouched) {
         // Синхронизируем pvzCode с мета в comment
         const resolvedPvz = resolvePvzCode(after.comment, after.pvzCode);
@@ -2954,24 +2962,12 @@ export class OrdersAdminService {
     actorUserId: string,
     opts: { amount?: number } = {},
   ) {
-    if (!this.yookassa.isConfigured()) {
-      throw new BadRequestException('ЮKassa не настроена');
-    }
-
     const order = await this.prisma.order.findUnique({
       where: { id },
       include: { payments: true },
     });
     if (!order) throw new NotFoundException('Заказ не найден');
-    if (order.giftPurchaseDenominationId) {
-      throw new BadRequestException('Для заказа сертификата доплата недоступна');
-    }
     assertOrderEditable(order.status);
-    if (!isPaidEditableStatus(order.status)) {
-      throw new BadRequestException(
-        'Доплата доступна только для оплаченных заказов (до отправки)',
-      );
-    }
 
     const netPaid = netPaidAmount(order.payments, order.refundedAmount);
     const { balanceDue } = balanceAfterTotal(order.total, netPaid);
@@ -2984,73 +2980,48 @@ export class OrdersAdminService {
           : `Сумма доплаты должна быть от 1 до ${balanceDue} ₽`,
       );
     }
+    if (amount !== balanceDue) {
+      throw new BadRequestException(
+        `Частичная доплата из админки пока не поддерживается (к доплате ${balanceDue} ₽)`,
+      );
+    }
 
-    const site =
-      this.config.get<string>('FRONTEND_PUBLIC_URL')?.replace(/\/+$/, '') ||
-      'http://localhost:5173';
-    const returnUrl = `${site}/profile`;
+    const link = await ensureOrderSurchargePayLink(
+      this.prisma,
+      this.yookassa,
+      this.config,
+      order,
+    );
 
-    const { payment, confirmationUrl } =
-      await this.yookassa.createRedirectPayment({
-        amountRub: amount,
-        description: `Доплата по заказу ${order.number}`,
-        orderId: order.id,
-        orderNumber: order.number,
-        customerEmail: order.email,
-        returnUrl,
-        kind: 'surcharge',
-        receiptItems: [
-          {
-            description: `Доплата по заказу ${order.number}`.slice(0, 128),
-            quantity: 1,
-            amountRub: amount,
-          },
-        ],
-      });
-
-    await this.prisma.payment.create({
-      data: {
-        orderId: order.id,
-        provider: 'yookassa',
-        status: PaymentStatus.PENDING,
-        amount,
-        externalId: payment.id,
-        confirmationUrl,
-        raw: {
+    if (!link.reused) {
+      await this.lifecycle.addEvent(this.prisma, {
+        orderId: id,
+        type: 'NOTE',
+        message: `Выставлена доплата ${link.amount} ₽`,
+        actorUserId,
+        meta: {
           kind: 'surcharge',
-          yookassa: payment,
-        } as Prisma.InputJsonValue,
-      },
-    });
-
-    await this.lifecycle.addEvent(this.prisma, {
-      orderId: id,
-      type: 'NOTE',
-      message: `Выставлена доплата ${amount} ₽`,
-      actorUserId,
-      meta: {
-        kind: 'surcharge',
-        amount,
-        yookassaPaymentId: payment.id,
-        confirmationUrl,
-      },
-    });
+          amount: link.amount,
+          yookassaPaymentId: link.paymentId,
+          confirmationUrl: link.confirmationUrl,
+        },
+      });
+    }
 
     await this.lifecycle.notifyOrderSurcharge({
       to: order.email,
       orderNumber: order.number,
-      amount,
-      // confirmation URL ЮKassa — только в admin response, не в письме
-      paymentUrl: '',
+      amount: link.amount,
+      paymentUrl: link.confirmationUrl,
     });
 
     const detail = await this.getById(id);
     return {
       ...detail,
       surcharge: {
-        amount,
-        confirmationUrl,
-        paymentId: payment.id,
+        amount: link.amount,
+        confirmationUrl: link.confirmationUrl,
+        paymentId: link.paymentId,
       },
     };
   }

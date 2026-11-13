@@ -534,6 +534,89 @@ describe('OrdersAdminService clarification clear + list filter', () => {
     expect(res.needsAddressClarification).toBe(false);
   });
 
+  it('updateShippingAddress: operator comment с marker → strip + снять flag', async () => {
+    orderFindUnique
+      .mockResolvedValueOnce({
+        id: 'o1',
+        number: 'MF-1',
+        status: OrderStatus.AWAITING_PAYMENT,
+        email: 'a@b.c',
+        phone: '+7900',
+        giftPurchaseDenominationId: null,
+        shippingCost: 0,
+        subtotal: 0,
+        discountTotal: 0,
+        giftCertificateAmount: 0,
+        total: 0,
+        shippingMethod: null,
+        needsAddressClarification: true,
+        shippingAddress: {
+          city: 'Москва',
+          address: 'набережная Марка Шагала, 1к1',
+          comment: `__JCOS:carrier=cdek|dropoff=courier|lon=1|lat=2|cc=RU__\nТип доставки: Уточнит оператор.\n${ADDRESS_CLARIFICATION_MARKER}`,
+        },
+        payments: [],
+        shipments: [],
+      })
+      .mockResolvedValueOnce({
+        id: 'o1',
+        number: 'MF-1',
+        status: OrderStatus.AWAITING_PAYMENT,
+        email: 'a@b.c',
+        phone: '+7900',
+        customerName: 'Ann',
+        customerNote: null,
+        shippingAddress: {},
+        shippingMethod: 'CDEK',
+        shippingCost: 350,
+        needsAddressClarification: false,
+        subtotal: 0,
+        discountTotal: 0,
+        giftCertificateAmount: 0,
+        giftPurchaseDenominationId: null,
+        giftPurchaseRecipientEmail: null,
+        total: 350,
+        refundedAmount: 0,
+        promoCode: null,
+        pricingGroupId: null,
+        pricingGroupName: null,
+        pricingContext: null,
+        guestId: 'g1',
+        userId: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        awaitingPaymentRemindStage: 0,
+        user: null,
+        items: [],
+        payments: [],
+        shipments: [],
+        checklistMarks: [],
+        events: [],
+        promoRedemption: null,
+        affiliateLead: null,
+      });
+
+    const res = await admin.updateShippingAddress('o1', 'admin1', {
+      city: 'Москва',
+      address: 'набережная Марка Шагала, 1к1',
+      comment: `__JCOS:carrier=cdek|dropoff=courier|lon=1|lat=2|cc=RU__\nТип доставки: Уточнит оператор.\n${ADDRESS_CLARIFICATION_MARKER}`,
+      shippingMethod: 'CDEK',
+      shippingCost: 350,
+    });
+
+    expect(orderUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          needsAddressClarification: false,
+          shippingAddress: expect.objectContaining({
+            comment: '__JCOS:carrier=cdek|dropoff=courier|lon=1|lat=2|cc=RU__',
+          }),
+        }),
+      }),
+    );
+    expect(res.addressClarificationCleared).toBe(true);
+  });
+
   it('markPaid: soft-block пока needsAddressClarification', async () => {
     orderFindUnique.mockResolvedValueOnce({
       needsAddressClarification: true,

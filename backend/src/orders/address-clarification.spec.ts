@@ -3,6 +3,7 @@ import {
   ADDRESS_CLARIFICATION_MARKER,
   buildAddressClarificationComment,
   hasAddressClarificationEvidence,
+  stripAddressClarificationFromComment,
 } from './address-clarification';
 
 describe('address-clarification', () => {
@@ -31,6 +32,13 @@ describe('address-clarification', () => {
         address: 'Тверская 1',
       }),
     ).toBe(false);
+  });
+
+  it('stripAddressClarificationFromComment сохраняет JCOS meta', () => {
+    const raw = `__JCOS:carrier=cdek|dropoff=courier|lon=1|lat=2|cc=RU__\nТип доставки: Уточнит оператор.\n${ADDRESS_CLARIFICATION_MARKER}`;
+    expect(stripAddressClarificationFromComment(raw)).toBe(
+      '__JCOS:carrier=cdek|dropoff=courier|lon=1|lat=2|cc=RU__',
+    );
   });
 
   it('buildAddressClarificationComment добавляет marker', () => {

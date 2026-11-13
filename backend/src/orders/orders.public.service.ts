@@ -56,6 +56,7 @@ import {
 import { ShippingServerEstimateService } from './shipping-server-estimate.service';
 import type { ShippingQuoteRequestDto } from './dto/shipping-quote.dto';
 import { applyPaidInTx } from './mark-order-paid';
+import { upsertPendingOrderPayment } from './payment-order-external';
 import { canMarkPaid } from './order-transitions';
 import { YooKassaService } from './yookassa.service';
 import { YandexPayService } from './yandex-pay.service';
@@ -1529,16 +1530,13 @@ export class OrdersPublicService {
       },
     });
 
-    await this.prisma.payment.create({
-      data: {
-        orderId: order.id,
-        provider: 'yandexpay',
-        status: PaymentStatus.PENDING,
-        amount: order.total,
-        externalId: yandexOrderId,
-        confirmationUrl: paymentUrl,
-        raw: { yandexPay: raw } as Prisma.InputJsonValue,
-      },
+    await upsertPendingOrderPayment(this.prisma, {
+      orderId: order.id,
+      provider: 'yandexpay',
+      amount: order.total,
+      externalId: yandexOrderId,
+      confirmationUrl: paymentUrl,
+      raw: { yandexPay: raw } as Prisma.InputJsonValue,
     });
 
     if (order.status === OrderStatus.NEW) {
@@ -1776,9 +1774,10 @@ export class OrdersPublicService {
         externalOperationId: `late-${paymentId}-${Date.now()}`,
       });
       await this.prisma.payment.updateMany({
-        where: { externalId: paymentId },
+        where: { orderId: order.id, externalId: paymentId },
         data: { status: PaymentStatus.REFUNDED },
       });
+      await this.recordLateRefundAccounting(order.id, amount);
       await this.lifecycle.addEvent(this.prisma, {
         orderId: order.id,
         type: 'REFUND',
@@ -1964,16 +1963,13 @@ export class OrdersPublicService {
       receiptItems,
     });
 
-    await this.prisma.payment.create({
-      data: {
-        orderId: order.id,
-        provider: 'yookassa',
-        status: PaymentStatus.PENDING,
-        amount: order.total,
-        externalId: payment.id,
-        confirmationUrl: payment.confirmation?.confirmation_url ?? null,
-        raw: { confirmationToken, yookassa: payment } as Prisma.InputJsonValue,
-      },
+    await upsertPendingOrderPayment(this.prisma, {
+      orderId: order.id,
+      provider: 'yookassa',
+      amount: order.total,
+      externalId: payment.id,
+      confirmationUrl: payment.confirmation?.confirmation_url ?? null,
+      raw: { confirmationToken, yookassa: payment } as Prisma.InputJsonValue,
     });
 
     if (order.status === OrderStatus.NEW) {
@@ -2513,6 +2509,18 @@ export class OrdersPublicService {
     }
   }
 
+  /** Учёт автовозврата (late): не меняем статус заказа / СДЭК. */
+  private async recordLateRefundAccounting(
+    orderId: string,
+    amount: number,
+  ): Promise<void> {
+    if (!Number.isFinite(amount) || amount < 1) return;
+    await this.prisma.order.update({
+      where: { id: orderId },
+      data: { refundedAmount: { increment: amount } },
+    });
+  }
+
   /** Автовозврат, если деньги пришли после ручной отмены / abandon. */
   private async refundLatePayment(
     order: {
@@ -2559,9 +2567,10 @@ export class OrdersPublicService {
         description: `Автовозврат: заказ ${order.number} уже ${order.status}`,
       });
       await this.prisma.payment.updateMany({
-        where: { externalId: paymentId },
+        where: { orderId: order.id, externalId: paymentId },
         data: { status: PaymentStatus.REFUNDED },
       });
+      await this.recordLateRefundAccounting(order.id, amount);
       await this.lifecycle.addEvent(this.prisma, {
         orderId: order.id,
         type: 'REFUND',

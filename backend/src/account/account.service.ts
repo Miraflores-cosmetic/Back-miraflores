@@ -36,6 +36,9 @@ import type {
 import { ReferralCodeService } from '../referral/referral-code.service';
 import { ReferralStickyService } from '../referral/referral-sticky.service';
 import { ReferralWalletService } from '../referral/referral-wallet.service';
+import { ConfigService } from '@nestjs/config';
+import { resolveOrderBalanceFields } from '../orders/order-balance-due';
+import { ensureOrderSurchargePayLink } from '../orders/order-surcharge-pay';
 
 const BCRYPT_ROUNDS = 10;
 
@@ -124,7 +127,16 @@ export class AccountService {
     private readonly referralCodes: ReferralCodeService,
     private readonly referralWallet: ReferralWalletService,
     private readonly referralSticky: ReferralStickyService,
+    private readonly config: ConfigService,
   ) {}
+
+  private orderPaymentsSelect = {
+    status: true,
+    amount: true,
+    externalId: true,
+    confirmationUrl: true,
+    raw: true,
+  } as const;
 
   async getProfile(userId: string) {
     const user = await this.prisma.user.findUnique({
@@ -663,9 +675,12 @@ export class AccountService {
         shippingCost: true,
         discountTotal: true,
         giftCertificateAmount: true,
+        refundedAmount: true,
+        giftPurchaseDenominationId: true,
         createdAt: true,
         guestId: true,
         needsAddressClarification: true,
+        payments: { select: this.orderPaymentsSelect },
         items: {
           select: {
             id: true,
@@ -744,6 +759,10 @@ export class AccountService {
       const needsAddressClarification = Boolean(o.needsAddressClarification);
       const canPay = awaitingUnpaid && !needsAddressClarification;
       const guestId = o.guestId?.trim() || '';
+      const { balanceDue, canPayBalance } = resolveOrderBalanceFields(
+        o,
+        o.payments,
+      );
       return {
         id: o.id,
         number: o.number,
@@ -753,6 +772,9 @@ export class AccountService {
         shippingCost: o.shippingCost,
         discountTotal: o.discountTotal,
         giftCertificateAmount: o.giftCertificateAmount,
+        refundedAmount: o.refundedAmount,
+        balanceDue,
+        canPayBalance,
         createdAt: o.createdAt,
         items: this.mapOrderItems(o.items),
         tracking: o.shipments[0]?.tracking?.trim() || null,
@@ -790,9 +812,11 @@ export class AccountService {
         pricingContext: true,
         giftCertificateCode: true,
         giftCertificateAmount: true,
+        giftPurchaseDenominationId: true,
         guestId: true,
         needsAddressClarification: true,
         createdAt: true,
+        payments: { select: this.orderPaymentsSelect },
         shipments: {
           orderBy: { createdAt: 'desc' },
           take: 3,
@@ -868,6 +892,10 @@ export class AccountService {
     }
     // Авто-отмена отключена: не отдаём дедлайн оплаты (UI раньше гейтил по нему).
     const payExpiresAt: string | null = null;
+    const { balanceDue, canPayBalance } = resolveOrderBalanceFields(
+      order,
+      order.payments,
+    );
 
     return {
       id: order.id,
@@ -895,6 +923,8 @@ export class AccountService {
       discountTotal: order.discountTotal,
       total: order.total,
       refundedAmount: order.refundedAmount,
+      balanceDue,
+      canPayBalance,
       promoCode: order.promoCode,
       pricingGroup: order.pricingGroupName
         ? {
@@ -914,6 +944,28 @@ export class AccountService {
       canPay,
       canCancel: canCancelUnpaid,
     };
+  }
+
+  /** Доплата по заказу (PAID/PACKING): redirect URL ЮKassa. */
+  async createOrderBalancePayment(userId: string, orderId: string) {
+    const accessWhere = await buyerOrderAccessWhere(this.prisma, userId);
+    const order = await this.prisma.order.findFirst({
+      where: { AND: [{ id: orderId }, accessWhere] },
+      include: { payments: true },
+    });
+    if (!order) throw new NotFoundException('Заказ не найден');
+    if (!order.userId) {
+      await this.prisma.order.update({
+        where: { id: order.id },
+        data: { userId },
+      });
+    }
+    return ensureOrderSurchargePayLink(
+      this.prisma,
+      this.yookassa,
+      this.config,
+      order,
+    );
   }
 
   /** Покупатель отменяет неоплаченный заказ (AWAITING/NEW). */

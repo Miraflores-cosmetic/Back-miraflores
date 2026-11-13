@@ -52,7 +52,7 @@ describe('applyPaidInTx', () => {
       findFirst: vi.fn(),
       update: vi.fn(),
       create: vi.fn(),
-      updateMany: vi.fn(),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     promoCode: { findFirst: vi.fn() },
     promoCodeRedemption: {
@@ -68,7 +68,6 @@ describe('applyPaidInTx', () => {
     tx.order.findUnique.mockResolvedValue({ ...orderRow });
     tx.order.update.mockResolvedValue({});
     tx.payment.findFirst.mockResolvedValue(null);
-    tx.payment.updateMany.mockResolvedValue({ count: 0 });
   });
 
   it('admin: stock + PAID + MARK_PAID + manual payment', async () => {
@@ -228,9 +227,7 @@ describe('applyPaidInTx', () => {
       ...orderRow,
       status: OrderStatus.PAID,
     });
-    tx.payment.findFirst.mockResolvedValue({
-      status: PaymentStatus.SUCCEEDED,
-    });
+    tx.payment.findFirst.mockResolvedValue({ id: 'pay-settled' });
     const res = await applyPaidInTx(tx as never, lifecycle, 'o1', {
       kind: 'yandexpay',
       remote: { id: 'o1:1', amountRub: 1000, status: 'CAPTURED' },
@@ -238,6 +235,29 @@ describe('applyPaidInTx', () => {
     expect(res.kind).toBe('already');
     expect(commitStockOnPaid).not.toHaveBeenCalled();
     expect(tx.payment.create).not.toHaveBeenCalled();
+    expect(tx.payment.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          orderId: 'o1',
+          externalId: 'o1:1',
+          status: { in: [PaymentStatus.SUCCEEDED, PaymentStatus.REFUNDED] },
+        }),
+      }),
+    );
+  });
+
+  it('FULFILLED + дубль строк: есть SUCCEEDED по orderId+externalId, PENDING не мешает → already', async () => {
+    tx.order.findUnique.mockResolvedValue({
+      ...orderRow,
+      status: OrderStatus.PACKING,
+    });
+    tx.payment.findFirst.mockResolvedValue({ id: 'pay-main' });
+    const res = await applyPaidInTx(tx as never, lifecycle, 'o1', {
+      kind: 'yookassa',
+      remote: { id: 'yk_dup', amount: { value: '1000.00' } },
+    });
+    expect(res.kind).toBe('already');
+    expect(lifecycle.addEvent).not.toHaveBeenCalled();
   });
 
   it('FULFILLED + другое списание (exclusive race) → late', async () => {
@@ -246,6 +266,7 @@ describe('applyPaidInTx', () => {
       status: OrderStatus.PAID,
     });
     tx.payment.findFirst.mockResolvedValue(null);
+    tx.payment.updateMany.mockResolvedValueOnce({ count: 0 });
     const res = await applyPaidInTx(tx as never, lifecycle, 'o1', {
       kind: 'yandexpay',
       remote: { id: 'o1:2', amountRub: 1000, status: 'CAPTURED' },

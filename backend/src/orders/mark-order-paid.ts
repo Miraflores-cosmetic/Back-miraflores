@@ -131,19 +131,15 @@ async function recordSucceededPayment(
   raw?: unknown,
 ): Promise<void> {
   if (!remote.id) return;
-  const existing = await tx.payment.findFirst({
-    where: { externalId: remote.id },
-  });
   const rawValue = (raw ?? remote) as unknown as Prisma.InputJsonValue;
-  if (existing) {
-    await tx.payment.update({
-      where: { id: existing.id },
-      data: {
-        status: PaymentStatus.SUCCEEDED,
-        raw: rawValue,
-      },
-    });
-  } else {
+  const { count } = await tx.payment.updateMany({
+    where: { orderId, externalId: remote.id },
+    data: {
+      status: PaymentStatus.SUCCEEDED,
+      raw: rawValue,
+    },
+  });
+  if (count === 0) {
     await tx.payment.create({
       data: {
         orderId,
@@ -155,6 +151,23 @@ async function recordSucceededPayment(
       },
     });
   }
+}
+
+/** Уже принятый / возвращённый платёж по этому заказу (идемпотентный webhook). */
+async function hasSettledPaymentForExternalId(
+  tx: Prisma.TransactionClient,
+  orderId: string,
+  externalId: string,
+): Promise<boolean> {
+  const row = await tx.payment.findFirst({
+    where: {
+      orderId,
+      externalId,
+      status: { in: [PaymentStatus.SUCCEEDED, PaymentStatus.REFUNDED] },
+    },
+    select: { id: true },
+  });
+  return row != null;
 }
 
 /**
@@ -205,17 +218,11 @@ export async function applyPaidInTx(
     if (source.kind === 'admin') {
       return { kind: 'already' };
     }
-    if (providerRemoteId) {
-      const existing = await tx.payment.findFirst({
-        where: { externalId: providerRemoteId },
-        select: { status: true },
-      });
-      if (
-        existing?.status === PaymentStatus.SUCCEEDED ||
-        existing?.status === PaymentStatus.REFUNDED
-      ) {
-        return { kind: 'already' };
-      }
+    if (
+      providerRemoteId &&
+      (await hasSettledPaymentForExternalId(tx, orderId, providerRemoteId))
+    ) {
+      return { kind: 'already' };
     }
     if (source.kind === 'yookassa' && yooRemote) {
       await recordSucceededPayment(

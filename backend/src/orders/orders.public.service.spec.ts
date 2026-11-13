@@ -42,6 +42,7 @@ const payment = {
   findMany: vi.fn().mockResolvedValue([]),
   create: vi.fn(),
   update: vi.fn(),
+  upsert: vi.fn(),
 };
 const promoCodeRedemption = {
   count: vi.fn(),
@@ -541,7 +542,7 @@ describe('OrdersPublicService', () => {
         ],
         payments: [],
       });
-      payment.create.mockResolvedValue({});
+      payment.upsert.mockResolvedValue({});
       yookassa.createEmbeddedPayment.mockResolvedValue({
         payment: {
           id: 'yk_pay_1',
@@ -578,7 +579,7 @@ describe('OrdersPublicService', () => {
         items: [{ title: 'Item', qty: 1, unitPrice: 500 }],
         payments: [],
       });
-      payment.create.mockResolvedValue({});
+      payment.upsert.mockResolvedValue({});
       yookassa.createEmbeddedPayment.mockResolvedValue({
         payment: {
           id: 'yk_pay_1',
@@ -668,7 +669,7 @@ describe('OrdersPublicService', () => {
         },
       ]);
       payment.updateMany.mockResolvedValue({ count: 1 });
-      payment.create.mockResolvedValue({});
+      payment.upsert.mockResolvedValue({});
       yookassa.createEmbeddedPayment.mockResolvedValue({
         payment: {
           id: 'yk_pay_1',

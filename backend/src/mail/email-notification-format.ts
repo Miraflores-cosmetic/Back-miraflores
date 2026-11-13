@@ -1,6 +1,7 @@
 import { escapeHtml, MAIL_BRAND } from './email-layout';
 import type { GiftEmailCertItem } from './email-templates';
 import {
+  isBuyerPaymentHref,
   isOrderPayDeepLink,
   type EmailTemplateVars,
 } from './email-notification-render';
@@ -225,7 +226,7 @@ export function baseOrderVars(opts: {
     // Пустой / не deep-link → {{#if order.pay_url}} и cta.pay скрыты (не ЛК).
     'order.pay_url': (() => {
       const pay = (opts.payUrl || '').trim();
-      return isOrderPayDeepLink(pay) ? pay : '';
+      return isBuyerPaymentHref(pay) ? pay : '';
     })(),
     'order.total_label': totalLabel,
     'order.subtotal_label': subtotalLabel,

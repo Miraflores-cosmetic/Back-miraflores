@@ -10,6 +10,7 @@ import {
 } from '@/components/shipping/ShippingCarrierModal';
 import type { AdminOrderShippingAddress } from '@/lib/adminOrderTypes';
 import { addressToShippingSeed } from '@/lib/shipping/buyerAddressHelpers';
+import { stripAddressClarificationFromComment } from '@/lib/shipping/addressClarification';
 import { buildJcosAddress2WithMeta } from '@/lib/shipping/addressShippingMeta';
 import { estimateShippingCostRub } from '@/lib/shipping/estimateShippingCost';
 import catalogStyles from '@/app/(admin)/admin/catalog/catalogAdmin.module.css';
@@ -141,7 +142,7 @@ export function OrderAddressEditModal({
           : {}),
         ...(pending.countryCode ? { cc: pending.countryCode } : {}),
       },
-      pending.comment,
+      stripAddressClarificationFromComment(pending.comment),
     );
     await onSave({
       address: {

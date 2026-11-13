@@ -1,5 +1,6 @@
 import type { ShippingSelection } from '@/components/shipping/ShippingCarrierModal';
 import { formatPhoneE164 } from '@/lib/phone';
+import { stripAddressClarificationFromComment } from '@/lib/shipping/addressClarification';
 import {
   buildJcosAddress2WithMeta,
   getJcosDeliveryDisplayMode,
@@ -124,6 +125,7 @@ export function addressToShippingSeed(
 > {
   const { meta, comment } = parseJcosAddressMeta(a.comment ?? '');
   const mode = getJcosDeliveryDisplayMode(a.comment);
+  const userComment = stripAddressClarificationFromComment(comment);
   return {
     recipientName: a.recipientName ?? '',
     phone: a.phone ?? '',
@@ -131,7 +133,7 @@ export function addressToShippingSeed(
     address: a.address,
     apartment: a.apartment ?? '',
     postalCode: a.postalCode ?? '',
-    comment,
+    comment: userComment,
     ...(meta
       ? {
           carrier: meta.carrier,

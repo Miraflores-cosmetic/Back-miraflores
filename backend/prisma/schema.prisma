@@ -1181,6 +1181,8 @@ model Payment {
   raw               Json?
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
+
+  @@unique([orderId, externalId])
 }
 
 model Shipment {

@@ -113,6 +113,11 @@ describe('AccountService', () => {
       referralCodes as never,
       referralWallet as never,
       { bindByCode: vi.fn(async () => ({ bound: false, referrerUserId: null })) } as never,
+      {
+        get: vi.fn((key: string) =>
+          key === 'FRONTEND_PUBLIC_URL' ? 'https://shop.test' : undefined,
+        ),
+      } as never,
     );
   });
 
@@ -261,8 +266,11 @@ describe('AccountService', () => {
       promoCode: null,
       giftCertificateCode: null,
       giftCertificateAmount: 0,
+      giftPurchaseDenominationId: null,
       guestId: 'guest-1',
       createdAt: new Date(),
+      payments: [{ status: 'SUCCEEDED', amount: 1000 }],
+      shipments: [],
       items: [],
     });
 
@@ -289,10 +297,13 @@ describe('AccountService', () => {
         shippingCost: 0,
         discountTotal: 0,
         giftCertificateAmount: 0,
+        refundedAmount: 0,
+        giftPurchaseDenominationId: null,
         createdAt: new Date(),
         userId: null,
         guestId: 'admin-guest',
         needsAddressClarification: false,
+        payments: [],
         items: [],
         shipments: [],
       },
@@ -323,6 +334,14 @@ describe('AccountService', () => {
         number: 'J-1',
         status: 'AWAITING_PAYMENT',
         total: 500,
+        subtotal: 500,
+        shippingCost: 0,
+        discountTotal: 0,
+        giftCertificateAmount: 0,
+        refundedAmount: 0,
+        giftPurchaseDenominationId: null,
+        needsAddressClarification: false,
+        payments: [],
         createdAt: new Date(),
         guestId: null,
         items: [],
@@ -366,6 +385,9 @@ describe('AccountService', () => {
       giftCertificateAmount: 0,
       guestId: 'guest-1',
       needsAddressClarification: false,
+      giftPurchaseDenominationId: null,
+      payments: [],
+      shipments: [],
       createdAt: new Date(Date.now() - 10 * 24 * 60 * 60_000),
       items: [],
     });
@@ -397,6 +419,9 @@ describe('AccountService', () => {
       giftCertificateAmount: 0,
       guestId: 'guest-1',
       needsAddressClarification: true,
+      giftPurchaseDenominationId: null,
+      payments: [],
+      shipments: [],
       createdAt: new Date(),
       items: [],
     });

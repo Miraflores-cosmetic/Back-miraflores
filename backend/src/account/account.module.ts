@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { DiscountsModule } from '../discounts/discounts.module';
 import { UserGroupsModule } from '../user-groups/user-groups.module';
 import { PrismaModule } from '../prisma/prisma.module';
@@ -14,6 +15,7 @@ import { ReferralModule } from '../referral/referral.module';
 
 @Module({
   imports: [
+    ConfigModule,
     PrismaModule,
     UserGroupsModule,
     DiscountsModule,

@@ -34,6 +34,7 @@ const payment = {
   create: vi.fn(),
   update: vi.fn(),
   updateMany: vi.fn(),
+  upsert: vi.fn(),
 };
 
 const prisma = {
@@ -147,7 +148,7 @@ describe('Yandex Pay flow (create / webhook / exclusive)', () => {
     payment.findMany.mockResolvedValue([]);
     payment.findFirst.mockResolvedValue(null);
     payment.updateMany.mockResolvedValue({ count: 0 });
-    payment.create.mockResolvedValue({ id: 'pay1' });
+    payment.upsert.mockResolvedValue({ id: 'pay1' });
     yandexPay.isConfigured.mockReturnValue(true);
     yandexPay.createOrder.mockResolvedValue({
       paymentUrl: 'https://pay.yandex.ru/l/1',
@@ -310,9 +311,12 @@ describe('Yandex Pay flow (create / webhook / exclusive)', () => {
       );
       expect(yandexPay.createOrder).toHaveBeenCalled();
       expect(res.paymentUrl).toBe('https://pay.yandex.ru/l/1');
-      expect(payment.create).toHaveBeenCalledWith(
+      expect(payment.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({
+          where: {
+            orderId_externalId: { orderId: 'ord1', externalId: 'ord1:1' },
+          },
+          create: expect.objectContaining({
             provider: 'yandexpay',
             externalId: 'ord1:1',
           }),

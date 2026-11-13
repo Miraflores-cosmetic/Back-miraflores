@@ -6,6 +6,7 @@
 export const ADDRESS_CLARIFICATION_MARKER = '__JCOS_ADDRESS_CLARIFICATION__=1';
 
 const SYNTHETIC_ADDRESS_RE = /адрес\s+уточнит\s+оператор/i;
+const CLARIFICATION_HINT_RE = /тип\s+доставки:\s*уточнит\s+оператор/i;
 
 /** True if comment/street2 carries the clarification marker. */
 export function isClarificationComment(
@@ -35,4 +36,18 @@ export function buildAddressClarificationComment(existing?: string | null): stri
     return `Тип доставки: Уточнит оператор.\n${ADDRESS_CLARIFICATION_MARKER}`;
   }
   return `${raw}\n${ADDRESS_CLARIFICATION_MARKER}`;
+}
+
+/** Убрать marker / «уточнит оператор» из comment (JCOS meta в первой строке сохраняем). */
+export function stripAddressClarificationFromComment(
+  comment: string | null | undefined,
+): string {
+  if (!comment?.trim()) return '';
+  const lines = comment.split('\n');
+  const kept = lines.filter((line) => {
+    if (line.includes(ADDRESS_CLARIFICATION_MARKER)) return false;
+    if (CLARIFICATION_HINT_RE.test(line)) return false;
+    return true;
+  });
+  return kept.join('\n').trimEnd();
 }
