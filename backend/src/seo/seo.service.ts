@@ -35,15 +35,14 @@ export class SeoService {
 
   getRobotsTxt(): string {
     const sitemap = this.abs('/sitemap.xml');
-    return [
-      'User-agent: *',
-      'Allow: /',
-      'Disallow: /admin',
-      'Disallow: /api/',
-      '',
-      `Sitemap: ${sitemap}`,
-      '',
-    ].join('\n');
+    const publicRules = ['Allow: /', 'Disallow: /admin', 'Disallow: /api/'];
+    const anthropicAgents = ['ClaudeBot', 'Claude-User', 'Claude-SearchBot'];
+    const lines: string[] = [];
+    for (const agent of anthropicAgents) {
+      lines.push(`User-agent: ${agent}`, ...publicRules, '');
+    }
+    lines.push('User-agent: *', ...publicRules, '', `Sitemap: ${sitemap}`, '');
+    return lines.join('\n');
   }
 
   async getSitemapXml(): Promise<string> {
