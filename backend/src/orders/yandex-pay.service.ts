@@ -328,15 +328,24 @@ export class YandexPayService {
       `orders/${encodeURIComponent(orderId)}`,
     );
 
-    const data = (
+    const envelope = (
       res.data && typeof res.data === 'object' ? res.data : res
     ) as {
       orderId?: string;
       paymentStatus?: string;
       orderAmount?: string | number;
       cart?: { total?: { amount?: string } };
+      order?: {
+        orderId?: string;
+        paymentStatus?: string;
+        orderAmount?: string | number;
+        cart?: { total?: { amount?: string } };
+      };
     };
-    const amountRaw = data.cart?.total?.amount ?? data.orderAmount;
+    /** Merchant API v1: поля в `data.order`, не на верхнем `data`. */
+    const orderNode = envelope.order ?? envelope;
+    const amountRaw =
+      orderNode.cart?.total?.amount ?? orderNode.orderAmount ?? null;
     let amountRub: number | null = null;
     if (amountRaw != null && amountRaw !== '') {
       const n = Math.round(Number(amountRaw));
@@ -344,8 +353,8 @@ export class YandexPayService {
     }
 
     return {
-      orderId: String(data.orderId || orderId),
-      paymentStatus: data.paymentStatus,
+      orderId: String(orderNode.orderId || orderId),
+      paymentStatus: orderNode.paymentStatus ?? envelope.paymentStatus,
       amountRub,
       raw: res,
     };

@@ -179,4 +179,32 @@ describe('YandexPayService', () => {
       await expect(service.verifyWebhookJwt('a.b.c')).resolves.toEqual(payload);
     });
   });
+
+  describe('getOrder', () => {
+    it('читает paymentStatus и сумму из data.order (Merchant API v1)', async () => {
+      fetchMock.mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({
+            code: 200,
+            status: 'success',
+            data: {
+              operations: [],
+              order: {
+                orderId: 'ord1:1',
+                paymentStatus: 'CAPTURED',
+                orderAmount: '9722.00',
+                cart: { total: { amount: '9722.00' } },
+              },
+            },
+          }),
+      });
+
+      const res = await service.getOrder('ord1:1');
+      expect(res.paymentStatus).toBe('CAPTURED');
+      expect(res.amountRub).toBe(9722);
+      expect(res.orderId).toBe('ord1:1');
+    });
+  });
 });
