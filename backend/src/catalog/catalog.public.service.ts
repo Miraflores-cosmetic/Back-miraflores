@@ -346,6 +346,7 @@ export class CatalogPublicService {
         slug: string;
         volumeMl: number | null;
         sku: string | null;
+        nationalCatalogName: string | null;
         price: number;
         compareAt: number | null;
         orderMinQty: number;
@@ -390,6 +391,7 @@ export class CatalogPublicService {
         slug: v.slug,
         volumeMl: v.volumeMl,
         sku: v.sku,
+        nationalCatalogName: v.nationalCatalogName?.trim() || null,
         price: groupPrices.get(v.id)?.groupPrice ?? v.price,
         compareAt: v.compareAt,
         orderMinQty: v.orderMinQty,
