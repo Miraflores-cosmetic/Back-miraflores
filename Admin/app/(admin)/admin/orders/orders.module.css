@@ -1380,12 +1380,40 @@
 .orderAsideActions {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 14px;
 }
 
 .orderAsideActions > * {
   width: 100%;
+}
+
+.orderAsidePrimaryStack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.orderAsidePrimaryStack > :is(button, a) {
+  width: 100%;
   justify-content: center;
+}
+
+.orderAsideDangerZone {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+  padding-top: 14px;
+  border-top: 1px solid var(--account-hairline-color, #e2e6e8);
+}
+
+.orderAsideDangerTitle {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-gray, #9d9d9d);
 }
 
 .orderMetaLine {

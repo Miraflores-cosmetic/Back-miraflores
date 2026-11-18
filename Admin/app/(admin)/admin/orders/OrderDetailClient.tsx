@@ -185,6 +185,7 @@ export function OrderDetailClient({
   const [openDelivery, setOpenDelivery] = useState(true);
   const [openItems, setOpenItems] = useState(true);
   const [openRefund, setOpenRefund] = useState(false);
+  const [openCancel, setOpenCancel] = useState(false);
   const [contact, setContact] = useState<ContactForm | null>(null);
   const [contactSaving, setContactSaving] = useState(false);
   const [contactErrors, setContactErrors] = useState<ContactFieldErrors>({});
@@ -766,9 +767,10 @@ export function OrderDetailClient({
   );
 
   const primaryActions =
-    canMarkPaid || a.canStartPacking || a.canDeliver || a.canCancel;
+    canMarkPaid || a.canStartPacking || a.canDeliver;
   const hasAsideActions =
-    primaryActions || a.canShip || canSendTracking || canRefund;
+    primaryActions || a.canShip || canSendTracking || canRefund || a.canCancel;
+  const hasDangerActions = canRefund || a.canCancel;
   const stockNotRestoredOnRefund =
     canRefund &&
     (order.status === 'SHIPPED' || order.status === 'DELIVERED');
@@ -2080,73 +2082,77 @@ export function OrderDetailClient({
             <div className={styles.orderAsideActions}>
               <p className={styles.orderAsideTitle}>Действия</p>
 
-              {canMarkPaid ? (
-                <AdminCompactBtn
-                  type="button"
-                  variant="accent"
-                  disabled={busy}
-                  onClick={() =>
-                    askConfirm({
-                      title: 'Отметить оплаченным',
-                      message: `Отметить заказ ${order.number} оплаченным вручную?`,
-                      confirmLabel: 'Отметить',
-                      run: () =>
-                        runAction(
-                          `orders/admin/${orderId}/mark-paid`,
-                          undefined,
-                          'Заказ отмечен оплаченным',
-                        ),
-                    })
-                  }
-                >
-                  Отметить оплаченным
-                </AdminCompactBtn>
-              ) : null}
+              {primaryActions ? (
+                <div className={styles.orderAsidePrimaryStack}>
+                  {canMarkPaid ? (
+                    <AdminCompactBtn
+                      type="button"
+                      variant="accent"
+                      disabled={busy}
+                      onClick={() =>
+                        askConfirm({
+                          title: 'Отметить оплаченным',
+                          message: `Отметить заказ ${order.number} оплаченным вручную?`,
+                          confirmLabel: 'Отметить',
+                          run: () =>
+                            runAction(
+                              `orders/admin/${orderId}/mark-paid`,
+                              undefined,
+                              'Заказ отмечен оплаченным',
+                            ),
+                        })
+                      }
+                    >
+                      Отметить оплаченным
+                    </AdminCompactBtn>
+                  ) : null}
 
-              {a.canStartPacking ? (
-                <AdminCompactBtn
-                  type="button"
-                  variant="outline"
-                  disabled={busy}
-                  onClick={() =>
-                    askConfirm({
-                      title: 'В сборку',
-                      message: `Перевести заказ ${order.number} в статус «Сборка»?`,
-                      confirmLabel: 'В сборку',
-                      run: () =>
-                        runAction(
-                          `orders/admin/${orderId}/packing`,
-                          undefined,
-                          'Заказ в сборке',
-                        ),
-                    })
-                  }
-                >
-                  В сборку
-                </AdminCompactBtn>
-              ) : null}
+                  {a.canStartPacking ? (
+                    <AdminCompactBtn
+                      type="button"
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() =>
+                        askConfirm({
+                          title: 'В сборку',
+                          message: `Перевести заказ ${order.number} в статус «Сборка»?`,
+                          confirmLabel: 'В сборку',
+                          run: () =>
+                            runAction(
+                              `orders/admin/${orderId}/packing`,
+                              undefined,
+                              'Заказ в сборке',
+                            ),
+                        })
+                      }
+                    >
+                      В сборку
+                    </AdminCompactBtn>
+                  ) : null}
 
-              {a.canDeliver ? (
-                <AdminCompactBtn
-                  type="button"
-                  variant="accent"
-                  disabled={busy}
-                  onClick={() =>
-                    askConfirm({
-                      title: 'Доставлен',
-                      message: `Отметить заказ ${order.number} доставленным?`,
-                      confirmLabel: 'Доставлен',
-                      run: () =>
-                        runAction(
-                          `orders/admin/${orderId}/deliver`,
-                          undefined,
-                          'Заказ доставлен',
-                        ),
-                    })
-                  }
-                >
-                  Доставлен
-                </AdminCompactBtn>
+                  {a.canDeliver ? (
+                    <AdminCompactBtn
+                      type="button"
+                      variant="accent"
+                      disabled={busy}
+                      onClick={() =>
+                        askConfirm({
+                          title: 'Доставлен',
+                          message: `Отметить заказ ${order.number} доставленным?`,
+                          confirmLabel: 'Доставлен',
+                          run: () =>
+                            runAction(
+                              `orders/admin/${orderId}/deliver`,
+                              undefined,
+                              'Заказ доставлен',
+                            ),
+                        })
+                      }
+                    >
+                      Доставлен
+                    </AdminCompactBtn>
+                  ) : null}
+                </div>
               ) : null}
 
               {a.canShip || canSendTracking ? (
@@ -2345,186 +2351,193 @@ export function OrderDetailClient({
                 </div>
               ) : null}
 
-              {canRefund ? (
-                <OrderAccordion
-                  id="order-refund"
-                  title="Возврат"
-                  open={openRefund}
-                  onToggle={() => setOpenRefund((v) => !v)}
-                >
-                  <div className={styles.orderAsideFieldStack}>
-                    {stockNotRestoredOnRefund ? (
-                      <p className={styles.orderHint}>
-                        После отправки полный возврат не возвращает товар на склад
-                        (по политике). Сток восстанавливается только из PAID /
-                        PACKING.
-                      </p>
-                    ) : null}
-                    {(order.giftCertificateAmount ?? 0) > 0 ||
-                    order.giftPurchaseDenominationId ? (
-                      <p className={styles.orderHint} role="note">
-                        {GIFT_PARTIAL_REFUND_POLICY}
-                      </p>
-                    ) : null}
-                    {(order.referralWalletAmount ?? 0) > 0 ? (
-                      <p className={styles.orderHint} role="note">
-                        {WALLET_PARTIAL_REFUND_POLICY}
-                      </p>
-                    ) : null}
-                    <AdminTextField
-                      label="Сумма ₽"
-                      value={refundAmount}
-                      onChange={(e) =>
-                        setRefundAmount(e.target.value.replace(/\D/g, ''))
-                      }
-                      disabled={
-                        busy ||
-                        (order.giftCertificateAmount ?? 0) > 0 ||
-                        Boolean(order.giftPurchaseDenominationId) ||
-                        (order.referralWalletAmount ?? 0) > 0
-                      }
-                      inputMode="numeric"
-                    />
-                    {(order.giftCertificateAmount ?? 0) > 0 ||
-                    order.giftPurchaseDenominationId ||
-                    (order.referralWalletAmount ?? 0) > 0 ? (
-                      <p className={styles.orderHint}>
-                        Сумма зафиксирована на полный остаток по карте (
-                        {formatAdminMoney(order.refundRemaining)}).
-                      </p>
-                    ) : null}
-                    <AdminTextField
-                      label="Причина"
-                      value={refundReason}
-                      onChange={(e) => setRefundReason(e.target.value)}
-                      disabled={busy}
-                      placeholder="опционально"
-                    />
-                    <div className={styles.labelCheckboxRow}>
-                      <AdminCheckbox
-                        id="order-provider-refund"
-                        className={styles.adminCheckboxForm}
-                        checked={providerRefund}
-                        onChange={(e) => setProviderRefund(e.target.checked)}
-                        disabled={busy}
-                      />
-                      <label htmlFor="order-provider-refund">
-                        Через платёжного провайдера
-                      </label>
-                    </div>
-                    {!providerRefund ? (
-                      <p className={styles.error} role="status">
-                        Без провайдера возврат только в учёте — деньги на карте
-                        / в Яндекс Пэй не вернутся.
-                      </p>
-                    ) : null}
-                    <AdminCompactBtn
-                      type="button"
-                      variant="danger"
-                      disabled={
-                        busy ||
-                        (order.refundRemaining > 0
-                          ? !refundAmount
-                          : !(
-                              (order.giftCertificateAmount ?? 0) > 0 ||
-                              order.giftPurchaseDenominationId
-                            ))
-                      }
-                      onClick={() =>
-                        askConfirm({
-                          title: 'Возврат средств',
-                          message: (() => {
-                            const giftFullOnly =
-                              (order.giftCertificateAmount ?? 0) > 0 ||
-                              Boolean(order.giftPurchaseDenominationId);
-                            const amt =
-                              giftFullOnly && order.refundRemaining > 0
-                                ? order.refundRemaining
-                                : Number(refundAmount);
-                            if (providerRefund) {
-                              const via = paymentProviderLabel(
-                                refundProviderFromPayments(order.payments),
-                              );
-                              return `Вернуть ${amt} ₽ через ${via} по заказу ${order.number}?${
-                                giftFullOnly
-                                  ? ' Сертификат вернётся на баланс только при полном возврате.'
-                                  : ''
-                              }`;
-                            }
-                            return amt > 0
-                              ? `Учесть возврат ${amt} ₽ без провайдера (деньги не вернутся)?`
-                              : `Полный возврат без карты (открутка сертификата / отзыв кодов) по заказу ${order.number}?`;
-                          })(),
-                          confirmLabel: 'Вернуть',
-                          danger: true,
-                          run: () => {
-                            const giftFullOnly =
-                              (order.giftCertificateAmount ?? 0) > 0 ||
-                              Boolean(order.giftPurchaseDenominationId);
-                            const amount =
-                              giftFullOnly && order.refundRemaining > 0
-                                ? order.refundRemaining
-                                : Number(refundAmount);
-                            return runAction(
-                              `orders/admin/${orderId}/refund`,
-                              {
-                                amount,
-                                reason: refundReason.trim() || undefined,
-                                providerRefund,
-                              },
-                              'Возврат выполнен',
-                            );
-                          },
-                        })
-                      }
-                    >
-                      Вернуть
-                    </AdminCompactBtn>
-                  </div>
-                </OrderAccordion>
-              ) : null}
+              {hasDangerActions ? (
+                <div className={styles.orderAsideDangerZone}>
+                  <p className={styles.orderAsideDangerTitle}>Отмена и возврат</p>
 
-              {a.canCancel ? (
-                <div className={styles.orderAsideFieldStack}>
-                  <AdminCompactBtn
-                    type="button"
-                    variant="danger"
-                    disabled={busy}
-                    onClick={() =>
-                      askConfirm({
-                        title: 'Отменить заказ',
-                        message: `Отменить заказ ${order.number}? Отмена до оплаты / без возврата через провайдера.`,
-                        confirmLabel: 'Отменить заказ',
-                        danger: true,
-                        run: () =>
-                          runAction(
-                            `orders/admin/${orderId}/cancel`,
-                            undefined,
-                            'Заказ отменён',
-                          ),
-                      })
-                    }
-                  >
-                    Отменить
-                  </AdminCompactBtn>
                   {canRefund ? (
-                    <p className={styles.orderHint}>
-                      Отмена — снять заказ с обработки. Если деньги уже списаны,
-                      используйте «Вернуть».
-                    </p>
-                  ) : (
-                    <p className={styles.orderHint}>
-                      Отмена до оплаты или без возврата денег через провайдера.
-                    </p>
-                  )}
-                </div>
-              ) : null}
+                    <OrderAccordion
+                      id="order-refund"
+                      title="Возврат"
+                      open={openRefund}
+                      onToggle={() => setOpenRefund((v) => !v)}
+                    >
+                      <div className={styles.orderAsideFieldStack}>
+                        {stockNotRestoredOnRefund ? (
+                          <p className={styles.orderHint}>
+                            После отправки полный возврат не возвращает товар на склад
+                            (по политике). Сток восстанавливается только из PAID /
+                            PACKING.
+                          </p>
+                        ) : null}
+                        {(order.giftCertificateAmount ?? 0) > 0 ||
+                        order.giftPurchaseDenominationId ? (
+                          <p className={styles.orderHint} role="note">
+                            {GIFT_PARTIAL_REFUND_POLICY}
+                          </p>
+                        ) : null}
+                        {(order.referralWalletAmount ?? 0) > 0 ? (
+                          <p className={styles.orderHint} role="note">
+                            {WALLET_PARTIAL_REFUND_POLICY}
+                          </p>
+                        ) : null}
+                        <AdminTextField
+                          label="Сумма ₽"
+                          value={refundAmount}
+                          onChange={(e) =>
+                            setRefundAmount(e.target.value.replace(/\D/g, ''))
+                          }
+                          disabled={
+                            busy ||
+                            (order.giftCertificateAmount ?? 0) > 0 ||
+                            Boolean(order.giftPurchaseDenominationId) ||
+                            (order.referralWalletAmount ?? 0) > 0
+                          }
+                          inputMode="numeric"
+                        />
+                        {(order.giftCertificateAmount ?? 0) > 0 ||
+                        order.giftPurchaseDenominationId ||
+                        (order.referralWalletAmount ?? 0) > 0 ? (
+                          <p className={styles.orderHint}>
+                            Сумма зафиксирована на полный остаток по карте (
+                            {formatAdminMoney(order.refundRemaining)}).
+                          </p>
+                        ) : null}
+                        <AdminTextField
+                          label="Причина"
+                          value={refundReason}
+                          onChange={(e) => setRefundReason(e.target.value)}
+                          disabled={busy}
+                          placeholder="опционально"
+                        />
+                        <div className={styles.labelCheckboxRow}>
+                          <AdminCheckbox
+                            id="order-provider-refund"
+                            className={styles.adminCheckboxForm}
+                            checked={providerRefund}
+                            onChange={(e) => setProviderRefund(e.target.checked)}
+                            disabled={busy}
+                          />
+                          <label htmlFor="order-provider-refund">
+                            Через платёжного провайдера
+                          </label>
+                        </div>
+                        {!providerRefund ? (
+                          <p className={styles.error} role="status">
+                            Без провайдера возврат только в учёте — деньги на карте
+                            / в Яндекс Пэй не вернутся.
+                          </p>
+                        ) : null}
+                        <AdminCompactBtn
+                          type="button"
+                          variant="danger"
+                          disabled={
+                            busy ||
+                            (order.refundRemaining > 0
+                              ? !refundAmount
+                              : !(
+                                  (order.giftCertificateAmount ?? 0) > 0 ||
+                                  order.giftPurchaseDenominationId
+                                ))
+                          }
+                          onClick={() =>
+                            askConfirm({
+                              title: 'Возврат средств',
+                              message: (() => {
+                                const giftFullOnly =
+                                  (order.giftCertificateAmount ?? 0) > 0 ||
+                                  Boolean(order.giftPurchaseDenominationId);
+                                const amt =
+                                  giftFullOnly && order.refundRemaining > 0
+                                    ? order.refundRemaining
+                                    : Number(refundAmount);
+                                if (providerRefund) {
+                                  const via = paymentProviderLabel(
+                                    refundProviderFromPayments(order.payments),
+                                  );
+                                  return `Вернуть ${amt} ₽ через ${via} по заказу ${order.number}?${
+                                    giftFullOnly
+                                      ? ' Сертификат вернётся на баланс только при полном возврате.'
+                                      : ''
+                                  }`;
+                                }
+                                return amt > 0
+                                  ? `Учесть возврат ${amt} ₽ без провайдера (деньги не вернутся)?`
+                                  : `Полный возврат без карты (открутка сертификата / отзыв кодов) по заказу ${order.number}?`;
+                              })(),
+                              confirmLabel: 'Вернуть',
+                              danger: true,
+                              run: () => {
+                                const giftFullOnly =
+                                  (order.giftCertificateAmount ?? 0) > 0 ||
+                                  Boolean(order.giftPurchaseDenominationId);
+                                const amount =
+                                  giftFullOnly && order.refundRemaining > 0
+                                    ? order.refundRemaining
+                                    : Number(refundAmount);
+                                return runAction(
+                                  `orders/admin/${orderId}/refund`,
+                                  {
+                                    amount,
+                                    reason: refundReason.trim() || undefined,
+                                    providerRefund,
+                                  },
+                                  'Возврат выполнен',
+                                );
+                              },
+                            })
+                          }
+                        >
+                          Вернуть
+                        </AdminCompactBtn>
+                      </div>
+                    </OrderAccordion>
+                  ) : null}
 
-              {!primaryActions && canRefund && !a.canShip ? (
-                <p className={styles.orderHint}>
-                  Доступен возврат. Отмена недоступна — заказ уже в оплаченном
-                  статусе.
-                </p>
+                  {a.canCancel ? (
+                    <OrderAccordion
+                      id="order-cancel"
+                      title="Отмена заказа"
+                      open={openCancel}
+                      onToggle={() => setOpenCancel((v) => !v)}
+                    >
+                      <div className={styles.orderAsideFieldStack}>
+                        <p className={styles.orderHint}>
+                          {canRefund
+                            ? 'Снимает заказ с обработки до оплаты. Если деньги уже списаны — используйте «Возврат».'
+                            : 'Отмена до оплаты или без возврата денег через провайдера.'}
+                        </p>
+                        <AdminCompactBtn
+                          type="button"
+                          variant="danger"
+                          disabled={busy}
+                          onClick={() =>
+                            askConfirm({
+                              title: 'Отменить заказ',
+                              message: `Отменить заказ ${order.number}? Отмена до оплаты / без возврата через провайдера.`,
+                              confirmLabel: 'Отменить заказ',
+                              danger: true,
+                              run: () =>
+                                runAction(
+                                  `orders/admin/${orderId}/cancel`,
+                                  undefined,
+                                  'Заказ отменён',
+                                ),
+                            })
+                          }
+                        >
+                          Отменить заказ
+                        </AdminCompactBtn>
+                      </div>
+                    </OrderAccordion>
+                  ) : null}
+
+                  {!a.canCancel && canRefund && !a.canShip && !primaryActions ? (
+                    <p className={styles.orderHint}>
+                      Отмена недоступна — заказ уже в оплаченном статусе.
+                    </p>
+                  ) : null}
+                </div>
               ) : null}
             </div>
           ) : null}
