@@ -1185,6 +1185,15 @@ model Payment {
   @@unique([orderId, externalId])
 }
 
+/// Лидерство фонового воркера (lease по строке, не pg advisory session lock).
+/// Keys: cdek_sync, awaiting_payment_remind, order_chat_retention.
+model BackgroundWorkerLease {
+  key       String   @id
+  holder    String
+  expiresAt DateTime
+  updatedAt DateTime @updatedAt
+}
+
 model Shipment {
   id         String           @id @default(cuid())
   orderId    String
@@ -1220,6 +1229,8 @@ model OrderChecklistMark {
 }
 
 /// Журнал действий по заказу (админ / система / оплата)
+/// DB: partial UNIQUE (orderId) WHERE type=TRACKING_SENT — migration 20261119110000.
+/// DB: partial idx flush outbox — 20261119120000 tracking; 20261119140000 delivered (cdek_sync|admin_manual).
 model OrderEvent {
   id          String   @id @default(cuid())
   orderId     String

@@ -26,6 +26,7 @@ import {
   serializeAdminCreatePreview,
   type AdminCreateQuoteDeps,
 } from './admin-create-quote';
+import { orderItemTitle } from './order-item-title';
 
 type LockedPromo = {
   id: string;
@@ -269,9 +270,12 @@ export async function createAdminOrder(
             items: {
               create: itemsForOrder.map((l) => {
                 const giftDenomId = parseGiftDenomCartVariantId(l.variantId);
-                const title = [l.name, l.variantName, l.shadeName]
-                  .filter(Boolean)
-                  .join(' · ');
+                const title = orderItemTitle({
+                  nationalCatalogName: l.nationalCatalogName,
+                  name: l.name,
+                  variantName: l.variantName,
+                  shadeName: l.shadeName,
+                });
                 return {
                   variantId: giftDenomId ? null : l.variantId,
                   shadeId: l.shadeId ?? null,

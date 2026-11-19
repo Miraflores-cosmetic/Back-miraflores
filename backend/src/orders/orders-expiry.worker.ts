@@ -1,44 +1,33 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrderAwaitingPaymentService } from './order-awaiting-payment.service';
+import { BackgroundWorkerLeaseService } from '../workers/background-worker-lease.service';
 
-/** Advisory lock: один инстанс API гоняет remind за раз. */
-const AWAITING_PAYMENT_ADVISORY_LOCK_KEY = 902_610_221;
+const LEASE_KEY = 'awaiting_payment_remind';
+const TICK_MS = 60_000;
 
 /**
- * Раз в минуту (только лидер по pg_try_advisory_lock):
- * напоминания об оплате (5м / 24ч / 48ч, catch-up = высший overdue).
- * Авто-отмена / expire hold — нет.
+ * Напоминания об оплате (5м / 24ч / 48ч). Leader: lease-row.
  */
 @Injectable()
 export class OrdersExpiryWorker implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(OrdersExpiryWorker.name);
   private timer: ReturnType<typeof setInterval> | null = null;
+  private tickBusy = false;
 
   constructor(
     private readonly awaitingPayment: OrderAwaitingPaymentService,
     private readonly prisma: PrismaService,
+    private readonly lease: BackgroundWorkerLeaseService,
   ) {}
 
-  private async tryAdvisoryLock(): Promise<boolean> {
-    const rows = await this.prisma.$queryRaw<Array<{ locked: boolean }>>`
-      SELECT pg_try_advisory_lock(${AWAITING_PAYMENT_ADVISORY_LOCK_KEY}) AS locked
-    `;
-    return rows[0]?.locked === true;
-  }
-
-  private async releaseAdvisoryLock(): Promise<void> {
-    await this.prisma.$queryRaw`
-      SELECT pg_advisory_unlock(${AWAITING_PAYMENT_ADVISORY_LOCK_KEY})
-    `;
-  }
-
   onModuleInit() {
-    const ms = 60_000;
+    if (process.env.NODE_ENV === 'test' || process.env.VITEST) return;
     this.timer = setInterval(() => {
       void this.tick();
-    }, ms);
+    }, TICK_MS);
     if (typeof this.timer.unref === 'function') this.timer.unref();
+    void this.tick();
   }
 
   onModuleDestroy() {
@@ -47,7 +36,15 @@ export class OrdersExpiryWorker implements OnModuleInit, OnModuleDestroy {
   }
 
   private async tick(): Promise<void> {
-    if (!(await this.tryAdvisoryLock())) return;
+    if (this.tickBusy) return;
+    this.tickBusy = true;
+
+    const leaseTtl = TICK_MS * 2 + 60_000;
+    if (!(await this.lease.acquire(LEASE_KEY, leaseTtl))) {
+      this.tickBusy = false;
+      return;
+    }
+
     try {
       await this.prisma.runInRlsTransaction({ userId: '', bypass: true }, async () => {
         const reminded =
@@ -59,7 +56,8 @@ export class OrdersExpiryWorker implements OnModuleInit, OnModuleDestroy {
     } catch (err) {
       this.logger.warn(`Awaiting payment tick failed: ${String(err)}`);
     } finally {
-      await this.releaseAdvisoryLock();
+      await this.lease.release(LEASE_KEY);
+      this.tickBusy = false;
     }
   }
 }

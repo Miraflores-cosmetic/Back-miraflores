@@ -29,6 +29,7 @@ import { cancelUnpaidOrderInTx } from './cancel-unpaid-order';
 import { cancelPendingAtProviders } from './cancel-pending-at-providers';
 import { nextYandexPayMerchantOrderId } from './yandex-pay-order-id';
 import { buildYandexPayFiscalCart } from './yandex-pay-fiscal-cart';
+import { orderItemTitle } from './order-item-title';
 import {
   reserveStockForLines,
 } from './order-stock';
@@ -95,6 +96,7 @@ type SyncedCartItem = {
   shadeName: string | null;
   name: string;
   variantName: string;
+  nationalCatalogName?: string | null;
   sku: string;
   price: number;
   qty: number;
@@ -189,6 +191,7 @@ export class OrdersPublicService {
         id: true,
         name: true,
         sku: true,
+        nationalCatalogName: true,
         stock: true,
         stockReserve: true,
         product: { select: { name: true } },
@@ -219,6 +222,7 @@ export class OrdersPublicService {
         shadeName: null,
         name: variant.product.name,
         variantName: variant.name,
+        nationalCatalogName: variant.nationalCatalogName?.trim() || null,
         sku: variant.sku?.trim() || `gift-${variant.id}`,
         price: 0,
         qty,
@@ -1054,9 +1058,12 @@ export class OrdersPublicService {
               items: {
                 create: itemsForOrder.map((l) => {
                   const giftDenomId = parseGiftDenomCartVariantId(l.variantId);
-                  const title = [l.name, l.variantName, l.shadeName]
-                    .filter(Boolean)
-                    .join(' · ');
+                  const title = orderItemTitle({
+                    nationalCatalogName: l.nationalCatalogName,
+                    name: l.name,
+                    variantName: l.variantName,
+                    shadeName: l.shadeName,
+                  });
                   return {
                     variantId: giftDenomId ? null : l.variantId,
                     shadeId: l.shadeId ?? null,

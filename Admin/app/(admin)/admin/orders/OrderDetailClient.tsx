@@ -982,6 +982,43 @@ export function OrderDetailClient({
           оплату.
         </div>
       ) : null}
+      {(() => {
+        const mo = order?.mailOutbox;
+        if (!mo) return null;
+        const lines: string[] = [];
+        const fmt = (slot: NonNullable<typeof mo.tracking>, label: string) => {
+          const st = slot.mailStatus;
+          if (st === 'pending') {
+            lines.push(`${label}: письмо в очереди (попытка ${slot.attempt})`);
+            return;
+          }
+          if (st === 'failed') {
+            const next = slot.nextRetryAt
+              ? new Date(slot.nextRetryAt).toLocaleString('ru-RU')
+              : 'скоро';
+            lines.push(
+              `${label}: SMTP не удался (попытка ${slot.attempt}, повтор ${next})${slot.lastError ? ` — ${slot.lastError}` : ''}`,
+            );
+            return;
+          }
+          if (slot.exhausted) {
+            lines.push(
+              `${label}: письмо не отправлено (исчерпаны попытки)${slot.lastError ? ` — ${slot.lastError}` : ''}`,
+            );
+          }
+        };
+        if (mo.tracking) fmt(mo.tracking, 'Трек-номер');
+        if (mo.delivered) fmt(mo.delivered, 'Доставка');
+        if (!lines.length) return null;
+        return (
+          <div className={styles.orderAlertDanger} role="alert">
+            <strong>Письма клиенту</strong>
+            {lines.map((t) => (
+              <div key={t}>{t}</div>
+            ))}
+          </div>
+        );
+      })()}
       {error ? (
         <p className={styles.error} role="alert">
           {error}

@@ -1,3 +1,12 @@
+export type AdminMailOutboxSlot = {
+  mailStatus: string;
+  attempt: number;
+  nextRetryAt: string | null;
+  lastError: string | null;
+  source: string;
+  exhausted: boolean;
+};
+
 export type AdminAwaitingPaymentChip = {
   key: 'remind1' | 'remind2' | 'remind3' | 'ttl';
   label: string;
@@ -267,6 +276,10 @@ export type AdminOrderDetail = {
   events: AdminOrderEvent[];
   /** Деньги списаны после отмены заказа, автовозврат не удался */
   latePaymentFailed?: boolean;
+  mailOutbox?: {
+    tracking: AdminMailOutboxSlot | null;
+    delivered: AdminMailOutboxSlot | null;
+  };
   actions: AdminOrderActions;
   canCancel: boolean;
 };

@@ -1,68 +1,72 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrderChatService } from './order-chat.service';
+import { BackgroundWorkerLeaseService } from '../workers/background-worker-lease.service';
 
-/** Advisory lock: один инстанс API purge/backfill за раз. */
-const RETENTION_ADVISORY_LOCK_KEY = 902_410_241;
+const LEASE_KEY = 'order_chat_retention';
+const TICK_MS = 15 * 60_000;
 
-/** Удаляет переписку заказов с истёкшим retentionPurgesAt (сообщения + файлы). */
+/** Purge + backfill retentionPurgesAt. Leader: lease-row. */
 @Injectable()
 export class OrderChatRetentionWorker implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(OrderChatRetentionWorker.name);
   private timer: ReturnType<typeof setInterval> | null = null;
+  private tickBusy = false;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly chat: OrderChatService,
+    private readonly lease: BackgroundWorkerLeaseService,
   ) {}
 
-  private async tryAdvisoryLock(): Promise<boolean> {
-    const rows = await this.prisma.$queryRaw<Array<{ locked: boolean }>>`
-      SELECT pg_try_advisory_lock(${RETENTION_ADVISORY_LOCK_KEY}) AS locked
-    `;
-    return rows[0]?.locked === true;
-  }
-
-  private async releaseAdvisoryLock(): Promise<void> {
-    await this.prisma.$queryRaw`
-      SELECT pg_advisory_unlock(${RETENTION_ADVISORY_LOCK_KEY})
-    `;
-  }
-
   onModuleInit() {
-    const ms = 15 * 60_000;
-    const tick = async () => {
-      if (!(await this.tryAdvisoryLock())) return;
-      try {
-        await this.prisma.runInRlsTransaction({ userId: '', bypass: true }, async () => {
-          const n = await this.chat.purgeExpiredConversations();
-          if (n > 0) this.logger.log(`Purged ${n} expired chat conversation(s)`);
-        });
-
-        let backfilled = 0;
-        for (;;) {
-          const n = await this.prisma.runInRlsTransaction({ userId: '', bypass: true }, () =>
-            this.chat.backfillRetentionForTerminalOrders(50),
-          );
-          backfilled += n;
-          if (n < 50) break;
-        }
-        if (backfilled > 0) {
-          this.logger.log(`Backfill retentionPurgesAt for ${backfilled} order chat(s)`);
-        }
-      } catch (err) {
-        this.logger.warn(`Chat retention tick failed: ${String(err)}`);
-      } finally {
-        await this.releaseAdvisoryLock();
-      }
-    };
-    void tick();
-    this.timer = setInterval(() => void tick(), ms);
+    if (process.env.NODE_ENV === 'test' || process.env.VITEST) return;
+    void this.tick();
+    this.timer = setInterval(() => {
+      void this.tick();
+    }, TICK_MS);
     if (typeof this.timer.unref === 'function') this.timer.unref();
   }
 
   onModuleDestroy() {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+  }
+
+  private async tick(): Promise<void> {
+    if (this.tickBusy) return;
+    this.tickBusy = true;
+
+    const leaseTtl = TICK_MS * 2 + 60_000;
+    if (!(await this.lease.acquire(LEASE_KEY, leaseTtl))) {
+      this.tickBusy = false;
+      return;
+    }
+
+    try {
+      await this.prisma.runInRlsTransaction({ userId: '', bypass: true }, async () => {
+        const n = await this.chat.purgeExpiredConversations();
+        if (n > 0) this.logger.log(`Purged ${n} expired chat conversation(s)`);
+      });
+      if (!(await this.lease.renew(LEASE_KEY, leaseTtl))) return;
+
+      let backfilled = 0;
+      for (;;) {
+        const n = await this.prisma.runInRlsTransaction({ userId: '', bypass: true }, () =>
+          this.chat.backfillRetentionForTerminalOrders(50),
+        );
+        backfilled += n;
+        if (n < 50) break;
+        if (!(await this.lease.renew(LEASE_KEY, leaseTtl))) return;
+      }
+      if (backfilled > 0) {
+        this.logger.log(`Backfill retentionPurgesAt for ${backfilled} order chat(s)`);
+      }
+    } catch (err) {
+      this.logger.warn(`Chat retention tick failed: ${String(err)}`);
+    } finally {
+      await this.lease.release(LEASE_KEY);
+      this.tickBusy = false;
+    }
   }
 }

@@ -187,10 +187,51 @@ export class OrderLifecycleService {
     );
   }
 
+  /** Outbox-aware (не глотает ошибку SMTP). */
+  async notifyOrderShippedWithResult(
+    to: string,
+    orderNumber: string,
+    tracking?: string | null,
+  ): Promise<'sent' | 'skipped' | 'failed'> {
+    const label = `Order shipped mail ${orderNumber} → ${to}`;
+    if (!this.mail.isConfigured()) {
+      this.logger.warn(`${label} skipped (no SMTP)`);
+      return 'skipped';
+    }
+    try {
+      await this.mail.sendOrderShipped({ to, orderNumber, tracking });
+      return 'sent';
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.logger.warn(`${label} failed: ${msg}`);
+      return 'failed';
+    }
+  }
+
   async notifyOrderDelivered(to: string, orderNumber: string): Promise<void> {
     await this.runMail(`Order delivered mail ${orderNumber} → ${to}`, () =>
       this.mail.sendOrderDelivered({ to, orderNumber }),
     );
+  }
+
+  /** Outbox СДЭК sync (не глотает ошибку SMTP). */
+  async notifyOrderDeliveredWithResult(
+    to: string,
+    orderNumber: string,
+  ): Promise<'sent' | 'skipped' | 'failed'> {
+    const label = `Order delivered mail ${orderNumber} → ${to}`;
+    if (!this.mail.isConfigured()) {
+      this.logger.warn(`${label} skipped (no SMTP)`);
+      return 'skipped';
+    }
+    try {
+      await this.mail.sendOrderDelivered({ to, orderNumber });
+      return 'sent';
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.logger.warn(`${label} failed: ${msg}`);
+      return 'failed';
+    }
   }
 
   async notifyOrderCancelled(

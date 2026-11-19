@@ -15,6 +15,7 @@ import {
 import { OrderChatAdminController } from './order-chat-admin.controller';
 import { OrderChatRetentionWorker } from './order-chat-retention.worker';
 import { OrderChatFilesController } from './order-chat-files.controller';
+import { BackgroundWorkerLeaseService } from '../workers/background-worker-lease.service';
 
 @Module({
   imports: [
@@ -37,7 +38,12 @@ import { OrderChatFilesController } from './order-chat-files.controller';
     OrderChatAdminController,
     OrderChatFilesController,
   ],
-  providers: [OrderChatService, OrderChatGateway, OrderChatRetentionWorker],
+  providers: [
+    OrderChatService,
+    OrderChatGateway,
+    OrderChatRetentionWorker,
+    BackgroundWorkerLeaseService,
+  ],
   exports: [OrderChatService],
 })
 export class OrderChatModule {}

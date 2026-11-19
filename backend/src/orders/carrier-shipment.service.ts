@@ -14,6 +14,11 @@ import {
   isPvzShippingComment,
   resolvePvzCode,
 } from './order-shipping.resolve';
+import {
+  type CdekOrderEntity,
+  cdekTrackingFromEntity,
+  parseCdekGetOrderResponse,
+} from './cdek-order-status.util';
 
 export { buildCdekPackagesFromOrderItems } from './cdek-package.util';
 
@@ -325,6 +330,41 @@ export class CarrierShipmentService {
     return typeof msg === 'string' ? msg.slice(0, 500) : fallback;
   }
 
+  /**
+   * GET /v2/orders/{uuid} — трек, история статусов.
+   * null: нет кредов, uuid пустой или HTTP/parse сбой.
+   */
+  async fetchCdekOrderByUuid(uuid: string): Promise<{
+    entity: CdekOrderEntity;
+    raw: unknown;
+  } | null> {
+    const id = uuid.trim();
+    if (!id || !this.isCdekConfigured()) return null;
+
+    const token = await this.getCdekToken();
+    try {
+      const res = await fetch(
+        `https://api.cdek.ru/v2/orders/${encodeURIComponent(id)}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      const raw = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        this.logger.warn(
+          `CDEK get order ${id}: HTTP ${res.status} ${this.formatCdekError(raw, '')}`.trim(),
+        );
+        return null;
+      }
+      const entity = parseCdekGetOrderResponse(raw);
+      if (!entity) return null;
+      return { entity, raw };
+    } catch (e) {
+      this.logger.warn(
+        `CDEK get order ${id} failed: ${e instanceof Error ? e.message : String(e)}`,
+      );
+      return null;
+    }
+  }
+
   /** cdek_number часто появляется с задержкой после create. */
   private async pollCdekTracking(
     token: string,
@@ -333,14 +373,15 @@ export class CarrierShipmentService {
     for (let i = 0; i < 3; i++) {
       await new Promise((r) => setTimeout(r, 700));
       try {
-        const res = await fetch(`https://api.cdek.ru/v2/orders/${uuid}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const json = (await res.json().catch(() => ({}))) as {
-          entity?: { cdek_number?: string };
-        };
-        const n = json.entity?.cdek_number;
-        if (n) return String(n);
+        const res = await fetch(
+          `https://api.cdek.ru/v2/orders/${encodeURIComponent(uuid)}`,
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
+        const raw = await res.json().catch(() => ({}));
+        if (!res.ok) continue;
+        const entity = parseCdekGetOrderResponse(raw);
+        const n = cdekTrackingFromEntity(entity);
+        if (n) return n;
       } catch {
         /* ignore transient */
       }

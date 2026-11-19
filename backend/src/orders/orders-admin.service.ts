@@ -94,9 +94,42 @@ import {
 import { ReferralWalletService } from '../referral/referral-wallet.service';
 import { OrdersPublicService } from './orders.public.service';
 import { ensureOrderSurchargePayLink } from './order-surcharge-pay';
+import {
+  type CdekTrackingMailMeta,
+  type TrackingMailOutboxMeta,
+  isTrackingMailDueForRetry,
+  isTrackingMailSettled,
+  parseCdekTrackingMailMeta,
+  parseTrackingMailOutboxMeta,
+  trackingMailMetaAfterFinalize,
+  trackingMailOutboxMessage,
+} from './cdek-tracking-mail-outbox.util';
+import {
+  type CdekDeliveredMailMeta,
+  type DeliveredMailOutboxMeta,
+  deliveredMailMetaAfterFinalize,
+  deliveredMailOutboxMessage,
+  isDeliveredMailDueForRetry,
+  isDeliveredMailSettled,
+  parseCdekDeliveredMailMeta,
+  parseDeliveredMailOutboxMeta,
+} from './cdek-delivered-mail-outbox.util';
+import { isPrismaUniqueViolation } from '../common/prisma-errors';
+import {
+  isMailOutboxHighAttempt,
+  summarizeAdminOrderMailOutbox,
+} from './order-mail-outbox-admin.util';
+import {
+  MAIL_OUTBOX_MAX_ATTEMPTS,
+} from './order-mail-outbox.util';
 
 const LIST_MAX = 100;
 const LIST_DEFAULT = 20;
+
+export type MailOutboxFinalizeResult = {
+  exhausted: boolean;
+  highAttempt: boolean;
+};
 
 type ShippingAddressSnap = {
   city?: string;
@@ -141,6 +174,31 @@ export class OrdersAdminService {
   ) {}
 
   /** YouRich outbox + MF referral earn/clawback. */
+  private async recordMailOutboxExhausted(
+    orderId: string,
+    kind: 'tracking' | 'delivered',
+    detail: string,
+  ): Promise<void> {
+    const label = kind === 'tracking' ? 'трек' : 'доставлен';
+    this.logger.error(
+      `OPS_ALERT mail_outbox_exhausted orderId=${orderId} kind=${kind} detail=${detail}`,
+    );
+    await this.lifecycle.addEvent(this.prisma, {
+      orderId,
+      type: 'NOTE',
+      message: `⚠️ Письмо клиенту (${label}) не отправлено после ${MAIL_OUTBOX_MAX_ATTEMPTS} попыток. ${detail}. Проверьте email заказа и SMTP.`,
+      actorUserId: null,
+      meta: { mailOutboxExhausted: true, kind },
+    });
+    await this.lifecycle.addEvent(this.prisma, {
+      orderId,
+      type: 'OPS_ALERT',
+      message: `mail_outbox_exhausted: ${kind} — ${detail}`,
+      actorUserId: null,
+      meta: { opsAlert: 'mail_outbox_exhausted', kind, detail },
+    });
+  }
+
   private scheduleYourichTouch(orderId: string) {
     if (this.yourichSync) {
       scheduleAfterRlsCommitWithBypass(this.prisma, () =>
@@ -726,6 +784,7 @@ export class OrdersAdminService {
           (m as Record<string, unknown>).lateFailed === true
         );
       }),
+      mailOutbox: summarizeAdminOrderMailOutbox(order.events),
       actions: {
         canCancel: canCancel(order.status),
         canMarkPaid:
@@ -1240,58 +1299,70 @@ export class OrdersAdminService {
    */
   async sendTracking(
     id: string,
-    actorUserId: string,
+    actorUserId: string | null,
     opts: { tracking?: string } = {},
   ) {
+    const fromBody = opts.tracking?.trim() || '';
     const orderRow = await this.prisma.order.findUnique({
       where: { id },
       select: {
-        id: true,
-        number: true,
-        email: true,
-        status: true,
         shipments: {
           orderBy: { createdAt: 'desc' },
           take: 1,
-          select: { id: true, tracking: true },
+          select: { tracking: true },
         },
       },
     });
     if (!orderRow) throw new NotFoundException('Заказ не найден');
-    if (!canSendTracking(orderRow.status)) {
-      throw new BadRequestException(
-        'Письмо с треком доступно после статуса «Отправлен»',
-      );
-    }
-
-    const fromBody = opts.tracking?.trim() || '';
     const fromShipment = orderRow.shipments[0]?.tracking?.trim() || '';
     const tracking = fromBody || fromShipment;
     if (!tracking) {
       throw new BadRequestException('Укажите трек-номер');
     }
 
-    const shipmentId = orderRow.shipments[0]?.id ?? null;
-    if (shipmentId && fromBody && fromBody !== fromShipment) {
-      await this.prisma.shipment.update({
-        where: { id: shipmentId },
-        data: { tracking: fromBody },
-      });
+    let reserved: {
+      eventId: string;
+      email: string;
+      number: string;
+      tracking: string;
+      meta: TrackingMailOutboxMeta;
+    };
+    try {
+      reserved = await this.reserveAdminTrackingMailOutbox(
+        id,
+        actorUserId,
+        tracking,
+        fromBody,
+      );
+    } catch (e) {
+      if (e instanceof BadRequestException || e instanceof NotFoundException) {
+        throw e;
+      }
+      if (isPrismaUniqueViolation(e)) {
+        throw new BadRequestException(
+          'Письмо с треком по этому заказу уже отправлялось',
+        );
+      }
+      throw e;
     }
 
-    await this.lifecycle.addEvent(this.prisma, {
-      orderId: id,
-      type: 'TRACKING_SENT',
-      message: `Трек отправлен клиенту: ${tracking}`,
-      actorUserId,
-      meta: { tracking },
-    });
-
-    await this.lifecycle.notifyOrderShipped(
-      orderRow.email,
-      orderRow.number,
-      tracking,
+    const mailResult = await this.lifecycle.notifyOrderShippedWithResult(
+      reserved.email,
+      reserved.number,
+      reserved.tracking,
     );
+    await this.finalizeCdekSyncTrackingMailOutbox(
+      reserved.eventId,
+      mailResult,
+      reserved.meta,
+      mailResult === 'failed' ? { lastError: 'smtp failed' } : {},
+    );
+
+    if (mailResult === 'failed') {
+      throw new BadRequestException(
+        'Не удалось отправить письмо — повторится автоматически',
+      );
+    }
 
     return this.getById(id);
   }
@@ -1501,15 +1572,561 @@ export class OrdersAdminService {
     throw new BadRequestException('Укажите службу доставки');
   }
 
-  async deliver(id: string, actorUserId: string) {
-    await this.setStatus(id, OrderStatus.DELIVERED, actorUserId, 'Заказ доставлен');
-    this.scheduleYourichTouch(id);
-    const order = await this.prisma.order.findUniqueOrThrow({
-      where: { id },
-      select: { number: true, email: true },
-    });
-    await this.lifecycle.notifyOrderDelivered(order.email, order.number);
+  async deliver(id: string, actorUserId: string | null) {
+    const claimed = await this.claimAdminDeliveredWithOutbox(id, actorUserId);
+    const mailResult = await this.lifecycle.notifyOrderDeliveredWithResult(
+      claimed.email,
+      claimed.number,
+    );
+    await this.finalizeCdekSyncDeliveredMailOutbox(
+      claimed.eventId,
+      mailResult,
+      claimed.meta,
+      mailResult === 'failed' ? { lastError: 'smtp failed' } : {},
+    );
+    if (mailResult === 'failed') {
+      throw new BadRequestException(
+        'Не удалось отправить письмо — повторится автоматически',
+      );
+    }
     return this.getById(id);
+  }
+
+  /**
+   * Ручная «Доставлен»: статус + DELIVERED outbox (admin_manual).
+   */
+  async claimAdminDeliveredWithOutbox(
+    orderId: string,
+    actorUserId: string | null,
+  ): Promise<{
+    email: string;
+    number: string;
+    eventId: string;
+    meta: DeliveredMailOutboxMeta;
+  }> {
+    const row = await this.prisma.$transaction(async (tx) => {
+      await lockOrderForUpdate(tx, orderId);
+      const order = await tx.order.findUnique({
+        where: { id: orderId },
+        select: { id: true, status: true, number: true, email: true },
+      });
+      if (!order) throw new NotFoundException('Заказ не найден');
+
+      const existing = await tx.orderEvent.findFirst({
+        where: { orderId, type: 'DELIVERED' },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, meta: true },
+      });
+
+      if (order.status === OrderStatus.DELIVERED) {
+        const admin = parseDeliveredMailOutboxMeta(existing?.meta);
+        if (
+          admin?.source === 'admin_manual' &&
+          (admin.mailStatus === 'pending' || admin.mailStatus === 'failed')
+        ) {
+          if (!isDeliveredMailDueForRetry(admin)) {
+            throw new BadRequestException(
+              'Повтор письма будет автоматически — подождите',
+            );
+          }
+          return {
+            email: order.email,
+            number: order.number,
+            eventId: existing!.id,
+            meta: admin,
+          };
+        }
+        throw new BadRequestException('Заказ уже доставлен');
+      }
+
+      if (!canDeliver(order.status)) {
+        throw new BadRequestException('Нельзя отметить доставленным');
+      }
+
+      if (existing && !isDeliveredMailSettled(existing.meta)) {
+        const cdek = parseCdekDeliveredMailMeta(existing.meta);
+        if (cdek && (cdek.mailStatus === 'pending' || cdek.mailStatus === 'failed')) {
+          throw new BadRequestException(
+            'Доставка уже отмечена (СДЭК sync) — дождитесь отправки письма',
+          );
+        }
+      }
+
+      await tx.order.update({
+        where: { id: orderId },
+        data: { status: OrderStatus.DELIVERED },
+      });
+
+      const deliveredMeta = {
+        from: order.status,
+        to: OrderStatus.DELIVERED,
+        cdekStatus: 'MANUAL',
+        source: 'admin_manual' as const,
+        mailStatus: 'pending' as const,
+        attempt: 0,
+      } satisfies DeliveredMailOutboxMeta;
+
+      const event = await this.lifecycle.addEvent(tx, {
+        orderId,
+        type: 'DELIVERED',
+        message: 'Заказ доставлен: ожидает письмо',
+        actorUserId,
+        meta: deliveredMeta as Prisma.InputJsonValue,
+      });
+
+      await enqueueReferralTouchInTx(tx, this.referralWallet, orderId);
+
+      return {
+        email: order.email,
+        number: order.number,
+        eventId: event.id,
+        meta: deliveredMeta,
+      };
+    });
+
+    scheduleAfterRlsCommitWithBypass(this.prisma, () =>
+      this.orderChat.applyRetentionForOrder(orderId, OrderStatus.DELIVERED),
+    );
+    this.scheduleYourichTouch(orderId);
+
+    return row;
+  }
+
+  /**
+   * Ручная кнопка «Отправить трек» — outbox admin_manual (retry как СДЭК).
+   */
+  async reserveAdminTrackingMailOutbox(
+    orderId: string,
+    actorUserId: string | null,
+    tracking: string,
+    fromBody: string,
+  ): Promise<{
+    eventId: string;
+    email: string;
+    number: string;
+    tracking: string;
+    meta: TrackingMailOutboxMeta;
+  }> {
+    const track = tracking.trim();
+    return this.prisma.$transaction(async (tx) => {
+      await lockOrderForUpdate(tx, orderId);
+      const orderRow = await tx.order.findUnique({
+        where: { id: orderId },
+        select: {
+          number: true,
+          email: true,
+          status: true,
+          shipments: {
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+            select: { id: true, tracking: true },
+          },
+        },
+      });
+      if (!orderRow) throw new NotFoundException('Заказ не найден');
+      if (!canSendTracking(orderRow.status)) {
+        throw new BadRequestException(
+          'Письмо с треком доступно после статуса «Отправлен»',
+        );
+      }
+
+      const existing = await tx.orderEvent.findFirst({
+        where: { orderId, type: 'TRACKING_SENT' },
+        select: { id: true, meta: true },
+      });
+      if (existing) {
+        if (isTrackingMailSettled(existing.meta)) {
+          throw new BadRequestException(
+            'Письмо с треком по этому заказу уже отправлялось',
+          );
+        }
+        const cdek = parseCdekTrackingMailMeta(existing.meta);
+        if (
+          cdek &&
+          (cdek.mailStatus === 'pending' || cdek.mailStatus === 'failed')
+        ) {
+          throw new BadRequestException(
+            'Отправка трека уже запланирована (автосинх СДЭК) — дождитесь или повторите позже',
+          );
+        }
+        const admin = parseTrackingMailOutboxMeta(existing.meta);
+        if (
+          admin?.source === 'admin_manual' &&
+          (admin.mailStatus === 'pending' || admin.mailStatus === 'failed')
+        ) {
+          if (!isTrackingMailDueForRetry(admin)) {
+            throw new BadRequestException(
+              'Повтор письма будет автоматически — подождите',
+            );
+          }
+          const fromShipment = orderRow.shipments[0]?.tracking?.trim() || '';
+          const shipmentId = orderRow.shipments[0]?.id ?? null;
+          if (shipmentId && fromBody && fromBody !== fromShipment) {
+            await tx.shipment.update({
+              where: { id: shipmentId },
+              data: { tracking: fromBody },
+            });
+          }
+          const nextMeta: TrackingMailOutboxMeta = {
+            ...admin,
+            tracking: track,
+          };
+          await tx.orderEvent.update({
+            where: { id: existing.id },
+            data: { meta: nextMeta as Prisma.InputJsonValue },
+          });
+          return {
+            eventId: existing.id,
+            email: orderRow.email,
+            number: orderRow.number,
+            tracking: track,
+            meta: nextMeta,
+          };
+        }
+        throw new BadRequestException(
+          'Письмо с треком по этому заказу уже отправлялось',
+        );
+      }
+
+      const shipmentId = orderRow.shipments[0]?.id ?? null;
+      const fromShipment = orderRow.shipments[0]?.tracking?.trim() || '';
+      if (shipmentId && fromBody && fromBody !== fromShipment) {
+        await tx.shipment.update({
+          where: { id: shipmentId },
+          data: { tracking: fromBody },
+        });
+      }
+
+      const pendingMeta = {
+        tracking: track,
+        source: 'admin_manual' as const,
+        mailStatus: 'pending' as const,
+        attempt: 0,
+      } satisfies TrackingMailOutboxMeta;
+
+      try {
+        const event = await this.lifecycle.addEvent(tx, {
+          orderId,
+          type: 'TRACKING_SENT',
+          message: `Трек: ожидает отправки письма, ${track}`,
+          actorUserId,
+          meta: pendingMeta as Prisma.InputJsonValue,
+        });
+        return {
+          eventId: event.id,
+          email: orderRow.email,
+          number: orderRow.number,
+          tracking: track,
+          meta: pendingMeta,
+        };
+      } catch (e) {
+        if (isPrismaUniqueViolation(e)) {
+          throw new BadRequestException(
+            'Письмо с треком по этому заказу уже отправлялось',
+          );
+        }
+        throw e;
+      }
+    });
+  }
+
+  /**
+   * СДЭК sync outbox: pending TRACKING_SENT до успешного SMTP.
+   */
+  async reserveCdekSyncTrackingMailOutbox(
+    orderId: string,
+    tracking: string,
+  ): Promise<{
+    eventId: string;
+    email: string;
+    number: string;
+    tracking: string;
+    meta: TrackingMailOutboxMeta;
+  } | null> {
+    const track = tracking.trim();
+    if (!track) return null;
+
+    return this.prisma.$transaction(async (tx) => {
+      await lockOrderForUpdate(tx, orderId);
+
+      const priorEvents = await tx.orderEvent.findMany({
+        where: { orderId, type: 'TRACKING_SENT' },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, meta: true },
+      });
+
+      for (const ev of priorEvents) {
+        if (isTrackingMailSettled(ev.meta)) return null;
+        const pending = parseTrackingMailOutboxMeta(ev.meta);
+        if (
+          pending?.source === 'cdek_sync' &&
+          (pending.mailStatus === 'pending' || pending.mailStatus === 'failed')
+        ) {
+          if (!isTrackingMailDueForRetry(pending)) return null;
+
+          const orderRow = await tx.order.findUnique({
+            where: { id: orderId },
+            select: { number: true, email: true, status: true },
+          });
+          if (!orderRow || !canSendTracking(orderRow.status)) return null;
+
+          const nextMeta: TrackingMailOutboxMeta = {
+            ...pending,
+            tracking: track,
+          };
+          await tx.orderEvent.update({
+            where: { id: ev.id },
+            data: { meta: nextMeta as Prisma.InputJsonValue },
+          });
+
+          return {
+            eventId: ev.id,
+            email: orderRow.email,
+            number: orderRow.number,
+            tracking: track,
+            meta: nextMeta,
+          };
+        }
+      }
+
+      const orderRow = await tx.order.findUnique({
+        where: { id: orderId },
+        select: {
+          number: true,
+          email: true,
+          status: true,
+          shipments: {
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+            select: { id: true, tracking: true },
+          },
+        },
+      });
+      if (!orderRow || !canSendTracking(orderRow.status)) return null;
+
+      const shipmentId = orderRow.shipments[0]?.id;
+      const dbTrack = orderRow.shipments[0]?.tracking?.trim() || '';
+      if (shipmentId && track !== dbTrack) {
+        await tx.shipment.update({
+          where: { id: shipmentId },
+          data: { tracking: track },
+        });
+      }
+
+      try {
+        const pendingMeta = {
+          tracking: track,
+          source: 'cdek_sync' as const,
+          mailStatus: 'pending' as const,
+          attempt: 0,
+        } satisfies CdekTrackingMailMeta;
+
+        const event = await this.lifecycle.addEvent(tx, {
+          orderId,
+          type: 'TRACKING_SENT',
+          message: `Трек СДЭК (авто): ожидает отправки письма, ${track}`,
+          actorUserId: null,
+          meta: pendingMeta as Prisma.InputJsonValue,
+        });
+
+        return {
+          eventId: event.id,
+          email: orderRow.email,
+          number: orderRow.number,
+          tracking: track,
+          meta: pendingMeta,
+        };
+      } catch (e) {
+        if (isPrismaUniqueViolation(e)) return null;
+        throw e;
+      }
+    });
+  }
+
+  async finalizeCdekSyncTrackingMailOutbox(
+    eventId: string,
+    result: 'sent' | 'skipped' | 'failed',
+    meta: TrackingMailOutboxMeta,
+    extra: { lastError?: string } = {},
+  ): Promise<MailOutboxFinalizeResult> {
+    const wasExhausted =
+      meta.mailStatus === 'skipped' &&
+      Boolean(meta.lastError?.includes('exhausted'));
+    const next = trackingMailMetaAfterFinalize(meta, result, extra);
+    const displayResult =
+      next.mailStatus === 'skipped' &&
+      Boolean(next.lastError?.includes('exhausted'))
+        ? 'skipped'
+        : result === 'failed' && next.mailStatus === 'failed'
+          ? 'failed'
+          : result;
+    const message = trackingMailOutboxMessage(next, displayResult);
+
+    const ev = await this.prisma.orderEvent.update({
+      where: { id: eventId },
+      data: {
+        message,
+        meta: next as Prisma.InputJsonValue,
+      },
+      select: { orderId: true },
+    });
+
+    const exhausted = Boolean(
+      next.lastError?.includes('exhausted') && next.mailStatus === 'skipped',
+    );
+    if (exhausted && !wasExhausted) {
+      await this.recordMailOutboxExhausted(
+        ev.orderId,
+        'tracking',
+        next.lastError ?? 'smtp',
+      );
+    }
+
+    return {
+      exhausted: exhausted && !wasExhausted,
+      highAttempt:
+        isMailOutboxHighAttempt(next.attempt) &&
+        next.mailStatus === 'failed',
+    };
+  }
+
+  async finalizeCdekSyncDeliveredMailOutbox(
+    eventId: string,
+    result: 'sent' | 'skipped' | 'failed',
+    meta: DeliveredMailOutboxMeta,
+    extra: { lastError?: string } = {},
+  ): Promise<MailOutboxFinalizeResult> {
+    const wasExhausted =
+      meta.mailStatus === 'skipped' &&
+      Boolean(meta.lastError?.includes('exhausted'));
+    const next = deliveredMailMetaAfterFinalize(meta, result, extra);
+    const finalResult =
+      next.mailStatus === 'skipped' &&
+      Boolean(next.lastError?.includes('exhausted'))
+        ? 'skipped'
+        : result;
+    const message = deliveredMailOutboxMessage(next, finalResult);
+
+    const ev = await this.prisma.orderEvent.update({
+      where: { id: eventId },
+      data: {
+        message,
+        meta: next as Prisma.InputJsonValue,
+      },
+      select: { orderId: true },
+    });
+
+    const exhausted = Boolean(
+      next.lastError?.includes('exhausted') && next.mailStatus === 'skipped',
+    );
+    if (exhausted && !wasExhausted) {
+      await this.recordMailOutboxExhausted(
+        ev.orderId,
+        'delivered',
+        next.lastError ?? 'smtp',
+      );
+    }
+
+    return {
+      exhausted: exhausted && !wasExhausted,
+      highAttempt:
+        isMailOutboxHighAttempt(next.attempt) &&
+        next.mailStatus === 'failed',
+    };
+  }
+
+  /**
+   * СДЭК sync: атомарно DELIVERED (без SMTP). Side effects chat/referral/youRich — после commit.
+   */
+  async claimCdekSyncDelivered(
+    orderId: string,
+    cdekStatusCode: string,
+  ): Promise<{
+    email: string;
+    number: string;
+    eventId: string;
+    meta: CdekDeliveredMailMeta;
+  } | null> {
+    const code = cdekStatusCode.trim() || 'DELIVERED';
+
+    let row: {
+      email: string;
+      number: string;
+      orderId: string;
+      eventId: string;
+      meta: CdekDeliveredMailMeta;
+    } | null = null;
+    try {
+      row = await this.prisma.$transaction(async (tx) => {
+        await lockOrderForUpdate(tx, orderId);
+        const order = await tx.order.findUnique({
+          where: { id: orderId },
+          select: { id: true, status: true, number: true, email: true },
+        });
+        if (!order) return null;
+        if (order.status === OrderStatus.DELIVERED) return null;
+        if (!canDeliver(order.status)) return null;
+
+        await tx.order.update({
+          where: { id: orderId },
+          data: { status: OrderStatus.DELIVERED },
+        });
+
+        const deliveredMeta = {
+          from: order.status,
+          to: OrderStatus.DELIVERED,
+          cdekStatus: code,
+          source: 'cdek_sync' as const,
+          mailStatus: 'pending' as const,
+          attempt: 0,
+        } satisfies CdekDeliveredMailMeta;
+
+        const event = await this.lifecycle.addEvent(tx, {
+          orderId,
+          type: 'DELIVERED',
+          message: `Заказ доставлен (СДЭК: ${code}): ожидает письмо`,
+          actorUserId: null,
+          meta: deliveredMeta as Prisma.InputJsonValue,
+        });
+
+        await enqueueReferralTouchInTx(tx, this.referralWallet, orderId);
+
+        return {
+          email: order.email,
+          number: order.number,
+          orderId: order.id,
+          eventId: event.id,
+          meta: deliveredMeta,
+        };
+      });
+    } catch (err) {
+      const order = await this.prisma.order.findUnique({
+        where: { id: orderId },
+        select: { status: true },
+      });
+      if (
+        order?.status === OrderStatus.DELIVERED ||
+        !canDeliver(order?.status ?? OrderStatus.CANCELLED)
+      ) {
+        return null;
+      }
+      if (isPrismaUniqueViolation(err)) return null;
+      throw err;
+    }
+
+    if (!row) return null;
+
+    scheduleAfterRlsCommitWithBypass(this.prisma, () =>
+      this.orderChat.applyRetentionForOrder(orderId, OrderStatus.DELIVERED),
+    );
+    this.scheduleYourichTouch(orderId);
+
+    return {
+      email: row.email,
+      number: row.number,
+      eventId: row.eventId,
+      meta: row.meta,
+    };
   }
 
   /** Внутренняя заметка саппорта → OrderEvent type=NOTE. */
@@ -3100,7 +3717,7 @@ export class OrdersAdminService {
   private async setStatus(
     id: string,
     to: OrderStatus,
-    actorUserId: string,
+    actorUserId: string | null,
     message: string,
   ) {
     await this.prisma.$transaction(async (tx) => {

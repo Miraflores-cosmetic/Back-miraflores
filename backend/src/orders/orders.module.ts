@@ -8,6 +8,9 @@ import { CarrierShipmentService } from './carrier-shipment.service';
 import { OrdersAdminController } from './orders-admin.controller';
 import { OrdersAdminService } from './orders-admin.service';
 import { OrdersExpiryWorker } from './orders-expiry.worker';
+import { CdekOrderSyncService } from './cdek-order-sync.service';
+import { OrdersCdekSyncWorker } from './orders-cdek-sync.worker';
+import { BackgroundWorkerLeaseService } from '../workers/background-worker-lease.service';
 import { OrderAwaitingPaymentService } from './order-awaiting-payment.service';
 import { OrderPayTokenService } from './order-pay-token.service';
 import { ShippingQuoteService } from './shipping-quote.service';
@@ -51,6 +54,9 @@ import { ReferralModule } from '../referral/referral.module';
     ShippingServerEstimateService,
     CarrierShipmentService,
     OrdersExpiryWorker,
+    CdekOrderSyncService,
+    OrdersCdekSyncWorker,
+    BackgroundWorkerLeaseService,
   ],
   exports: [OrdersAdminService],
 })

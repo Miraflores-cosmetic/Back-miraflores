@@ -1196,6 +1196,8 @@ export class CatalogPublicService {
       name: string;
       productType: string | null;
       variantName: string;
+      /** Название из нац. каталога — для чека / OrderItem.title. */
+      nationalCatalogName: string | null;
       sku: string;
       imageUrl: string | null;
       /** Base catalog price before group rules. */
@@ -1279,6 +1281,7 @@ export class CatalogPublicService {
           name: `Подарочный сертификат «${denom.name}»`,
           productType: 'Подарочные сертификаты',
           variantName: validityLabel,
+          nationalCatalogName: null,
           sku: giftPurchaseSkuForDenom(denom.id),
           imageUrl: denom.images[0]?.url ?? null,
           basePrice: denom.faceValue,
@@ -1304,6 +1307,7 @@ export class CatalogPublicService {
             id: true,
             name: true,
             sku: true,
+            nationalCatalogName: true,
             price: true,
             compareAt: true,
             orderMinQty: true,
@@ -1468,6 +1472,7 @@ export class CatalogPublicService {
         name: v.product.name,
         productType: v.product.productType,
         variantName: v.name,
+        nationalCatalogName: v.nationalCatalogName?.trim() || null,
         sku: v.sku,
         imageUrl,
         isSample: v.isSample,
@@ -1523,6 +1528,7 @@ export class CatalogPublicService {
         name: r.name,
         productType: r.productType,
         variantName: r.variantName,
+        nationalCatalogName: r.nationalCatalogName,
         sku: r.sku,
         imageUrl: r.imageUrl,
         baseUnitPrice: r.basePrice,
@@ -1548,6 +1554,7 @@ export class CatalogPublicService {
       name: r.name,
       productType: r.productType,
       variantName: r.variantName,
+      nationalCatalogName: r.nationalCatalogName,
       sku: r.sku,
       imageUrl: r.imageUrl,
       listPrice: r.listPrice,

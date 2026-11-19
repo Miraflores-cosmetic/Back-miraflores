@@ -18,6 +18,7 @@ import { shouldSyncOrderToYourich } from '../yourich/yourich-lead';
 import type { AdminCreateOrderDto } from './dto/admin-create-order.dto';
 import { throwIfSampleCartBlocked } from '../catalog/sample-purchase.errors';
 import type { PrismaService } from '../prisma/prisma.service';
+import { orderItemTitle } from './order-item-title';
 
 export type AdminSyncedCartItem = {
   variantId: string;
@@ -25,6 +26,7 @@ export type AdminSyncedCartItem = {
   shadeName: string | null;
   name: string;
   variantName: string;
+  nationalCatalogName?: string | null;
   isSample?: boolean;
   sku: string;
   price: number;
@@ -335,13 +337,22 @@ export function serializeAdminCreatePreview(quote: AdminCreateQuote) {
     giftCertificateCode: quote.giftCertificateCode,
     gratitudeCount: quote.gratitudeGifts.length,
     gratitudeItems: quote.gratitudeGifts.map((g) => ({
-      title: [g.name, g.variantName].filter(Boolean).join(' · '),
+      title: orderItemTitle({
+        nationalCatalogName: g.nationalCatalogName,
+        name: g.name,
+        variantName: g.variantName,
+      }),
       qty: g.qty,
     })),
     priceOverrides: quote.priceOverrides,
     lines: quote.items.map((l) => ({
       variantId: l.variantId,
-      title: [l.name, l.variantName, l.shadeName].filter(Boolean).join(' · '),
+      title: orderItemTitle({
+        nationalCatalogName: l.nationalCatalogName,
+        name: l.name,
+        variantName: l.variantName,
+        shadeName: l.shadeName,
+      }),
       qty: l.qty,
       unitPrice: l.price,
       catalogPrice: l.catalogPrice ?? l.price,

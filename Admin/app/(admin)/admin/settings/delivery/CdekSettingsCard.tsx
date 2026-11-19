@@ -55,6 +55,14 @@ export function CdekSettingsCard({
           <dt>В заказах</dt>
           <dd>Автосоздание отправления без трека (кнопка «Заказ отправлен»)</dd>
         </div>
+        <div className={styles.fact}>
+          <dt>Фоновый sync</dt>
+          <dd>
+            ~15&nbsp;мин: трек из API, письмо с треком (1×), авто «Доставлен» при вручении. Ключи{' '}
+            <code>CDEK_SYNC_*</code> в <code>backend/.env</code>; регламент —{' '}
+            <code>docs/runbooks/cdek-sync.md</code>
+          </dd>
+        </div>
       </dl>
 
       <p className={styles.hint}>
@@ -78,6 +86,9 @@ export function CdekSettingsCard({
             В <code>backend/.env</code> на API: <code>CDEK_ACCOUNT</code>, <code>CDEK_SECURE</code>, при
             необходимости <code>CDEK_SHIPMENT_POINT</code> и <code>CDEK_FROM_CITY_CODE</code>. Без ключей
             отметка «отправлен» только меняет статус; с ключами Nest создаёт отправление в СДЭК.
+            Автосинх: <code>CDEK_SYNC_ENABLED</code> (по умолчанию вкл. при ключах),{' '}
+            <code>CDEK_SYNC_INTERVAL_MS</code>, <code>CDEK_SYNC_BATCH_SIZE</code> — см.{' '}
+            <code>docs/runbooks/cdek-sync.md</code>.
           </p>
         </div>
       </details>
