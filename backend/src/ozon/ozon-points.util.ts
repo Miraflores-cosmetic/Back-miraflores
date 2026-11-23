@@ -1,7 +1,18 @@
 export type OzonPointListItem = {
   map_point_id?: number | string;
-  coordinate?: { lat?: number; long?: number };
+  coordinate?: { lat?: number; long?: number; lng?: number };
 };
+
+export function ozonListItemCoords(
+  item: OzonPointListItem,
+): { lat: number; lon: number } | null {
+  const c = item.coordinate;
+  if (!c) return null;
+  const lat = c.lat;
+  const lon = c.long ?? c.lng;
+  if (typeof lat !== 'number' || typeof lon !== 'number') return null;
+  return { lat, lon };
+}
 
 export type OzonPickupPoint = {
   id: string;
@@ -41,10 +52,10 @@ export function nearestPointIds(
 ): string[] {
   const hits: Array<{ id: string; d: number }> = [];
   for (const item of items) {
-    const lat = item.coordinate?.lat;
-    const lon = item.coordinate?.long;
+    const coords = ozonListItemCoords(item);
     const id = item.map_point_id;
-    if (typeof lat !== 'number' || typeof lon !== 'number' || id == null) continue;
+    if (!coords || id == null) continue;
+    const { lat, lon } = coords;
     // Грубый bbox до haversine — список Ozon на десятки тысяч точек.
     if (Math.abs(lat - center.lat) > radiusKm / 111) continue;
     const d = distanceKm(center, { lat, lon });

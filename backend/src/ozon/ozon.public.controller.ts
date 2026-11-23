@@ -76,6 +76,7 @@ export class OzonPublicController {
         lat: dto.lat,
         lon: dto.lon,
         radiusKm: dto.radiusKm,
+        limit: dto.limit,
       });
       return { available: true, degraded: false, points, message: null };
     } catch (e) {

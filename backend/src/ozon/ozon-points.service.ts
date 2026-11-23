@@ -11,6 +11,9 @@ import {
   type OzonPointListItem,
 } from './ozon-points.util';
 
+const POINT_LIST_PAGE_SIZE = 2000;
+const POINT_LIST_MAX_PAGES = 80;
+
 const POINT_LIST_TTL_MS = 60 * 60 * 1000;
 const POINT_INFO_TTL_MS = 6 * 60 * 60 * 1000;
 const POINT_INFO_BATCH = 100;
@@ -57,20 +60,72 @@ export class OzonPointsService {
     return json;
   }
 
+  private appendPointListChunk(
+    merged: Map<string, OzonPointListItem>,
+    chunk: OzonPointListItem[],
+  ): void {
+    for (const row of chunk) {
+      if (row.map_point_id == null) continue;
+      merged.set(String(row.map_point_id), row);
+    }
+  }
+
+  /** Справочник ПВЗ: Ozon отдаёт страницами (limit/offset + has_next). */
+  private async fetchPointListFromApi(): Promise<OzonPointListItem[]> {
+    type ListJson = {
+      points?: OzonPointListItem[];
+      has_next?: boolean;
+      last_map_point_id?: number | string;
+    };
+
+    const merged = new Map<string, OzonPointListItem>();
+    let offset = 0;
+
+    for (let page = 0; page < POINT_LIST_MAX_PAGES; page++) {
+      const body: Record<string, unknown> = {
+        limit: POINT_LIST_PAGE_SIZE,
+        offset,
+      };
+      const json = await this.post<ListJson>(
+        '/v1/delivery/point/list',
+        body,
+        120_000,
+      );
+      const chunk = Array.isArray(json.points) ? json.points : [];
+      if (!chunk.length) {
+        if (page === 0) {
+          const legacy = await this.post<ListJson>(
+            '/v1/delivery/point/list',
+            {},
+            120_000,
+          );
+          const all = Array.isArray(legacy.points) ? legacy.points : [];
+          return all;
+        }
+        break;
+      }
+      const sizeBefore = merged.size;
+      this.appendPointListChunk(merged, chunk);
+      if (page > 0 && merged.size === sizeBefore) break;
+      if (json.has_next === false || chunk.length < POINT_LIST_PAGE_SIZE) break;
+      offset += chunk.length;
+    }
+
+    return [...merged.values()];
+  }
+
   private async allPoints(): Promise<OzonPointListItem[]> {
     if (this.pointList && Date.now() - this.pointList.at < POINT_LIST_TTL_MS) {
       return this.pointList.items;
     }
     if (!this.pointListInFlight) {
-      this.pointListInFlight = this.post<{ points?: OzonPointListItem[] }>(
-        '/v1/delivery/point/list',
-        {},
-        120_000,
-      )
-        .then((json) => {
-          const items = Array.isArray(json.points) ? json.points : [];
+      this.pointListInFlight = this.fetchPointListFromApi()
+        .then((items) => {
           this.pointList = { at: Date.now(), items };
           this.lastListError = null;
+          this.logger.log(
+            `Ozon point/list cached ${items.length} пунктов`,
+          );
           return items;
         })
         .catch((e) => {
@@ -78,7 +133,6 @@ export class OzonPointsService {
             at: Date.now(),
             message: (e instanceof Error ? e.message : String(e)).slice(0, 300),
           };
-          // Отдаём устаревший список, если Ozon временно недоступен.
           if (this.pointList) return this.pointList.items;
           throw e;
         })
@@ -134,8 +188,8 @@ export class OzonPointsService {
     radiusKm?: number;
     limit?: number;
   }): Promise<OzonPickupPoint[]> {
-    const radiusKm = Math.min(60, Math.max(1, opts.radiusKm ?? 25));
-    const limit = Math.min(300, Math.max(1, opts.limit ?? 200));
+    const radiusKm = Math.min(60, Math.max(1, opts.radiusKm ?? 40));
+    const limit = Math.min(500, Math.max(1, opts.limit ?? 400));
     const items = await this.allPoints();
     const ids = nearestPointIds(items, { lat: opts.lat, lon: opts.lon }, radiusKm, limit);
     if (!ids.length) return [];
