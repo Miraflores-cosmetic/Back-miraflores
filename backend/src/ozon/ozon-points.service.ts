@@ -70,43 +70,40 @@ export class OzonPointsService {
     }
   }
 
-  /** Справочник ПВЗ: Ozon отдаёт страницами (limit/offset + has_next). */
+  /** Справочник ПВЗ: сначала полный list (как раньше), при has_next — догрузка offset. */
   private async fetchPointListFromApi(): Promise<OzonPointListItem[]> {
     type ListJson = {
       points?: OzonPointListItem[];
       has_next?: boolean;
-      last_map_point_id?: number | string;
     };
 
+    const first = await this.post<ListJson>(
+      '/v1/delivery/point/list',
+      {},
+      120_000,
+    );
+    const firstChunk = Array.isArray(first.points) ? first.points : [];
     const merged = new Map<string, OzonPointListItem>();
-    let offset = 0;
+    this.appendPointListChunk(merged, firstChunk);
 
+    const cappedPage =
+      firstChunk.length > 0 &&
+      firstChunk.length % POINT_LIST_PAGE_SIZE === 0;
+    const needMore = first.has_next === true || cappedPage;
+    if (!needMore) return [...merged.values()];
+
+    let offset = firstChunk.length;
     for (let page = 0; page < POINT_LIST_MAX_PAGES; page++) {
-      const body: Record<string, unknown> = {
-        limit: POINT_LIST_PAGE_SIZE,
-        offset,
-      };
       const json = await this.post<ListJson>(
         '/v1/delivery/point/list',
-        body,
+        { limit: POINT_LIST_PAGE_SIZE, offset },
         120_000,
       );
       const chunk = Array.isArray(json.points) ? json.points : [];
-      if (!chunk.length) {
-        if (page === 0) {
-          const legacy = await this.post<ListJson>(
-            '/v1/delivery/point/list',
-            {},
-            120_000,
-          );
-          const all = Array.isArray(legacy.points) ? legacy.points : [];
-          return all;
-        }
-        break;
-      }
+      if (!chunk.length) break;
       const sizeBefore = merged.size;
       this.appendPointListChunk(merged, chunk);
-      if (page > 0 && merged.size === sizeBefore) break;
+      if (merged.size === sizeBefore) break;
       if (json.has_next === false || chunk.length < POINT_LIST_PAGE_SIZE) break;
       offset += chunk.length;
     }
