@@ -7,12 +7,14 @@ import { OzonAuthService } from './ozon-auth.service';
 import {
   nearestPointIds,
   normalizeOzonPointInfo,
+  ozonPickupStubFromListItem,
   type OzonPickupPoint,
   type OzonPointListItem,
 } from './ozon-points.util';
 
 const POINT_LIST_PAGE_SIZE = 2000;
 const POINT_LIST_MAX_PAGES = 80;
+const SUSPECT_LIST_PAGE_SIZES = [500, 1000, 2000, 5000];
 
 const POINT_LIST_TTL_MS = 60 * 60 * 1000;
 const POINT_INFO_TTL_MS = 6 * 60 * 60 * 1000;
@@ -86,14 +88,18 @@ export class OzonPointsService {
     const merged = new Map<string, OzonPointListItem>();
     this.appendPointListChunk(merged, firstChunk);
 
-    const cappedPage =
-      firstChunk.length > 0 &&
-      firstChunk.length % POINT_LIST_PAGE_SIZE === 0;
-    const needMore = first.has_next === true || cappedPage;
+    const needMore =
+      first.has_next === true ||
+      (firstChunk.length > 0 &&
+        firstChunk.length < 50_000 &&
+        SUSPECT_LIST_PAGE_SIZES.includes(firstChunk.length));
     if (!needMore) return [...merged.values()];
 
     let offset = firstChunk.length;
     for (let page = 0; page < POINT_LIST_MAX_PAGES; page++) {
+      if (page > 0) {
+        await new Promise((r) => setTimeout(r, 250));
+      }
       const json = await this.post<ListJson>(
         '/v1/delivery/point/list',
         { limit: POINT_LIST_PAGE_SIZE, offset },
@@ -184,14 +190,35 @@ export class OzonPointsService {
     lon: number;
     radiusKm?: number;
     limit?: number;
+    /** Сколько ближайших обогатить через point/info (адрес, часы). Остальные — маркеры с list. */
+    detailLimit?: number;
   }): Promise<OzonPickupPoint[]> {
     const radiusKm = Math.min(60, Math.max(1, opts.radiusKm ?? 40));
-    const limit = Math.min(500, Math.max(1, opts.limit ?? 400));
+    const limit = Math.min(800, Math.max(1, opts.limit ?? 600));
+    const detailLimit = Math.min(
+      limit,
+      Math.max(0, opts.detailLimit ?? 160),
+    );
     const items = await this.allPoints();
+    const byId = new Map<string, OzonPointListItem>();
+    for (const item of items) {
+      if (item.map_point_id != null) {
+        byId.set(String(item.map_point_id), item);
+      }
+    }
     const ids = nearestPointIds(items, { lat: opts.lat, lon: opts.lon }, radiusKm, limit);
     if (!ids.length) return [];
-    const info = await this.pointInfo(ids);
-    return ids.map((id) => info.get(id)).filter((p): p is OzonPickupPoint => Boolean(p));
+    const info =
+      detailLimit > 0
+        ? await this.pointInfo(ids.slice(0, detailLimit))
+        : new Map<string, OzonPickupPoint | null>();
+    return ids
+      .map((id) => {
+        const detailed = info.get(id);
+        if (detailed) return detailed;
+        return ozonPickupStubFromListItem(id, byId.get(id));
+      })
+      .filter((p): p is OzonPickupPoint => Boolean(p));
   }
 
   /** Проверка подключения из админки: число точек в справочнике. */

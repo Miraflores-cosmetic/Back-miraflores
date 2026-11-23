@@ -39,8 +39,16 @@ export class OzonPickupPointsQueryDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(500)
+  @Max(800)
   limit?: number;
+
+  /** Адреса/часы только для N ближайших; карта — координаты из справочника list. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(300)
+  detailLimit?: number;
 }
 
 export class OzonEstimateLineDto {

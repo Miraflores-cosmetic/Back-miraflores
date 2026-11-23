@@ -3,6 +3,27 @@ export type OzonPointListItem = {
   coordinate?: { lat?: number; long?: number; lng?: number };
 };
 
+/** Маркер на карте из list (координаты есть, адреса нет — детали подтягиваем выборочно). */
+export function ozonPickupStubFromListItem(
+  id: string,
+  item: OzonPointListItem | undefined,
+): OzonPickupPoint | null {
+  const c = item ? ozonListItemCoords(item) : null;
+  if (!c) return null;
+  return {
+    id,
+    name: 'Пункт выдачи Ozon',
+    type: 'PickPoint',
+    address: '',
+    city: '',
+    region: '',
+    postalCode: '',
+    lat: c.lat,
+    lon: c.lon,
+    workingHours: null,
+  };
+}
+
 export function ozonListItemCoords(
   item: OzonPointListItem,
 ): { lat: number; lon: number } | null {
