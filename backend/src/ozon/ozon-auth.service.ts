@@ -130,11 +130,12 @@ export class OzonAuthService {
     const row = await this.readRow().catch(() => null);
     const hasRefresh = Boolean(row?.refreshTokenEnc);
     const apiKey = this.apiKeyCredentials();
-    const mode: OzonAuthMode = app && hasRefresh ? 'oauth' : apiKey ? 'api-key' : 'none';
+    const mode: OzonAuthMode = apiKey ? 'api-key' : app ? 'oauth' : 'none';
+    const connected = mode === 'api-key' || (mode === 'oauth' && hasRefresh);
     return {
       mode,
       appConfigured: Boolean(app),
-      connected: mode !== 'none',
+      connected,
       redirectUri: this.redirectUri(),
       scope: this.scope(),
       connectedAt: row?.connectedAt?.toISOString() ?? null,

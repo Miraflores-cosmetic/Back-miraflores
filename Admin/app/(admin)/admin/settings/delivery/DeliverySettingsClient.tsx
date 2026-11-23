@@ -282,7 +282,9 @@ export function DeliverySettingsClient() {
         ? { cls: styles.pillError, text: 'Требуется переподключение' }
         : { cls: styles.pillIdle, text: 'Не подключено' };
 
-  const oauthMode = status?.mode === 'oauth';
+  /** OAuth-приложение настроено (есть client_id/secret или уже подключён refresh). */
+  const oauthMode =
+    status?.mode === 'oauth' || Boolean(status?.appConfigured && status?.mode === 'none');
 
   return (
     <div className={`${catalogStyles.form} ${catalogStyles.formWide} ${styles.page}`}>
