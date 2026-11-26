@@ -86,6 +86,34 @@ export function nearestPointIds(
   return hits.slice(0, limit).map((h) => h.id);
 }
 
+export type GeoBounds = {
+  south: number;
+  west: number;
+  north: number;
+  east: number;
+};
+
+/** Точки в прямоугольнике карты; при переполнении — ближайшие к center. */
+export function pointIdsInBounds(
+  items: OzonPointListItem[],
+  bounds: GeoBounds,
+  limit: number,
+  center: { lat: number; lon: number },
+): string[] {
+  const { south, west, north, east } = bounds;
+  const hits: Array<{ id: string; d: number }> = [];
+  for (const item of items) {
+    const coords = ozonListItemCoords(item);
+    const id = item.map_point_id;
+    if (!coords || id == null) continue;
+    const { lat, lon } = coords;
+    if (lat < south || lat > north || lon < west || lon > east) continue;
+    hits.push({ id: String(id), d: distanceKm(center, { lat, lon }) });
+  }
+  hits.sort((x, y) => x.d - y.d);
+  return hits.slice(0, limit).map((h) => h.id);
+}
+
 function hhmm(t: unknown): string {
   if (!t || typeof t !== 'object') return '';
   const r = t as { hours?: number; minutes?: number };

@@ -7,6 +7,7 @@ import { OzonAuthService } from './ozon-auth.service';
 import {
   nearestPointIds,
   normalizeOzonPointInfo,
+  pointIdsInBounds,
   ozonPickupStubFromListItem,
   type OzonPickupPoint,
   type OzonPointListItem,
@@ -184,7 +185,25 @@ export class OzonPointsService {
     return out;
   }
 
-  /** ПВЗ Ozon вокруг центра города, ближайшие первыми. */
+  private hasBounds(opts: {
+    south?: number;
+    west?: number;
+    north?: number;
+    east?: number;
+  }): opts is { south: number; west: number; north: number; east: number } {
+    return (
+      opts.south != null &&
+      opts.west != null &&
+      opts.north != null &&
+      opts.east != null &&
+      Number.isFinite(opts.south) &&
+      Number.isFinite(opts.west) &&
+      Number.isFinite(opts.north) &&
+      Number.isFinite(opts.east)
+    );
+  }
+
+  /** ПВЗ вокруг центра или в рамке карты; ближайшие к lat/lon первыми. */
   async nearby(opts: {
     lat: number;
     lon: number;
@@ -192,6 +211,10 @@ export class OzonPointsService {
     limit?: number;
     /** Сколько ближайших обогатить через point/info (адрес, часы). Остальные — маркеры с list. */
     detailLimit?: number;
+    south?: number;
+    west?: number;
+    north?: number;
+    east?: number;
   }): Promise<OzonPickupPoint[]> {
     const radiusKm = Math.min(60, Math.max(1, opts.radiusKm ?? 40));
     const limit = Math.min(800, Math.max(1, opts.limit ?? 600));
@@ -206,7 +229,20 @@ export class OzonPointsService {
         byId.set(String(item.map_point_id), item);
       }
     }
-    const ids = nearestPointIds(items, { lat: opts.lat, lon: opts.lon }, radiusKm, limit);
+    const center = { lat: opts.lat, lon: opts.lon };
+    const ids = this.hasBounds(opts)
+      ? pointIdsInBounds(
+          items,
+          {
+            south: Math.min(opts.south, opts.north),
+            north: Math.max(opts.south, opts.north),
+            west: Math.min(opts.west, opts.east),
+            east: Math.max(opts.west, opts.east),
+          },
+          limit,
+          center,
+        )
+      : nearestPointIds(items, center, radiusKm, limit);
     if (!ids.length) return [];
     const info =
       detailLimit > 0

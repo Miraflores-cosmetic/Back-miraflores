@@ -78,6 +78,10 @@ export class OzonPublicController {
         radiusKm: dto.radiusKm,
         limit: dto.limit,
         detailLimit: dto.detailLimit,
+        south: dto.south,
+        west: dto.west,
+        north: dto.north,
+        east: dto.east,
       });
       return { available: true, degraded: false, points, message: null };
     } catch (e) {

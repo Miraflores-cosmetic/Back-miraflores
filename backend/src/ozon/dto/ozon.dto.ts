@@ -49,6 +49,35 @@ export class OzonPickupPointsQueryDto {
   @Min(0)
   @Max(300)
   detailLimit?: number;
+
+  /** Видимая область карты — ПВЗ внутри рамки, а не N ближайших к центру города. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  south?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  west?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  north?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  east?: number;
 }
 
 export class OzonEstimateLineDto {

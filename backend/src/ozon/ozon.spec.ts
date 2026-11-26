@@ -9,6 +9,7 @@ import {
   formatOzonWorkingHours,
   nearestPointIds,
   normalizeOzonPointInfo,
+  pointIdsInBounds,
 } from './ozon-points.util';
 import { estimateOzonDelivery, ozonBillableKg, ozonPvzTariffRub } from './ozon-tariff';
 
@@ -71,6 +72,22 @@ describe('ozon points', () => {
       10,
     );
     expect(ids).toEqual(['2', '1']);
+  });
+
+  it('точки в рамке карты, не только у центра города', () => {
+    const center = { lat: 55.75, lon: 37.62 };
+    const items = [
+      { map_point_id: 1, coordinate: { lat: 55.751, long: 37.621 } },
+      { map_point_id: 2, coordinate: { lat: 55.9, long: 37.62 } },
+      { map_point_id: 3, coordinate: { lat: 55.65, long: 37.4 } },
+    ];
+    const ids = pointIdsInBounds(
+      items,
+      { south: 55.85, west: 37.5, north: 55.95, east: 37.75 },
+      10,
+      center,
+    );
+    expect(ids).toEqual(['2']);
   });
 
   it('нормализует point/info и пропускает выключенные', () => {
